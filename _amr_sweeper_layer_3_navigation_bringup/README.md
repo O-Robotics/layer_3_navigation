@@ -1,6 +1,8 @@
 # amr_sweeper_layer_3_navigation_bringup
 
-`ros2 launch amr_sweeper_layer_3_navigation_bringup amr_sweeper_layer_3_navigation_bringup.launch.py`
+```bash
+ros2 launch amr_sweeper_layer_3_navigation_bringup amr_sweeper_layer_3_navigation_bringup.launch.py
+```
 
 Dependencies to other AMR Sweeper packages:
 - `amr_sweeper_localization`

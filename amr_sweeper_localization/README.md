@@ -1,6 +1,8 @@
 # amr_sweeper_localization
 
-`ros2 launch amr_sweeper_localization dual_ekf_navsat.launch.py`
+```bash
+ros2 launch amr_sweeper_localization dual_ekf_navsat.launch.py
+```
 
 Dependencies to other AMR Sweeper packages:
 - `amr_sweeper_imu`

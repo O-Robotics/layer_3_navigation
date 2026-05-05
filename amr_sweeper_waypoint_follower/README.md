@@ -1,6 +1,8 @@
 # amr_sweeper_waypoint_follower
 
-`ros2 launch amr_sweeper_waypoint_follower bringup_launch.py`
+```bash
+ros2 launch amr_sweeper_waypoint_follower bringup_launch.py
+```
 
 Dependencies to other AMR Sweeper packages:
 - `amr_sweeper_localization`
