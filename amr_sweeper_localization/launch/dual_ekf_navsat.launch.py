@@ -86,8 +86,8 @@ def generate_launch_description():
                 # IMPORTANT: Match these to your actual topics.
                 # Your IMU topic is /amr_sweeper/imu/data_raw (Imu)
                 ("imu", "/amr_sweeper/imu/data_raw"),
-                # Your GNSS topic is /amr_sweeper/navsat (NavSatFix)
-                ("gps/fix", "/amr_sweeper/navsat"),
+                # Use the namespaced GNSS fix topic published by layer 1.
+                ("gps/fix", "navsat"),
 
                 # Outputs under the namespace
                 ("gps/filtered", "gps/filtered"),
