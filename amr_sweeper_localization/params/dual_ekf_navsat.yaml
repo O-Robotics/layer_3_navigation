@@ -1,9 +1,8 @@
-# For parameter descriptions, please refer to the template parameter files for each node.
 
 /**/ekf_filter_node_odom:
   ros__parameters:
     frequency: 10.0
-    sensor_timeout: 0.5 # when CPU usage is lower, it can be 0.1
+    sensor_timeout: 0.5 
     two_d_mode: true
     transform_time_offset: 0.0
     transform_timeout: 0.0
@@ -18,10 +17,10 @@
 
     odom0: /amr_sweeper/diff_cont/odom
     odom0_config: [false,  false,  false,
-               false, false, false,
-               true, false, false,
-               false, false, false,
-               false, false, false]
+                   false,  false,  false,
+                   true,   false,  false,
+                   false,  false,  false,
+                   false,  false,  false]
 
 
     odom0_queue_size: 10
@@ -29,15 +28,6 @@
     odom0_differential: false
     odom0_relative: false
 
-    # twist0: /amr_sweeper/diff_cont/cmd_vel_unstamped
-    # twist0_config: [true,  false, false,
-    #                 false, false, true,
-    #                 false, false, false,
-    #                 false, false, false,
-    #                 false, false, false]
-    # twist0_queue_size: 3
-    # twist0_rejection_threshold: 2.0
-    # twist0_nodelay: false
 
     imu0: /amr_sweeper/imu/data_raw
     imu0_config: [false, false, false,
@@ -46,11 +36,7 @@
                   false, false, true,
                   false, false, false]
 
-    # imu0_config: [false, false, false,
-    #                 true,  true,  true,
-    #                 false, false, false,
-    #                 true,  true,  true,
-    #                 true,  true,  true]
+
 
     imu0_differential: false
     imu0_relative: false
@@ -215,5 +201,3 @@
     datum: [56.164512169, 10.145487016999999, 0.0] #first waypoint - aarhus
 
 
-    # datum: [0.0, 0.0, 0.0]
-    # datum: [55.944904, -3.186693, 0.0]
