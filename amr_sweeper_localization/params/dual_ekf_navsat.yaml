@@ -183,7 +183,7 @@
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    1.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    1.0]
 
-/**/amr_sweeper/navsat_transform:
+/**/navsat_transform:
   ros__parameters:
     frequency: 5.0
     delay: 3.0
@@ -196,7 +196,6 @@
     # broadcast_utm_transform: true # Deprecated format (replaced by broadcast_cartesian_transform)
     publish_filtered_gps: true
     use_odometry_yaw: false
-    wait_for_datum: false
+    wait_for_datum: true
     # datum: [55.229, 10.2448, 0.0] #first waypoint - odense office TODO: need /amr_sweeper/navsat for it
     datum: [56.164512169, 10.145487016999999, 0.0] #first waypoint - aarhus
-
