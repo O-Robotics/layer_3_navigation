@@ -16,7 +16,7 @@ def generate_launch_description():
     Launches a single EKF node for odometry + IMU debugging.
     
     Nodes:
-      1) ekf_filter_node: publishes odometry/filtered and odom->base_link TF
+      1) ekf_filter_node: publishes odometry/filtered and odom->base_footprint TF
     """
 
     declare_namespace = DeclareLaunchArgument(

@@ -26,7 +26,7 @@ def generate_launch_description():
     Launches a dual-EKF + navsat_transform setup under a configurable namespace.
 
     Nodes:
-      1) ekf_filter_node_odom (local EKF): publishes odometry/local and odom->base_link TF
+      1) ekf_filter_node_odom (local EKF): publishes odometry/local and odom->base_footprint TF
       2) navsat_transform_node: publishes odometry/gps and gps/filtered
       3) ekf_filter_node_map (global EKF): publishes odometry/global and map->odom TF (if enabled in YAML)
     """
@@ -49,7 +49,7 @@ def generate_launch_description():
     package_dir = get_package_share_directory("amr_sweeper_localization")
     parameters_file_path = os.path.join(package_dir, "params", "dual_ekf_navsat.yaml")
 
-    # Local EKF (odom world frame): produces odometry/local and (optionally) odom->base_link TF.
+    # Local EKF (odom world frame): produces odometry/local and (optionally) odom->base_footprint TF.
     local_ekf_node = launch_ros.actions.Node(
         package="robot_localization",
         executable="ekf_node",
