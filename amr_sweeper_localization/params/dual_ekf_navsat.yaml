@@ -1,12 +1,12 @@
 
 /**/ekf_filter_node_odom:
   ros__parameters:
-    frequency: 10.0
+    frequency: 30.0
     sensor_timeout: 0.5 
     two_d_mode: true
     transform_time_offset: 0.0
     transform_timeout: 0.0
-    print_diagnostics: false
+    print_diagnostics: true
     debug: false
     publish_tf: true
 
@@ -21,8 +21,6 @@
                    true,   false,  false,
                    false,  false,  false,
                    false,  false,  false]
-
-
     odom0_queue_size: 10
     odom0_nodelay: true
     odom0_differential: false
@@ -35,30 +33,13 @@
                   false, false, false,
                   false, false, true,
                   false, false, false]
-
-
-
+    imu0_nodelay: false
     imu0_differential: false
     imu0_relative: false
     imu0_queue_size: 10
-    imu0_remove_gravitational_acceleration: false #(after cov is added, can have linear acc and set true)
+    imu0_remove_gravitational_acceleration: true
     
     use_control: false
-    stamped_control: false
-    # The last issued control command will be used in prediction for this period. Defaults to 0.2.
-    control_timeout: 0.2
-    # Which velocities are being controlled. Order is vx, vy, vz, vroll, vpitch, vyaw.
-    control_config: [true, false, false, false, false, false]
-    # Places limits on how large the acceleration term will be. Should match your robot's kinematics.
-    acceleration_limits: [1.3, 0.0, 0.0, 0.0, 0.0, 3.4]
-    # Acceleration and deceleration limits are not always the same for robots.
-    deceleration_limits: [1.3, 0.0, 0.0, 0.0, 0.0, 4.5]
-    # If your robot cannot instantaneously reach its acceleration limit, the permitted change can be controlled with these
-    # gains
-    acceleration_gains: [0.8, 0.0, 0.0, 0.0, 0.0, 0.9]
-    # If your robot cannot instantaneously reach its deceleration limit, the permitted change can be controlled with these
-    # gains
-    deceleration_gains: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
     process_noise_covariance: [1e-3, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
                               0.0,    1e-3,  0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
@@ -92,36 +73,33 @@
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    1.0,  0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    1.0]
 
+
 /**/ekf_filter_node_map:
   ros__parameters:
-    frequency: 5.0
+    frequency: 30.0
     sensor_timeout: 0.5
     two_d_mode: true
     transform_time_offset: 0.0
     transform_timeout: 0.0
     print_diagnostics: true
-    publish_tf: true
-
     debug: false
+
     map_frame: map
     odom_frame: odom
     base_link_frame: base_footprint
     world_frame: map
 
-# twist only: vx
     odom0: /amr_sweeper/diff_cont/odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true, false, false,
                    false, false, false,
                    false, false, false]
-
     odom0_queue_size: 10
     odom0_nodelay: true
     odom0_differential: false
     odom0_relative: false
 
-# fuse X,Y only
     odom1: /amr_sweeper/odometry/gps
     odom1_config: [true, true, false,
                   false, false, false,
@@ -140,14 +118,11 @@
                   false,  false,  false,
                   false,  false,  true,
                   false,  false,  false]
-    imu0_nodelay: false
+    imu0_nodelay: true
     imu0_differential: false
     imu0_relative: false
-    imu0_queue_size: 5
+    imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
-    imu0_pose_rejection_threshold: 0.8                 # Note the difference in parameter names
-    imu0_twist_rejection_threshold: 0.8                #
-    imu0_linear_acceleration_rejection_threshold: 0.8  #
     
     use_control: false
 
@@ -183,19 +158,18 @@
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    1.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    1.0]
 
+
 /**/navsat_transform:
   ros__parameters:
-    frequency: 5.0
+    frequency: 30.0
     delay: 3.0
-    magnetic_declination_radians: 0.0774  # For lat/lon 56.164512169, 10.145487016999999 in aarhus office, provided by /amr_sweeper/navsat
-    # magnetic_declination_radians: 0.07805 # For Forskerparken 10F, 5230 Odense, provided by official doc reference: https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml
-    
+    magnetic_declination_radians: 0.0774  # For lat/lon 56.164512169, 10.145487016999999 in aarhus office, provided by /amr_sweeper/navsat    
     yaw_offset: 0.0     # IMU follows ENU, IMU rotation handled with TF between IMU_link and base_link
     zero_altitude: true
-    broadcast_cartesian_transform: false
-    # broadcast_utm_transform: true # Deprecated format (replaced by broadcast_cartesian_transform)
+    #broadcast_cartesian_transform: false
+    broadcast_utm_transform: true # Deprecated format (replaced by broadcast_cartesian_transform)
     publish_filtered_gps: true
     use_odometry_yaw: false
-    wait_for_datum: true
+    wait_for_datum: false
     # datum: [55.229, 10.2448, 0.0] #first waypoint - odense office TODO: need /amr_sweeper/navsat for it
-    datum: [56.164512169, 10.145487016999999, 0.0] #first waypoint - aarhus
+    # datum: [56.164512169, 10.145487016999999, 0.0] #first waypoint - aarhus
