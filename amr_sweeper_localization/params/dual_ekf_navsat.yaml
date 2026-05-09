@@ -106,10 +106,11 @@
                    false, false, false,
                    false, false, false,
                    false, false, false]
-    odom1_queue_size: 10
-    odom1_nodelay: true
+    odom1_queue_size: 3
+    odom1_nodelay: false
     odom1_differential: false
     odom1_relative: false
+    odom1_pose_rejection_threshold: 0.8
 
 
     imu0: /amr_sweeper/imu/data_raw
@@ -170,4 +171,3 @@
     publish_filtered_gps: true
     use_odometry_yaw: false
     wait_for_datum: false
-
