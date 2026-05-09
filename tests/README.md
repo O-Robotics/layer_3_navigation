@@ -1,7 +1,7 @@
 # layer_3_navigation_tests
 
 ```bash
-python3 layer_3_navigation/tests/alf_driveway_back_and_forth_test.py --round-trips 1
+python3 src/layer_3_navigation/tests/alf_driveway_back_and_forth_test.py --round-trips 1
 ```
 
 Dependencies to other AMR Sweeper packages:
@@ -21,7 +21,7 @@ This folder contains ad hoc navigation tests for the real AMR Sweeper stack.
 - `alf_driveway_back_and_forth_test.py`
 
 ## Test Arguments
-- `--geojson`: default `layer_3_navigation/tests/Alf_Driveway.geojson`
+- `--geojson`: default `src/layer_3_navigation/tests/Alf_Driveway.geojson`
 - `--namespace`: default `amr_sweeper`
 - `--frame-id`: default `map`
 - `--round-trips`: default `1`
