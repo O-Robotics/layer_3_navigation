@@ -101,9 +101,7 @@
 
 
     odom1: /amr_sweeper/odometry/gps
-    # Temporarily disable GNSS fusion in the global EKF to verify that the
-    # drifting map frame is caused by GPS pulling the map->odom transform.
-    odom1_config: [false, false, false,
+    odom1_config: [true,  true,  false,
                    false, false, false,
                    false, false, false,
                    false, false, false,
@@ -112,7 +110,7 @@
     odom1_nodelay: false
     odom1_differential: false
     odom1_relative: false
-    odom1_pose_rejection_threshold: 0.8
+    odom1_pose_rejection_threshold: 0.35
 
 
     imu0: /amr_sweeper/imu/data_raw
