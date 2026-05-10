@@ -113,6 +113,13 @@ def build_pose_sequence(
 
     zone, hemisphere = next(iter(zones))
     node.get_logger().info(f'Loaded {len(utm_points)} route points in UTM zone {zone}{hemisphere}.')
+    first_easting, first_northing = utm_points[0]
+    last_easting, last_northing = utm_points[-1]
+    node.get_logger().info(
+        'Raw UTM route endpoints: '
+        f'start=({first_easting:.2f}, {first_northing:.2f}) '
+        f'end=({last_easting:.2f}, {last_northing:.2f})'
+    )
 
     if map_origin_utm is not None:
         origin_easting, origin_northing = map_origin_utm
@@ -150,6 +157,14 @@ def build_pose_sequence(
         pose.pose.orientation.z = qz
         pose.pose.orientation.w = qw
         poses.append(pose)
+
+    first_pose = poses[0].pose.position
+    last_pose = poses[-1].pose.position
+    node.get_logger().info(
+        f'Route endpoints in frame "{frame_id}": '
+        f'start=({first_pose.x:.2f}, {first_pose.y:.2f}) '
+        f'end=({last_pose.x:.2f}, {last_pose.y:.2f})'
+    )
 
     return poses
 
@@ -308,14 +323,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         '--map-origin-easting',
         type=float,
-        default=684623.75,
-        help='UTM easting for the local map frame origin. Used to convert GeoJSON UTM points into map coordinates.',
+        default=None,
+        help='UTM easting for the local map frame origin. Required when --frame-id map is used.',
     )
     parser.add_argument(
         '--map-origin-northing',
         type=float,
-        default=7466421.41,
-        help='UTM northing for the local map frame origin. Used to convert GeoJSON UTM points into map coordinates.',
+        default=None,
+        help='UTM northing for the local map frame origin. Required when --frame-id map is used.',
     )
     parser.add_argument(
         '--round-trips',
@@ -347,6 +362,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         parser.error('--round-trips must be >= 0')
     if args.brush_publish_hz <= 0.0:
         parser.error('--brush-publish-hz must be > 0')
+    if args.frame_id == 'map':
+        if args.map_origin_easting is None or args.map_origin_northing is None:
+            parser.error(
+                '--map-origin-easting and --map-origin-northing are required when --frame-id map is used'
+            )
     return args
 
 
