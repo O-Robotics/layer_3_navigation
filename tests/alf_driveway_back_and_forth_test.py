@@ -97,6 +97,7 @@ def build_pose_sequence(
     node: Node,
     coordinates: Sequence[Tuple[float, float]],
     frame_id: str,
+    map_origin_utm: Tuple[float, float] | None = None,
 ) -> List[PoseStamped]:
     poses: List[PoseStamped] = []
     utm_points: List[Tuple[float, float]] = []
@@ -113,12 +114,29 @@ def build_pose_sequence(
     zone, hemisphere = next(iter(zones))
     node.get_logger().info(f'Loaded {len(utm_points)} route points in UTM zone {zone}{hemisphere}.')
 
+    if map_origin_utm is not None:
+        origin_easting, origin_northing = map_origin_utm
+        node.get_logger().info(
+            'Converting UTM route into local map coordinates using '
+            f'origin ({origin_easting:.2f}, {origin_northing:.2f}).'
+        )
+
     for index, (x, y) in enumerate(utm_points):
+        if map_origin_utm is not None:
+            x -= origin_easting
+            y -= origin_northing
+
         if index < len(utm_points) - 1:
             next_x, next_y = utm_points[index + 1]
+            if map_origin_utm is not None:
+                next_x -= origin_easting
+                next_y -= origin_northing
             yaw = math.atan2(next_y - y, next_x - x)
         else:
             prev_x, prev_y = utm_points[index - 1]
+            if map_origin_utm is not None:
+                prev_x -= origin_easting
+                prev_y -= origin_northing
             yaw = math.atan2(y - prev_y, x - prev_x)
 
         pose = PoseStamped()
@@ -288,6 +306,18 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help='Target frame for the generated waypoint poses.',
     )
     parser.add_argument(
+        '--map-origin-easting',
+        type=float,
+        default=684623.75,
+        help='UTM easting for the local map frame origin. Used to convert GeoJSON UTM points into map coordinates.',
+    )
+    parser.add_argument(
+        '--map-origin-northing',
+        type=float,
+        default=7466421.41,
+        help='UTM northing for the local map frame origin. Used to convert GeoJSON UTM points into map coordinates.',
+    )
+    parser.add_argument(
         '--round-trips',
         type=int,
         default=1,
@@ -329,8 +359,11 @@ def main() -> int:
     rclpy.init(args=sys.argv)
     route_loader = Node('alf_driveway_route_loader')
     try:
-        forward_route = build_pose_sequence(route_loader, coordinates, args.frame_id)
-        reverse_route = build_pose_sequence(route_loader, list(reversed(coordinates)), args.frame_id)
+        map_origin_utm = None
+        if args.frame_id == 'map':
+            map_origin_utm = (args.map_origin_easting, args.map_origin_northing)
+        forward_route = build_pose_sequence(route_loader, coordinates, args.frame_id, map_origin_utm)
+        reverse_route = build_pose_sequence(route_loader, list(reversed(coordinates)), args.frame_id, map_origin_utm)
     finally:
         route_loader.destroy_node()
 
