@@ -13,6 +13,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import FollowWaypoints
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import NavSatFix
 
@@ -192,7 +193,7 @@ def wait_for_navsat_origin(node: Node, topic: str, timeout_sec: float) -> Tuple[
         if math.isfinite(msg.latitude) and math.isfinite(msg.longitude):
             navsat_msg = msg
 
-    subscription = node.create_subscription(NavSatFix, topic, on_navsat, 10)
+    subscription = node.create_subscription(NavSatFix, topic, on_navsat, qos_profile_sensor_data)
     try:
         node.get_logger().info(f'Waiting for NavSatFix on {topic} to derive local map origin...')
         deadline = node.get_clock().now().nanoseconds + int(timeout_sec * 1e9)
