@@ -383,7 +383,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         '--brush-linear',
         type=float,
-        default=0.5,
+        default=1.0,
         help='Brush command linear.x value. The layer 2 tool controller maps this into both brush motors.',
     )
     parser.add_argument(

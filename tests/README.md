@@ -29,7 +29,7 @@ This folder contains ad hoc navigation tests for the real AMR Sweeper stack.
 - `--navsat-topic`: default `navsat`, used to derive the local `map` origin when no explicit UTM origin is provided
 - `--navsat-timeout`: default `10.0`
 - `--round-trips`: default `1`
-- `--brush-linear`: default `0.5`
+- `--brush-linear`: default `1.0`
 - `--brush-angular`: default `0.0`
 - `--brush-publish-hz`: default `10.0`
 
