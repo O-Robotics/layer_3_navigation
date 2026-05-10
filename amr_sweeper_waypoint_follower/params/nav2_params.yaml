@@ -96,7 +96,7 @@
       max_vel_x: 0.26
       max_vel_y: 0.0
 
-      max_vel_theta: 0.3 #changed this from 0.25 to 0.3
+      max_vel_theta: 0.15
 
       min_speed_xy: 0.0
       max_speed_xy: 0.26
@@ -112,9 +112,9 @@
 
       vx_samples: 5
       vy_samples: 1
-      vtheta_samples: 20
+      vtheta_samples: 10
 
-      sim_time: 1.0 #changed this from 1.2 to 1.0
+      sim_time: 0.8
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 1.0
@@ -126,10 +126,10 @@
 
       critics: ["Oscillation", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
 
-      PathAlign.scale: 8.0 #chnaged this from 10.0 to 8.0
+      PathAlign.scale: 4.0
       PathAlign.forward_point_distance: 0.1
 
-      GoalAlign.scale: 6.0
+      GoalAlign.scale: 2.0
       GoalAlign.forward_point_distance: 0.1
 
       PathDist.scale: 16.0
