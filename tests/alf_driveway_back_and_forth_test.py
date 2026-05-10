@@ -14,6 +14,7 @@ from nav2_msgs.action import FollowWaypoints
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.utilities import remove_ros_args
+from sensor_msgs.msg import NavSatFix
 
 
 def latlon_to_utm(latitude: float, longitude: float) -> Tuple[float, float, int, str]:
@@ -183,6 +184,35 @@ def namespace_join(namespace: str, topic_or_action: str) -> str:
     return f'/{ns}/{leaf}'
 
 
+def wait_for_navsat_origin(node: Node, topic: str, timeout_sec: float) -> Tuple[float, float]:
+    navsat_msg: NavSatFix | None = None
+
+    def on_navsat(msg: NavSatFix) -> None:
+        nonlocal navsat_msg
+        if math.isfinite(msg.latitude) and math.isfinite(msg.longitude):
+            navsat_msg = msg
+
+    subscription = node.create_subscription(NavSatFix, topic, on_navsat, 10)
+    try:
+        node.get_logger().info(f'Waiting for NavSatFix on {topic} to derive local map origin...')
+        deadline = node.get_clock().now().nanoseconds + int(timeout_sec * 1e9)
+        while rclpy.ok() and navsat_msg is None and node.get_clock().now().nanoseconds < deadline:
+            rclpy.spin_once(node, timeout_sec=0.5)
+
+        if navsat_msg is None:
+            raise RuntimeError(f'Timed out waiting for NavSatFix on {topic}')
+
+        easting, northing, zone, hemisphere = latlon_to_utm(navsat_msg.latitude, navsat_msg.longitude)
+        node.get_logger().info(
+            'Derived local map origin from NavSatFix: '
+            f'lat={navsat_msg.latitude:.9f} lon={navsat_msg.longitude:.9f} '
+            f'-> UTM ({easting:.2f}, {northing:.2f}) zone {zone}{hemisphere}'
+        )
+        return easting, northing
+    finally:
+        node.destroy_subscription(subscription)
+
+
 class DrivewayBackAndForthTester(Node):
     def __init__(
         self,
@@ -324,13 +354,24 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         '--map-origin-easting',
         type=float,
         default=None,
-        help='UTM easting for the local map frame origin. Required when --frame-id map is used.',
+        help='Optional UTM easting for the local map frame origin. If omitted with --frame-id map, the script derives it from NavSatFix.',
     )
     parser.add_argument(
         '--map-origin-northing',
         type=float,
         default=None,
-        help='UTM northing for the local map frame origin. Required when --frame-id map is used.',
+        help='Optional UTM northing for the local map frame origin. If omitted with --frame-id map, the script derives it from NavSatFix.',
+    )
+    parser.add_argument(
+        '--navsat-topic',
+        default='navsat',
+        help='NavSatFix topic used to derive the local map origin when no explicit UTM origin is provided.',
+    )
+    parser.add_argument(
+        '--navsat-timeout',
+        type=float,
+        default=10.0,
+        help='Seconds to wait for a NavSatFix sample when deriving the local map origin.',
     )
     parser.add_argument(
         '--round-trips',
@@ -362,11 +403,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         parser.error('--round-trips must be >= 0')
     if args.brush_publish_hz <= 0.0:
         parser.error('--brush-publish-hz must be > 0')
-    if args.frame_id == 'map':
-        if args.map_origin_easting is None or args.map_origin_northing is None:
-            parser.error(
-                '--map-origin-easting and --map-origin-northing are required when --frame-id map is used'
-            )
+    if (args.map_origin_easting is None) != (args.map_origin_northing is None):
+        parser.error('--map-origin-easting and --map-origin-northing must be provided together')
+    if args.navsat_timeout <= 0.0:
+        parser.error('--navsat-timeout must be > 0')
     return args
 
 
@@ -381,7 +421,14 @@ def main() -> int:
     try:
         map_origin_utm = None
         if args.frame_id == 'map':
-            map_origin_utm = (args.map_origin_easting, args.map_origin_northing)
+            if args.map_origin_easting is not None and args.map_origin_northing is not None:
+                map_origin_utm = (args.map_origin_easting, args.map_origin_northing)
+            else:
+                map_origin_utm = wait_for_navsat_origin(
+                    route_loader,
+                    namespace_join(args.namespace, args.navsat_topic),
+                    args.navsat_timeout,
+                )
         forward_route = build_pose_sequence(route_loader, coordinates, args.frame_id, map_origin_utm)
         reverse_route = build_pose_sequence(route_loader, list(reversed(coordinates)), args.frame_id, map_origin_utm)
     finally:
