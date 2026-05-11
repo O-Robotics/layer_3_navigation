@@ -110,11 +110,9 @@
     odom1_nodelay: false
     odom1_differential: false
     odom1_relative: false
-    # Be very conservative with GNSS corrections in the global filter. The
-    # source NavSatFix covariance is currently optimistic for the observed
-    # stationary drift, so reject more GPS updates unless they agree closely
-    # with the running map estimate.
-    odom1_pose_rejection_threshold: 0.15
+    # Allow the global filter to accept normal GNSS corrections instead of
+    # rejecting nearly all updates that differ from the current map estimate.
+    odom1_pose_rejection_threshold: 5.0
 
 
     imu0: /amr_sweeper/imu/data_raw
@@ -131,8 +129,8 @@
     
     use_control: false
 
-    process_noise_covariance: [1.0,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                              0.0,    1.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+    process_noise_covariance: [0.05,  0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                              0.0,    0.05,   0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
                               0.0,    0.0,    1e-3,   0.0,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
                               0.0,    0.0,    0.0,    0.3,    0.0,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
                               0.0,    0.0,    0.0,    0.0,    0.3,    0.0,    0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
