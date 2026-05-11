@@ -1,7 +1,9 @@
 # layer_3_navigation_tests
 
 ```bash
-python3 src/layer_3_navigation/tests/alf_driveway_back_and_forth_test.py --round-trips 1
+python3 src/layer_3_navigation/tests/waypoint_follower_test.py \
+  --geojson src/layer_3_navigation/tests/Forskerparken_zigzag_path.geojson \
+  --round-trips 1
 ```
 
 Dependencies to other AMR Sweeper packages:
@@ -15,13 +17,13 @@ Dependencies to other AMR Sweeper packages:
 This folder contains ad hoc navigation tests for the real AMR Sweeper stack.
 
 ## Main Test File
-`tests/alf_driveway_back_and_forth_test.py`
+`tests/waypoint_follower_test.py`
 
 ## Available Test Files
-- `alf_driveway_back_and_forth_test.py`
+- `waypoint_follower_test.py`
 
 ## Test Arguments
-- `--geojson`: default `src/layer_3_navigation/tests/Alf_Driveway.geojson`
+- `--geojson`: required path to the GeoJSON route file
 - `--namespace`: default `amr_sweeper`
 - `--frame-id`: default `map`
 - `--map-origin-easting`: optional UTM easting override for the local `map` origin
@@ -34,7 +36,7 @@ This folder contains ad hoc navigation tests for the real AMR Sweeper stack.
 - `--brush-publish-hz`: default `10.0`
 
 ## Overview
-`alf_driveway_back_and_forth_test.py` reads the `Alf_Driveway.geojson` line, converts the WGS84 coordinates into UTM, and then converts those UTM coordinates into the local Nav2 `map` frame. By default it derives the local `map` origin from a live `NavSatFix` sample on the configured `navsat` topic. If needed, you can still override the UTM origin explicitly with `--map-origin-easting` and `--map-origin-northing`. It sends the route to Nav2 as forward and reverse waypoint sequences. While the route is running, it continuously publishes brush commands on `cmd_vel_joy_brushes` so the layer 2 tool controller keeps both brushes turned on.
+`waypoint_follower_test.py` reads the GeoJSON line passed with `--geojson`, converts the WGS84 coordinates into UTM, and then converts those UTM coordinates into the local Nav2 `map` frame. By default it derives the local `map` origin from a live `NavSatFix` sample on the configured `navsat` topic. If needed, you can still override the UTM origin explicitly with `--map-origin-easting` and `--map-origin-northing`. It sends the route to Nav2 as forward and reverse waypoint sequences. While the route is running, it continuously publishes brush commands on `cmd_vel_joy_brushes` so the layer 2 tool controller keeps both brushes turned on.
 
 ## Notes
 - Run this after layer 1, layer 2, and layer 3 bringup are active on the robot.

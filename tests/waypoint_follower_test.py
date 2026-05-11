@@ -79,7 +79,7 @@ def yaw_to_quaternion(yaw: float) -> Tuple[float, float, float, float]:
 def resolve_geojson_path(path_arg: str | None) -> Path:
     if path_arg:
         return Path(path_arg).expanduser().resolve()
-    return Path(__file__).with_name('Alf_Driveway.geojson').resolve()
+    raise ValueError('A GeoJSON file path is required. Pass it with --geojson.')
 
 
 def load_linestring_points(path: Path) -> List[Tuple[float, float]]:
@@ -214,7 +214,7 @@ def wait_for_navsat_origin(node: Node, topic: str, timeout_sec: float) -> Tuple[
         node.destroy_subscription(subscription)
 
 
-class DrivewayBackAndForthTester(Node):
+class WaypointFollowerTester(Node):
     def __init__(
         self,
         args: argparse.Namespace,
@@ -222,7 +222,7 @@ class DrivewayBackAndForthTester(Node):
         forward_route: Sequence[PoseStamped],
         reverse_route: Sequence[PoseStamped],
     ):
-        super().__init__('alf_driveway_back_and_forth_test')
+        super().__init__('waypoint_follower_test')
         self.args = args
         self.geojson_path = geojson_path
         self.forward_route = list(forward_route)
@@ -334,12 +334,12 @@ class DrivewayBackAndForthTester(Node):
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='Run the AMR Sweeper back and forth along the Alf_Driveway GeoJSON line while keeping the brushes on.',
+        description='Run the AMR Sweeper back and forth along a GeoJSON line while keeping the brushes on.',
     )
     parser.add_argument(
         '--geojson',
-        default=None,
-        help='Path to the GeoJSON line to follow. Defaults to Alf_Driveway.geojson next to this script.',
+        required=True,
+        help='Path to the GeoJSON line to follow.',
     )
     parser.add_argument(
         '--namespace',
@@ -418,7 +418,7 @@ def main() -> int:
     coordinates = load_linestring_points(geojson_path)
 
     rclpy.init(args=sys.argv)
-    route_loader = Node('alf_driveway_route_loader')
+    route_loader = Node('waypoint_follower_route_loader')
     try:
         map_origin_utm = None
         if args.frame_id == 'map':
@@ -449,7 +449,7 @@ def main() -> int:
 
     node = None
     try:
-        node = DrivewayBackAndForthTester(args, geojson_path, forward_route, reverse_route)
+        node = WaypointFollowerTester(args, geojson_path, forward_route, reverse_route)
         node.get_logger().info(f'Using GeoJSON route: {node.geojson_path}')
         node.run()
         return 0
