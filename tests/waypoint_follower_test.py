@@ -430,17 +430,15 @@ def main() -> int:
                     namespace_join(args.namespace, args.navsat_topic),
                     args.navsat_timeout,
                 )
-        # Start from the opposite end of the driveway so the first commanded
-        # waypoint order matches the robot's current field usage better.
         forward_route = build_pose_sequence(
             route_loader,
-            list(reversed(coordinates)),
+            coordinates,
             args.frame_id,
             map_origin_utm,
         )
         reverse_route = build_pose_sequence(
             route_loader,
-            coordinates,
+            list(reversed(coordinates)),
             args.frame_id,
             map_origin_utm,
         )
