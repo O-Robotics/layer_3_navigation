@@ -93,9 +93,9 @@ def generate_launch_description():
                 ("gps/filtered", "gps/filtered"),
                 ("odometry/gps", "odometry/gps"),
 
-                # Reference odometry for navsat_transform should come from the local EKF to
-                # avoid feeding the global EKF estimate back into the GPS transform path.
-                ("odometry/filtered", "odometry/local"),
+                # Reference odometry for navsat_transform now comes from the global EKF to
+                # match the upstream example behavior for GPS projection.
+                ("odometry/filtered", "odometry/global"),
             ],
         )
 
