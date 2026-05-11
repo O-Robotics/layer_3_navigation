@@ -1,7 +1,7 @@
 
 /**/ekf_filter_node_odom:
   ros__parameters:
-    frequency: 30.0
+    frequency: 20.0
     sensor_timeout: 0.1 
     two_d_mode: true
     transform_time_offset: 0.0
@@ -75,7 +75,7 @@
 
 /**/ekf_filter_node_map:
   ros__parameters:
-    frequency: 30.0
+    frequency: 20.0
     sensor_timeout: 0.1
     two_d_mode: true
     transform_time_offset: 0.0
@@ -161,7 +161,7 @@
 
 /**/navsat_transform:
   ros__parameters:
-    frequency: 30.0
+    frequency: 20.0
     delay: 3.0
     magnetic_declination_radians: 0.0774  # For lat/lon 56.164512169, 10.145487016999999 in Aarhus
     yaw_offset: 0.0     # IMU follows ENU
