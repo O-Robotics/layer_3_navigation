@@ -41,5 +41,6 @@ This folder contains ad hoc navigation tests for the real AMR Sweeper stack.
 ## Notes
 - Run this after layer 1, layer 2, and layer 3 bringup are active on the robot.
 - The test uses the Nav2 `follow_waypoints` action under the configured namespace.
+- The test also publishes a `visualization_msgs/Marker` line on `/amr_sweeper/waypoint_test/route_marker` for the GeoJSON route and a `visualization_msgs/Marker` sphere on `/amr_sweeper/waypoint_test/next_waypoint` for the next commanded waypoint.
 - When `--frame-id map` is used, the derived or supplied origin must match the local `map` frame used by Nav2. The script logs both the raw UTM route endpoints and the converted `map` endpoints to help verify the chosen origin.
 - Set `--round-trips 0` to keep sweeping back and forth until interrupted.

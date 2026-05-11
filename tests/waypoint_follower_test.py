@@ -13,9 +13,11 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import FollowWaypoints
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import NavSatFix
+from std_msgs.msg import ColorRGBA
+from visualization_msgs.msg import Marker
 
 
 def latlon_to_utm(latitude: float, longitude: float) -> Tuple[float, float, int, str]:
@@ -177,6 +179,15 @@ def trim_duplicate_endpoint(poses: Sequence[PoseStamped]) -> List[PoseStamped]:
     return list(poses[1:])
 
 
+def make_color(r: float, g: float, b: float, a: float) -> ColorRGBA:
+    color = ColorRGBA()
+    color.r = r
+    color.g = g
+    color.b = b
+    color.a = a
+    return color
+
+
 def namespace_join(namespace: str, topic_or_action: str) -> str:
     ns = namespace.strip('/')
     leaf = topic_or_action.lstrip('/')
@@ -230,7 +241,24 @@ class WaypointFollowerTester(Node):
         self.brush_command = Twist()
         self.brush_command.linear.x = args.brush_linear
         self.brush_command.angular.z = args.brush_angular
+        self.route_frame_id = self.forward_route[0].header.frame_id if self.forward_route else args.frame_id
         self.follow_waypoints_action = namespace_join(args.namespace, 'follow_waypoints')
+        path_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.route_marker_publisher = self.create_publisher(
+            Marker,
+            namespace_join(args.namespace, 'waypoint_test/route_marker'),
+            path_qos,
+        )
+        self.next_waypoint_publisher = self.create_publisher(
+            Marker,
+            namespace_join(args.namespace, 'waypoint_test/next_waypoint'),
+            path_qos,
+        )
         self.brush_publisher = self.create_publisher(
             Twist,
             namespace_join(args.namespace, 'cmd_vel_joy_brushes'),
@@ -244,10 +272,53 @@ class WaypointFollowerTester(Node):
             self.follow_waypoints_action,
         )
         self.active_goal_handle = None
+        self.publish_debug_paths()
 
     def publish_brush_command(self) -> None:
         if self.brush_enabled:
             self.brush_publisher.publish(self.brush_command)
+
+    def publish_debug_paths(self) -> None:
+        stamp = self.get_clock().now().to_msg()
+        self.route_marker_publisher.publish(self.build_route_marker(stamp))
+
+    def build_route_marker(self, stamp) -> Marker:
+        marker = Marker()
+        marker.header.frame_id = self.route_frame_id
+        marker.header.stamp = stamp
+        marker.ns = 'waypoint_test'
+        marker.id = 0
+        marker.type = Marker.LINE_STRIP
+        marker.action = Marker.ADD
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.08
+        marker.color = make_color(0.3, 0.7, 1.0, 0.95)
+        marker.points = [pose.pose.position for pose in self.forward_route]
+        return marker
+
+    def publish_next_waypoint_marker(self, route_name: str, poses: Sequence[PoseStamped]) -> None:
+        stamp = self.get_clock().now().to_msg()
+        marker = Marker()
+        marker.header.frame_id = self.route_frame_id
+        marker.header.stamp = stamp
+        marker.ns = 'waypoint_test'
+        marker.id = 1
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.35
+        marker.scale.y = 0.35
+        marker.scale.z = 0.35
+        marker.color = make_color(1.0, 0.2, 0.2, 0.95)
+        if poses:
+            marker.pose = poses[0].pose
+            self.get_logger().info(
+                f'Publishing next waypoint marker for {route_name} at '
+                f'({marker.pose.position.x:.2f}, {marker.pose.position.y:.2f}) in {self.route_frame_id}.'
+            )
+        else:
+            marker.action = Marker.DELETE
+        self.next_waypoint_publisher.publish(marker)
 
     def set_brushes_enabled(self, enabled: bool) -> None:
         self.brush_enabled = enabled
@@ -267,6 +338,7 @@ class WaypointFollowerTester(Node):
             self.get_logger().warn(f'Skipping empty route: {route_name}')
             return
 
+        self.publish_next_waypoint_marker(route_name, poses)
         goal = FollowWaypoints.Goal()
         now = self.get_clock().now().to_msg()
         for pose in poses:
@@ -297,6 +369,7 @@ class WaypointFollowerTester(Node):
 
         self.get_logger().info(f'{route_name} route completed successfully.')
         self.active_goal_handle = None
+        self.publish_next_waypoint_marker(route_name, [])
 
     def cancel_active_goal(self) -> None:
         if self.active_goal_handle is None:
@@ -307,6 +380,7 @@ class WaypointFollowerTester(Node):
 
     def run(self) -> None:
         self.wait_for_nav_server()
+        self.publish_debug_paths()
         self.set_brushes_enabled(True)
 
         forward_initial = self.forward_route
@@ -449,6 +523,11 @@ def main() -> int:
     try:
         node = WaypointFollowerTester(args, geojson_path, forward_route, reverse_route)
         node.get_logger().info(f'Using GeoJSON route: {node.geojson_path}')
+        node.get_logger().info(
+            'Publishing route debug topics on '
+            f'{namespace_join(args.namespace, "waypoint_test/route_marker")} and '
+            f'{namespace_join(args.namespace, "waypoint_test/next_waypoint")}.'
+        )
         node.run()
         return 0
     except KeyboardInterrupt:
