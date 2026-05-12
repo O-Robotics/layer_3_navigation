@@ -148,7 +148,7 @@
       height: 3
       resolution: 0.05
       robot_radius: 0.22
-      plugins: ["inflation_layer"]
+      plugins: ["obstacle_layer", "inflation_layer"]
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -157,10 +157,10 @@
 
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
-        enabled: False
+        enabled: True
         observation_sources: scan
         scan:
-          topic: /scan
+          topic: /amr_sweeper/depth_camera/scan
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -186,14 +186,14 @@
       width: 50
       height: 50
       track_unknown_space: false
-      plugins: ["inflation_layer"]
+      plugins: ["obstacle_layer", "inflation_layer"]
 
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
-        enabled: False
+        enabled: True
         observation_sources: scan
         scan:
-          topic: /scan
+          topic: /amr_sweeper/depth_camera/scan
           max_obstacle_height: 2.0
           clearing: True
           marking: True
