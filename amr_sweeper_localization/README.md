@@ -17,14 +17,13 @@ This package provides the real-robot localization stack for the AMR Sweeper.
 
 ## Available Launch Files
 - `dual_ekf_navsat.launch.py`
-- `ekf_odom_imu.launch.py`
 
 ## Launch Arguments
 - `namespace`: default `amr_sweeper`
 - `use_sim_time`: default `false`
 
 ## Overview
-`amr_sweeper_localization` contains the EKF and navsat-based launch files plus parameter files used to fuse wheel odometry, IMU data, and GNSS data into robot pose estimates. It is the localization foundation for the navigation layer and is normally launched as part of layer 3 bringup.
+`amr_sweeper_localization` contains the dual-EKF and navsat-based launch path plus the parameter file used to fuse wheel odometry, IMU data, and GNSS data into robot pose estimates. It is the localization foundation for the navigation layer and is normally launched as part of layer 3 bringup.
 
 ## Notes
 - Uses wheel odometry from the layer 1 wheel-control path.
