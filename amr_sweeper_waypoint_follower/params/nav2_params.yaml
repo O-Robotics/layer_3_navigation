@@ -1,9 +1,9 @@
 /**/bt_navigator:
   ros__parameters:
     use_sim_time: False
-    global_frame: map
+    global_frame: odom
     robot_base_frame: base_footprint
-    odom_topic: /amr_sweeper/odometry/local
+    odom_topic: /amr_sweeper/odometry/fused
     bt_loop_duration: 200
     default_server_timeout: 30
     wait_for_service_timeout: 2000
@@ -177,7 +177,7 @@
     ros__parameters:
       update_frequency: 1.0
       publish_frequency: 1.0
-      global_frame: map
+      global_frame: odom
       rolling_window: true
       robot_base_frame: base_footprint
       use_sim_time: False
@@ -269,7 +269,7 @@
     assisted_teleop:
       plugin: "nav2_behaviors/AssistedTeleop"
 
-    global_frame: map
+    global_frame: odom
     robot_base_frame: base_footprint
     transform_tolerance: 0.1
     use_sim_time: False

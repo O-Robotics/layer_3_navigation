@@ -28,7 +28,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_localization', default_value='true'),
         DeclareLaunchArgument('use_navigation', default_value='true'),
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(_launch_file('amr_sweeper_localization', 'dual_ekf_navsat.launch.py')),
+            PythonLaunchDescriptionSource(_launch_file('amr_sweeper_localization', 'fusioncore.launch.py')),
             launch_arguments={
                 'namespace': namespace,
                 'use_sim_time': use_sim_time,

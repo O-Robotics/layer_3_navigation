@@ -1,7 +1,7 @@
 # amr_sweeper_localization
 
 ```bash
-ros2 launch amr_sweeper_localization dual_ekf_navsat.launch.py
+ros2 launch amr_sweeper_localization fusioncore.launch.py
 ```
 
 Dependencies to other AMR Sweeper packages:
@@ -13,17 +13,17 @@ Dependencies to other AMR Sweeper packages:
 This package provides the real-robot localization stack for the AMR Sweeper.
 
 ## Main Launch File
-`launch/dual_ekf_navsat.launch.py`
+`launch/fusioncore.launch.py`
 
 ## Available Launch Files
-- `dual_ekf_navsat.launch.py`
+- `fusioncore.launch.py`
 
 ## Launch Arguments
 - `namespace`: default `amr_sweeper`
 - `use_sim_time`: default `false`
 
 ## Overview
-`amr_sweeper_localization` contains the dual-EKF and navsat-based launch path plus the parameter file used to fuse wheel odometry, IMU data, and GNSS data into robot pose estimates. It is the localization foundation for the navigation layer and is normally launched as part of layer 3 bringup.
+`amr_sweeper_localization` contains the FusionCore launch path plus the parameter file used to fuse wheel odometry, IMU data, and GNSS data into a single robot odometry estimate. It is the localization foundation for the navigation layer and is normally launched as part of layer 3 bringup.
 
 ## Notes
 - Uses wheel odometry from the layer 1 wheel-control path.

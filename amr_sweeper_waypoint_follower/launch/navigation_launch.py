@@ -100,7 +100,7 @@ def generate_launch_description():
                 parameters=[configured_params],
                 arguments=['--ros-args', '--log-level', log_level],
                 remappings=[('cmd_vel', 'cmd_vel_nav'),
-                            ('odom', 'odometry/local')]),
+                            ('odom', 'odometry/fused')]),
             Node(
                 namespace=namespace,
                 package='nav2_smoother',
@@ -163,7 +163,7 @@ def generate_launch_description():
                 arguments=['--ros-args', '--log-level', log_level],
                 remappings=[('cmd_vel', 'cmd_vel_nav'),
                             ('cmd_vel_smoothed', 'cmd_vel'),
-                            ('odom', 'odometry/local')]),
+                            ('odom', 'odometry/fused')]),
             Node(
                 namespace=namespace,
                 package='nav2_lifecycle_manager',
