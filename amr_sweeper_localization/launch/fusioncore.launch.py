@@ -24,7 +24,14 @@ def _launch_fusioncore(context, *args, **kwargs):
         name="fusioncore",
         namespace=namespace,
         output="screen",
-        parameters=[config_path, {"use_sim_time": use_sim_time}],
+        parameters=[
+            config_path,
+            {
+                "use_sim_time": use_sim_time,
+                "base_frame": "base_footprint",
+                "odom_frame": "odom",
+            },
+        ],
         remappings=[
             ("/imu/data", "imu/data_raw"),
             ("/odom/wheels", "diff_cont/odom"),
