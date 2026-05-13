@@ -2,7 +2,7 @@
 
 ```bash
 python3 src/layer_3_navigation/tests/waypoint_follower_test.py \
-  --geojson src/layer_3_navigation/tests/Forskerparken_zigzag_path.geojson \
+  --geojson src/layer_3_navigation/tests/Ecopark_line.geojson \
   --round-trips 1
 ```
 
@@ -25,22 +25,21 @@ This folder contains ad hoc navigation tests for the real AMR Sweeper stack.
 ## Test Arguments
 - `--geojson`: required path to the GeoJSON route file
 - `--namespace`: default `amr_sweeper`
-- `--frame-id`: default `map`
-- `--map-origin-easting`: optional UTM easting override for the local `map` origin
-- `--map-origin-northing`: optional UTM northing override for the local `map` origin
-- `--navsat-topic`: default `navsat`, used to derive the local `map` origin when no explicit UTM origin is provided
-- `--navsat-timeout`: default `10.0`
+- `--frame-id`: default `odom`
+- `--fromll-service`: default `/fromLL`
+- `--fromll-timeout`: default `10.0`
 - `--round-trips`: default `1`
-- `--brush-linear`: default `1.0`
+- `--brush-linear`: default `0.1`
 - `--brush-angular`: default `0.0`
 - `--brush-publish-hz`: default `10.0`
 
 ## Overview
-`waypoint_follower_test.py` reads the GeoJSON line passed with `--geojson`, converts the WGS84 coordinates into UTM, and then converts those UTM coordinates into the local Nav2 `map` frame. By default it derives the local `map` origin from a live `NavSatFix` sample on the configured `navsat` topic. If needed, you can still override the UTM origin explicitly with `--map-origin-easting` and `--map-origin-northing`. It sends the route to Nav2 as forward and reverse waypoint sequences. While the route is running, it continuously publishes brush commands on `cmd_vel_joy_brushes` so the layer 2 tool controller keeps both brushes turned on.
+`waypoint_follower_test.py` reads the GeoJSON line passed with `--geojson` and converts each WGS84 coordinate through FusionCore's `/fromLL` service into the same local navigation frame used by Nav2. This keeps the waypoint conversion aligned with FusionCore's active GNSS reference when `reference.use_first_fix: true` is enabled. It sends the route to Nav2 as forward and reverse waypoint sequences. While the route is running, it continuously publishes brush commands on `cmd_vel_joy_brushes` so the layer 2 tool controller keeps both brushes turned on.
 
 ## Notes
 - Run this after layer 1, layer 2, and layer 3 bringup are active on the robot.
+- Wait until FusionCore is active and has accepted a GNSS fix before starting the test, otherwise `/fromLL` cannot convert the route yet.
 - The test uses the Nav2 `follow_waypoints` action under the configured namespace.
 - The test also publishes a `visualization_msgs/Marker` line on `/amr_sweeper/waypoint_test/route_marker` for the GeoJSON route and a `visualization_msgs/Marker` sphere on `/amr_sweeper/waypoint_test/next_waypoint` for the next commanded waypoint.
-- When `--frame-id map` is used, the derived or supplied origin must match the local `map` frame used by Nav2. The script logs both the raw UTM route endpoints and the converted `map` endpoints to help verify the chosen origin.
+- Use `--frame-id odom` unless your Nav2 stack is configured to consume a different FusionCore-aligned local frame.
 - Set `--round-trips 0` to keep sweeping back and forth until interrupted.

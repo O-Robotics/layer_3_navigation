@@ -5,72 +5,19 @@ import json
 import math
 import sys
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 import rclpy
 from action_msgs.msg import GoalStatus
+from fusioncore_ros.srv import FromLL
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import FollowWaypoints
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.utilities import remove_ros_args
-from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker
-
-
-def latlon_to_utm(latitude: float, longitude: float) -> Tuple[float, float, int, str]:
-    a = 6378137.0
-    f = 1 / 298.257223563
-    k0 = 0.9996
-    e2 = f * (2 - f)
-    ep2 = e2 / (1 - e2)
-
-    zone = int((longitude + 180.0) / 6.0) + 1
-    hemisphere = 'N' if latitude >= 0.0 else 'S'
-
-    lat_rad = math.radians(latitude)
-    lon_rad = math.radians(longitude)
-    lon0_rad = math.radians((zone - 1) * 6 - 180 + 3)
-
-    sin_lat = math.sin(lat_rad)
-    cos_lat = math.cos(lat_rad)
-    tan_lat = math.tan(lat_rad)
-
-    n = a / math.sqrt(1 - e2 * sin_lat * sin_lat)
-    t = tan_lat * tan_lat
-    c = ep2 * cos_lat * cos_lat
-    a_term = cos_lat * (lon_rad - lon0_rad)
-
-    m = a * (
-        (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256) * lat_rad
-        - (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * e2 * e2 * e2 / 1024) * math.sin(2 * lat_rad)
-        + (15 * e2 * e2 / 256 + 45 * e2 * e2 * e2 / 1024) * math.sin(4 * lat_rad)
-        - (35 * e2 * e2 * e2 / 3072) * math.sin(6 * lat_rad)
-    )
-
-    easting = k0 * n * (
-        a_term
-        + (1 - t + c) * a_term**3 / 6
-        + (5 - 18 * t + t * t + 72 * c - 58 * ep2) * a_term**5 / 120
-    ) + 500000.0
-
-    northing = k0 * (
-        m
-        + n
-        * tan_lat
-        * (
-            a_term * a_term / 2
-            + (5 - t + 9 * c + 4 * c * c) * a_term**4 / 24
-            + (61 - 58 * t + t * t + 600 * c - 330 * ep2) * a_term**6 / 720
-        )
-    )
-
-    if latitude < 0.0:
-        northing += 10000000.0
-
-    return easting, northing, zone, hemisphere
 
 
 def yaw_to_quaternion(yaw: float) -> Tuple[float, float, float, float]:
@@ -97,57 +44,48 @@ def load_linestring_points(path: Path) -> List[Tuple[float, float]]:
     raise ValueError('No LineString geometry found in the GeoJSON file.')
 
 
-def build_pose_sequence(
+def convert_geojson_points_with_fusioncore(
     node: Node,
     coordinates: Sequence[Tuple[float, float]],
+    service_name: str,
+    timeout_sec: float,
+) -> List[Tuple[float, float]]:
+    client = node.create_client(FromLL, service_name)
+    node.get_logger().info(f'Waiting for FusionCore conversion service {service_name}...')
+    if not client.wait_for_service(timeout_sec=timeout_sec):
+        raise RuntimeError(f'Timed out waiting for FusionCore service {service_name}')
+
+    converted_points: List[Tuple[float, float]] = []
+    for index, (longitude, latitude) in enumerate(coordinates, start=1):
+        request = FromLL.Request()
+        request.ll_point.latitude = latitude
+        request.ll_point.longitude = longitude
+        request.ll_point.altitude = 0.0
+        future = client.call_async(request)
+        rclpy.spin_until_future_complete(node, future, timeout_sec=timeout_sec)
+        response = future.result()
+        if response is None:
+            raise RuntimeError(f'FusionCore conversion failed for waypoint {index}')
+        converted_points.append((float(response.map_point.x), float(response.map_point.y)))
+
+    node.get_logger().info(
+        f'Converted {len(converted_points)} GeoJSON point(s) through FusionCore service {service_name}.'
+    )
+    return converted_points
+
+
+def build_pose_sequence(
+    node: Node,
+    xy_points: Sequence[Tuple[float, float]],
     frame_id: str,
-    map_origin_utm: Tuple[float, float] | None = None,
 ) -> List[PoseStamped]:
     poses: List[PoseStamped] = []
-    utm_points: List[Tuple[float, float]] = []
-    zones = set()
-
-    for longitude, latitude in coordinates:
-        easting, northing, zone, hemisphere = latlon_to_utm(latitude, longitude)
-        utm_points.append((easting, northing))
-        zones.add((zone, hemisphere))
-
-    if len(zones) != 1:
-        raise ValueError(f'GeoJSON spans multiple UTM zones: {sorted(zones)}')
-
-    zone, hemisphere = next(iter(zones))
-    node.get_logger().info(f'Loaded {len(utm_points)} route points in UTM zone {zone}{hemisphere}.')
-    first_easting, first_northing = utm_points[0]
-    last_easting, last_northing = utm_points[-1]
-    node.get_logger().info(
-        'Raw UTM route endpoints: '
-        f'start=({first_easting:.2f}, {first_northing:.2f}) '
-        f'end=({last_easting:.2f}, {last_northing:.2f})'
-    )
-
-    if map_origin_utm is not None:
-        origin_easting, origin_northing = map_origin_utm
-        node.get_logger().info(
-            'Converting UTM route into local map coordinates using '
-            f'origin ({origin_easting:.2f}, {origin_northing:.2f}).'
-        )
-
-    for index, (x, y) in enumerate(utm_points):
-        if map_origin_utm is not None:
-            x -= origin_easting
-            y -= origin_northing
-
-        if index < len(utm_points) - 1:
-            next_x, next_y = utm_points[index + 1]
-            if map_origin_utm is not None:
-                next_x -= origin_easting
-                next_y -= origin_northing
+    for index, (x, y) in enumerate(xy_points):
+        if index < len(xy_points) - 1:
+            next_x, next_y = xy_points[index + 1]
             yaw = math.atan2(next_y - y, next_x - x)
         else:
-            prev_x, prev_y = utm_points[index - 1]
-            if map_origin_utm is not None:
-                prev_x -= origin_easting
-                prev_y -= origin_northing
+            prev_x, prev_y = xy_points[index - 1]
             yaw = math.atan2(y - prev_y, x - prev_x)
 
         pose = PoseStamped()
@@ -194,35 +132,6 @@ def namespace_join(namespace: str, topic_or_action: str) -> str:
     if not ns:
         return f'/{leaf}'
     return f'/{ns}/{leaf}'
-
-
-def wait_for_navsat_origin(node: Node, topic: str, timeout_sec: float) -> Tuple[float, float]:
-    navsat_msg: NavSatFix | None = None
-
-    def on_navsat(msg: NavSatFix) -> None:
-        nonlocal navsat_msg
-        if math.isfinite(msg.latitude) and math.isfinite(msg.longitude):
-            navsat_msg = msg
-
-    subscription = node.create_subscription(NavSatFix, topic, on_navsat, qos_profile_sensor_data)
-    try:
-        node.get_logger().info(f'Waiting for NavSatFix on {topic} to derive local map origin...')
-        deadline = node.get_clock().now().nanoseconds + int(timeout_sec * 1e9)
-        while rclpy.ok() and navsat_msg is None and node.get_clock().now().nanoseconds < deadline:
-            rclpy.spin_once(node, timeout_sec=0.5)
-
-        if navsat_msg is None:
-            raise RuntimeError(f'Timed out waiting for NavSatFix on {topic}')
-
-        easting, northing, zone, hemisphere = latlon_to_utm(navsat_msg.latitude, navsat_msg.longitude)
-        node.get_logger().info(
-            'Derived local map origin from NavSatFix: '
-            f'lat={navsat_msg.latitude:.9f} lon={navsat_msg.longitude:.9f} '
-            f'-> UTM ({easting:.2f}, {northing:.2f}) zone {zone}{hemisphere}'
-        )
-        return easting, northing
-    finally:
-        node.destroy_subscription(subscription)
 
 
 class WaypointFollowerTester(Node):
@@ -422,31 +331,19 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         '--frame-id',
-        default='map',
-        help='Target frame for the generated waypoint poses.',
+        default='odom',
+        help='Target frame for the generated waypoint poses. Use the same local frame FusionCore publishes to Nav2.',
     )
     parser.add_argument(
-        '--map-origin-easting',
-        type=float,
-        default=None,
-        help='Optional UTM easting for the local map frame origin. If omitted with --frame-id map, the script derives it from NavSatFix.',
+        '--fromll-service',
+        default='/fromLL',
+        help='FusionCore service used to convert WGS84 GeoJSON coordinates into the local navigation frame.',
     )
     parser.add_argument(
-        '--map-origin-northing',
-        type=float,
-        default=None,
-        help='Optional UTM northing for the local map frame origin. If omitted with --frame-id map, the script derives it from NavSatFix.',
-    )
-    parser.add_argument(
-        '--navsat-topic',
-        default='navsat',
-        help='NavSatFix topic used to derive the local map origin when no explicit UTM origin is provided.',
-    )
-    parser.add_argument(
-        '--navsat-timeout',
+        '--fromll-timeout',
         type=float,
         default=10.0,
-        help='Seconds to wait for a NavSatFix sample when deriving the local map origin.',
+        help='Seconds to wait for the FusionCore /fromLL service and each waypoint conversion response.',
     )
     parser.add_argument(
         '--round-trips',
@@ -457,7 +354,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         '--brush-linear',
         type=float,
-        default=1.0,
+        default=0.1,
         help='Brush command linear.x value. The layer 2 tool controller maps this into both brush motors.',
     )
     parser.add_argument(
@@ -478,10 +375,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         parser.error('--round-trips must be >= 0')
     if args.brush_publish_hz <= 0.0:
         parser.error('--brush-publish-hz must be > 0')
-    if (args.map_origin_easting is None) != (args.map_origin_northing is None):
-        parser.error('--map-origin-easting and --map-origin-northing must be provided together')
-    if args.navsat_timeout <= 0.0:
-        parser.error('--navsat-timeout must be > 0')
+    if args.fromll_timeout <= 0.0:
+        parser.error('--fromll-timeout must be > 0')
     return args
 
 
@@ -494,27 +389,21 @@ def main() -> int:
     rclpy.init(args=sys.argv)
     route_loader = Node('waypoint_follower_route_loader')
     try:
-        map_origin_utm = None
-        if args.frame_id == 'map':
-            if args.map_origin_easting is not None and args.map_origin_northing is not None:
-                map_origin_utm = (args.map_origin_easting, args.map_origin_northing)
-            else:
-                map_origin_utm = wait_for_navsat_origin(
-                    route_loader,
-                    namespace_join(args.namespace, args.navsat_topic),
-                    args.navsat_timeout,
-                )
-        forward_route = build_pose_sequence(
+        converted_points = convert_geojson_points_with_fusioncore(
             route_loader,
             coordinates,
+            args.fromll_service,
+            args.fromll_timeout,
+        )
+        forward_route = build_pose_sequence(
+            route_loader,
+            converted_points,
             args.frame_id,
-            map_origin_utm,
         )
         reverse_route = build_pose_sequence(
             route_loader,
-            list(reversed(coordinates)),
+            list(reversed(converted_points)),
             args.frame_id,
-            map_origin_utm,
         )
     finally:
         route_loader.destroy_node()
