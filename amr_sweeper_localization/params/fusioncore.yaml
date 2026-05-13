@@ -6,7 +6,7 @@
     publish.force_2d: true
     publish.tf: true
 
-    imu.has_magnetometer: false
+    imu.has_magnetometer: true
     imu.gyro_noise: 0.005
     imu.accel_noise: 0.1
     imu.remove_gravitational_acceleration: false
