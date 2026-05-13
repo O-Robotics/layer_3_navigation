@@ -23,8 +23,9 @@ This package provides the real-robot localization stack for the AMR Sweeper.
 - `use_sim_time`: default `false`
 
 ## Overview
-`amr_sweeper_localization` contains the FusionCore launch path plus the parameter file used to fuse wheel odometry, IMU data, and GNSS data into a single robot odometry estimate. It is the localization foundation for the navigation layer and is normally launched as part of layer 3 bringup.
+`amr_sweeper_localization` contains the FusionCore launch path plus the parameter file used to fuse wheel odometry, IMU data, and GNSS data into a single robot odometry estimate. It is the localization foundation for the navigation layer and is normally launched as part of layer 3 bringup. The launch also publishes an identity `map -> odom` static transform so tools such as Foxglove can use a `map` fixed frame even when navigation is running directly in FusionCore's `odom` frame.
 
 ## Notes
 - Uses wheel odometry from the layer 1 wheel-control path.
 - Uses IMU data from `amr_sweeper_imu` and GNSS data from `amr_sweeper_gnss`.
+- Publishes a static `map -> odom` identity transform for visualization/debugging compatibility.

@@ -6,7 +6,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import LifecycleNode
+from launch_ros.actions import LifecycleNode, Node
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from lifecycle_msgs.msg import Transition
@@ -69,7 +69,26 @@ def _launch_fusioncore(context, *args, **kwargs):
         )
     )
 
-    return [node, configure, activate]
+    map_to_odom = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="map_to_odom_static_tf",
+        namespace=namespace,
+        output="screen",
+        arguments=[
+            "--x", "0",
+            "--y", "0",
+            "--z", "0",
+            "--roll", "0",
+            "--pitch", "0",
+            "--yaw", "0",
+            "--frame-id", "map",
+            "--child-frame-id", "odom",
+        ],
+        parameters=[{"use_sim_time": use_sim_time}],
+    )
+
+    return [node, configure, activate, map_to_odom]
 
 
 def generate_launch_description():
