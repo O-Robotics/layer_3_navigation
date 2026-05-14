@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import sys
+import time
 from pathlib import Path
 from typing import List, Sequence, Tuple
 
@@ -232,8 +233,14 @@ class WaypointFollowerTester(Node):
     def set_brushes_enabled(self, enabled: bool) -> None:
         self.brush_enabled = enabled
         if not enabled:
-            stop_msg = Twist()
+            self.stop_brushes()
+
+    def stop_brushes(self) -> None:
+        stop_msg = Twist()
+        for _ in range(3):
             self.brush_publisher.publish(stop_msg)
+            rclpy.spin_once(self, timeout_sec=0.05)
+            time.sleep(0.05)
 
     def wait_for_nav_server(self) -> None:
         self.get_logger().info(f'Waiting for action server {self.follow_waypoints_action}...')
