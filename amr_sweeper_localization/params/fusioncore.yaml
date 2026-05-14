@@ -20,7 +20,7 @@
     gnss.heading_noise: 0.02
     gnss.max_hdop: 4.0
     gnss.min_satellites: 4
-    gnss.min_fix_type: 3
+    gnss.min_fix_type: 1
     gnss.fix2_topic: ""
     gnss.heading_topic: ""
     gnss.azimuth_topic: ""
