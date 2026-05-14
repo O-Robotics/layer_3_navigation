@@ -32,14 +32,16 @@ This folder contains ad hoc navigation tests for the real AMR Sweeper stack.
 - `--brush-linear`: default `0.1`
 - `--brush-angular`: default `0.0`
 - `--brush-publish-hz`: default `10.0`
+- `--max-segments-per-goal`: default `4`
 
 ## Overview
-`waypoint_follower_test.py` reads the GeoJSON line passed with `--geojson` and converts each WGS84 coordinate through FusionCore's `/fromLL` service into the same local navigation frame used by Nav2. This keeps the waypoint conversion aligned with FusionCore's active GNSS reference when `reference.use_first_fix: true` is enabled. It sends the route to Nav2 as forward and reverse waypoint sequences. While the route is running, it continuously publishes brush commands on `cmd_vel_joy_brushes` so the layer 2 tool controller keeps both brushes turned on.
+`waypoint_follower_test.py` reads the GeoJSON line passed with `--geojson` and converts each WGS84 coordinate through FusionCore's `/fromLL` service into the same local navigation frame used by Nav2. This keeps the waypoint conversion aligned with FusionCore's active GNSS reference when `reference.use_first_fix: true` is enabled. It sends the route to Nav2 as forward and reverse waypoint sequences in smaller follow-waypoints chunks so the rolling-window planner only has to solve a short stretch of the line at a time. While the route is running, it continuously publishes brush commands on `cmd_vel_joy_brushes` so the layer 2 tool controller keeps both brushes turned on.
 
 ## Notes
 - Run this after layer 1, layer 2, and layer 3 bringup are active on the robot.
 - Wait until FusionCore is active and has accepted a GNSS fix before starting the test, otherwise `/fromLL` cannot convert the route yet.
 - The test uses the Nav2 `follow_waypoints` action under the configured namespace.
+- `--max-segments-per-goal` controls how many connected GeoJSON line segments are sent in each Nav2 goal. The default of `4` keeps each local plan short enough to fit comfortably inside a rolling local world model.
 - The test also publishes a `visualization_msgs/Marker` line on `/amr_sweeper/waypoint_test/route_marker` for the GeoJSON route and a `visualization_msgs/Marker` sphere on `/amr_sweeper/waypoint_test/next_waypoint` for the next commanded waypoint.
 - Use `--frame-id odom` unless your Nav2 stack is configured to consume a different FusionCore-aligned local frame.
 - Set `--round-trips 0` to keep sweeping back and forth until interrupted.

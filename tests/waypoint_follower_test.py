@@ -118,6 +118,29 @@ def trim_duplicate_endpoint(poses: Sequence[PoseStamped]) -> List[PoseStamped]:
     return list(poses[1:])
 
 
+def chunk_route_by_segments(
+    poses: Sequence[PoseStamped],
+    max_segments_per_goal: int,
+) -> List[List[PoseStamped]]:
+    if not poses:
+        return []
+    if len(poses) == 1 or max_segments_per_goal <= 0:
+        return [list(poses)]
+
+    max_points_per_goal = max_segments_per_goal + 1
+    chunks: List[List[PoseStamped]] = []
+    start_index = 0
+
+    while start_index < len(poses) - 1:
+        end_index = min(start_index + max_points_per_goal, len(poses))
+        chunks.append(list(poses[start_index:end_index]))
+        if end_index >= len(poses):
+            break
+        start_index = end_index - 1
+
+    return chunks
+
+
 def make_color(r: float, g: float, b: float, a: float) -> ColorRGBA:
     color = ColorRGBA()
     color.r = r
@@ -254,36 +277,44 @@ class WaypointFollowerTester(Node):
             self.get_logger().warn(f'Skipping empty route: {route_name}')
             return
 
-        self.publish_next_waypoint_marker(route_name, poses)
-        goal = FollowWaypoints.Goal()
-        now = self.get_clock().now().to_msg()
-        for pose in poses:
-            pose.header.stamp = now
-            goal.poses.append(pose)
+        route_chunks = chunk_route_by_segments(poses, self.args.max_segments_per_goal)
+        for chunk_index, chunk in enumerate(route_chunks, start=1):
+            chunk_name = f'{route_name} chunk {chunk_index}/{len(route_chunks)}'
+            self.publish_next_waypoint_marker(chunk_name, chunk)
+            goal = FollowWaypoints.Goal()
+            now = self.get_clock().now().to_msg()
+            for pose in chunk:
+                pose.header.stamp = now
+                goal.poses.append(pose)
 
-        self.get_logger().info(f'Sending {route_name} route with {len(goal.poses)} waypoint(s).')
-        send_goal_future = self.action_client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self, send_goal_future)
-        self.active_goal_handle = send_goal_future.result()
+            self.get_logger().info(
+                f'Sending {chunk_name} with {len(goal.poses)} waypoint(s) '
+                f'covering up to {max(0, len(goal.poses) - 1)} segment(s).'
+            )
+            send_goal_future = self.action_client.send_goal_async(goal)
+            rclpy.spin_until_future_complete(self, send_goal_future)
+            self.active_goal_handle = send_goal_future.result()
 
-        if self.active_goal_handle is None or not self.active_goal_handle.accepted:
-            raise RuntimeError(f'{route_name} route was rejected by Nav2.')
+            if self.active_goal_handle is None or not self.active_goal_handle.accepted:
+                raise RuntimeError(f'{chunk_name} was rejected by Nav2.')
 
-        result_future = self.active_goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future)
-        result = result_future.result()
+            result_future = self.active_goal_handle.get_result_async()
+            rclpy.spin_until_future_complete(self, result_future)
+            result = result_future.result()
 
-        if result is None:
-            raise RuntimeError(f'{route_name} route did not return a result.')
+            if result is None:
+                raise RuntimeError(f'{chunk_name} did not return a result.')
 
-        if result.status != GoalStatus.STATUS_SUCCEEDED:
-            raise RuntimeError(f'{route_name} route failed with goal status {result.status}.')
+            if result.status != GoalStatus.STATUS_SUCCEEDED:
+                raise RuntimeError(f'{chunk_name} failed with goal status {result.status}.')
 
-        missed = list(result.result.missed_waypoints)
-        if missed:
-            raise RuntimeError(f'{route_name} route missed waypoint indices: {missed}')
+            missed = list(result.result.missed_waypoints)
+            if missed:
+                raise RuntimeError(f'{chunk_name} missed waypoint indices: {missed}')
 
-        self.get_logger().info(f'{route_name} route completed successfully.')
+            self.get_logger().info(f'{chunk_name} completed successfully.')
+            self.active_goal_handle = None
+
         self.active_goal_handle = None
         self.publish_next_waypoint_marker(route_name, [])
 
@@ -376,6 +407,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=10.0,
         help='How often to republish the brush command while the route is running.',
     )
+    parser.add_argument(
+        '--max-segments-per-goal',
+        type=int,
+        default=4,
+        help='Maximum number of connected line segments to send to Nav2 in one follow_waypoints goal.',
+    )
 
     args = parser.parse_args(argv)
     if args.round_trips < 0:
@@ -384,6 +421,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         parser.error('--brush-publish-hz must be > 0')
     if args.fromll_timeout <= 0.0:
         parser.error('--fromll-timeout must be > 0')
+    if args.max_segments_per_goal <= 0:
+        parser.error('--max-segments-per-goal must be > 0')
     return args
 
 
