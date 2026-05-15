@@ -18,6 +18,21 @@ def _launch_fusioncore(context, *args, **kwargs):
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "params", "fusioncore.yaml")
 
+    navsat_qos_bridge = Node(
+        package="amr_sweeper_localization",
+        executable="navsat_qos_bridge.py",
+        name="navsat_qos_bridge",
+        namespace=namespace,
+        output="screen",
+        parameters=[
+            {
+                "input_topic": "gnss/navsat",
+                "output_topic": "gnss/navsat_reliable",
+                "use_sim_time": use_sim_time,
+            }
+        ],
+    )
+
     node = LifecycleNode(
         package="fusioncore_ros",
         executable="fusioncore_node",
@@ -35,7 +50,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         remappings=[
             ("/imu/data", "imu/data_raw"),
             ("/odom/wheels", "diff_cont/odom"),
-            ("/gnss/fix", "gnss/navsat"),
+            ("/gnss/fix", "gnss/navsat_reliable"),
             ("/fusion/odom", "odometry/fused"),
             ("/fusion/pose", "pose"),
         ],
@@ -88,7 +103,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
-    return [node, configure, activate, map_to_odom]
+    return [navsat_qos_bridge, node, configure, activate, map_to_odom]
 
 
 def generate_launch_description():
