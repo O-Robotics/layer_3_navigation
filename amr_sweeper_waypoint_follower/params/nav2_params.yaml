@@ -7,54 +7,6 @@
     bt_loop_duration: 200 # Behavior tree tick period in milliseconds. Common Nav2 default is 10 ms; this config runs a slower 5 Hz tree tick.
     default_server_timeout: 30 # Seconds to wait for BT action/service servers before timing out. Default in many examples is 20 s.
     wait_for_service_timeout: 2000 # Milliseconds to wait when connecting to required ROS services. Common default is 1000 ms.
-    plugin_lib_names: # Behavior Tree node libraries to load at startup; this list extends Nav2's standard default set.
-      - nav2_compute_path_to_pose_action_bt_node
-      - nav2_compute_path_through_poses_action_bt_node
-      - nav2_smooth_path_action_bt_node
-      - nav2_follow_path_action_bt_node
-      - nav2_spin_action_bt_node
-      - nav2_wait_action_bt_node
-      - nav2_assisted_teleop_action_bt_node
-      - nav2_back_up_action_bt_node
-      - nav2_drive_on_heading_bt_node
-      - nav2_clear_costmap_service_bt_node
-      - nav2_is_stuck_condition_bt_node
-      - nav2_goal_reached_condition_bt_node
-      - nav2_goal_updated_condition_bt_node
-      - nav2_globally_updated_goal_condition_bt_node
-      - nav2_is_path_valid_condition_bt_node
-      - nav2_initial_pose_received_condition_bt_node
-      - nav2_reinitialize_global_localization_service_bt_node
-      - nav2_rate_controller_bt_node
-      - nav2_distance_controller_bt_node
-      - nav2_speed_controller_bt_node
-      - nav2_truncate_path_action_bt_node
-      - nav2_truncate_path_local_action_bt_node
-      - nav2_goal_updater_node_bt_node
-      - nav2_recovery_node_bt_node
-      - nav2_pipeline_sequence_bt_node
-      - nav2_round_robin_node_bt_node
-      - nav2_transform_available_condition_bt_node
-      - nav2_time_expired_condition_bt_node
-      - nav2_path_expiring_timer_condition
-      - nav2_distance_traveled_condition_bt_node
-      - nav2_single_trigger_bt_node
-      - nav2_goal_updated_controller_bt_node
-      - nav2_is_battery_low_condition_bt_node
-      - nav2_navigate_through_poses_action_bt_node
-      - nav2_navigate_to_pose_action_bt_node
-      - nav2_remove_passed_goals_action_bt_node
-      - nav2_planner_selector_bt_node
-      - nav2_controller_selector_bt_node
-      - nav2_goal_checker_selector_bt_node
-      - nav2_controller_cancel_bt_node
-      - nav2_path_longer_on_approach_bt_node
-      - nav2_wait_cancel_bt_node
-      - nav2_spin_cancel_bt_node
-      - nav2_back_up_cancel_bt_node
-      - nav2_assisted_teleop_cancel_bt_node
-      - nav2_drive_on_heading_cancel_bt_node
-      - nav2_is_battery_charging_condition_bt_node
 
 /**/bt_navigator_navigate_through_poses_rclcpp_node:
   ros__parameters:
@@ -72,7 +24,7 @@
     min_y_velocity_threshold: 0.001 # Linear Y deadband below which motion is treated as zero. Default is commonly 0.5 for holonomic robots; near-zero fits diff drive.
     min_theta_velocity_threshold: 0.001 # Angular deadband below which rotation is treated as zero. Default is commonly 0.001 rad/s.
     failure_tolerance: 0.6 # Extra seconds of controller failure tolerance before aborting. Was 0.3; Nav2 examples often use 0.3.
-    progress_checker_plugin: "progress_checker" # Name of the active progress checker plugin instance. No single universal default beyond configured plugin names.
+    progress_checker_plugins: ["progress_checker"] # Progress checker plugins available to the controller. Jazzy expects this plural key.
     goal_checker_plugins: ["general_goal_checker"] # Goal checker plugins available to the controller. Common examples load one SimpleGoalChecker.
     controller_plugins: ["FollowPath"] # Controller plugins available to execute paths. Common examples load one DWB FollowPath plugin.
 
@@ -231,7 +183,7 @@
     planner_plugins: ["GridBased"] # Planner plugins available to generate global paths. Common examples load one GridBased planner.
 
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner" # Planner implementation. Common example plugin is NavfnPlanner.
+      plugin: "nav2_navfn_planner::NavfnPlanner" # Planner implementation. Common example plugin is NavfnPlanner.
       tolerance: 0.5 # Goal tolerance in meters if exact goal cell is not reachable. Common examples use 0.5 m.
       use_astar: false # Use Dijkstra when false or A* when true. Common Navfn example default is false.
       allow_unknown: true # Permit planning through unknown cells. Common mapped examples often use true.
@@ -249,25 +201,27 @@
 
 /**/behavior_server:
   ros__parameters:
-    costmap_topic: local_costmap/costmap_raw # Local costmap topic used by recovery behaviors. Common examples use the local costmap raw topic.
-    footprint_topic: local_costmap/published_footprint # Footprint topic used by recovery behaviors. Common examples use the local published footprint topic.
+    local_costmap_topic: local_costmap/costmap_raw # Local costmap topic used by recovery behaviors.
+    global_costmap_topic: global_costmap/costmap_raw # Global costmap topic used by recovery behaviors.
+    local_footprint_topic: local_costmap/published_footprint # Local footprint topic used by recovery behaviors.
+    global_footprint_topic: global_costmap/published_footprint # Global footprint topic used by recovery behaviors.
     cycle_frequency: 10.0 # Behavior server update rate in Hz. Common examples use 10 Hz.
     behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"] # Recovery/utility behaviors available to the behavior tree. This matches Nav2's standard example set.
 
     spin:
-      plugin: "nav2_behaviors/Spin" # Recovery behavior that rotates the robot in place. Standard Nav2 behavior plugin.
+      plugin: "nav2_behaviors::Spin" # Recovery behavior that rotates the robot in place. Standard Nav2 behavior plugin.
 
     backup:
-      plugin: "nav2_behaviors/BackUp" # Recovery behavior that drives backward. Standard Nav2 behavior plugin.
+      plugin: "nav2_behaviors::BackUp" # Recovery behavior that drives backward. Standard Nav2 behavior plugin.
 
     drive_on_heading:
-      plugin: "nav2_behaviors/DriveOnHeading" # Behavior that drives along the current heading. Standard Nav2 behavior plugin.
+      plugin: "nav2_behaviors::DriveOnHeading" # Behavior that drives along the current heading. Standard Nav2 behavior plugin.
 
     wait:
-      plugin: "nav2_behaviors/Wait" # Behavior that pauses for a duration. Standard Nav2 behavior plugin.
+      plugin: "nav2_behaviors::Wait" # Behavior that pauses for a duration. Standard Nav2 behavior plugin.
 
     assisted_teleop:
-      plugin: "nav2_behaviors/AssistedTeleop" # Behavior that allows guarded teleoperation. Standard Nav2 behavior plugin.
+      plugin: "nav2_behaviors::AssistedTeleop" # Behavior that allows guarded teleoperation. Standard Nav2 behavior plugin.
 
     global_frame: odom # Frame used by recovery behaviors. Typical mapped setups use map, but odom fits this rolling-window stack.
     robot_base_frame: base_footprint # Robot body frame used by recovery behaviors. Common default is base_link.
