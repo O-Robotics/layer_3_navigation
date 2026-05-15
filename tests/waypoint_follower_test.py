@@ -171,9 +171,9 @@ class WaypointFollowerTester(Node):
         self.geojson_path = geojson_path
         self.forward_route = list(forward_route)
         self.reverse_route = list(reverse_route)
-        self.brush_command = Twist()
-        self.brush_command.linear.x = args.brush_linear
-        self.brush_command.angular.z = args.brush_angular
+        self.tool_command = Twist()
+        self.tool_command.linear.x = args.tool_linear
+        self.tool_command.angular.z = args.tool_angular
         self.route_frame_id = self.forward_route[0].header.frame_id if self.forward_route else args.frame_id
         self.follow_waypoints_action = namespace_join(args.namespace, 'follow_waypoints')
         path_qos = QoSProfile(
@@ -192,13 +192,13 @@ class WaypointFollowerTester(Node):
             namespace_join(args.namespace, 'waypoint_test/next_waypoint'),
             path_qos,
         )
-        self.brush_publisher = self.create_publisher(
+        self.tool_publisher = self.create_publisher(
             Twist,
-            namespace_join(args.namespace, 'cmd_vel_joy_brushes'),
+            namespace_join(args.namespace, 'cmd_vel_joy_tools'),
             10,
         )
-        self.brush_timer = self.create_timer(1.0 / args.brush_publish_hz, self.publish_brush_command)
-        self.brush_enabled = False
+        self.tool_timer = self.create_timer(1.0 / args.tool_publish_hz, self.publish_tool_command)
+        self.tool_enabled = False
         self.action_client = ActionClient(
             self,
             FollowWaypoints,
@@ -207,9 +207,9 @@ class WaypointFollowerTester(Node):
         self.active_goal_handle = None
         self.publish_debug_paths()
 
-    def publish_brush_command(self) -> None:
-        if self.brush_enabled:
-            self.brush_publisher.publish(self.brush_command)
+    def publish_tool_command(self) -> None:
+        if self.tool_enabled:
+            self.tool_publisher.publish(self.tool_command)
 
     def publish_debug_paths(self) -> None:
         stamp = self.get_clock().now().to_msg()
@@ -253,15 +253,15 @@ class WaypointFollowerTester(Node):
             marker.action = Marker.DELETE
         self.next_waypoint_publisher.publish(marker)
 
-    def set_brushes_enabled(self, enabled: bool) -> None:
-        self.brush_enabled = enabled
+    def set_tools_enabled(self, enabled: bool) -> None:
+        self.tool_enabled = enabled
         if not enabled:
-            self.stop_brushes()
+            self.stop_tools()
 
-    def stop_brushes(self) -> None:
+    def stop_tools(self) -> None:
         stop_msg = Twist()
         for _ in range(3):
-            self.brush_publisher.publish(stop_msg)
+            self.tool_publisher.publish(stop_msg)
             rclpy.spin_once(self, timeout_sec=0.05)
             time.sleep(0.05)
 
@@ -328,7 +328,7 @@ class WaypointFollowerTester(Node):
     def run(self) -> None:
         self.wait_for_nav_server()
         self.publish_debug_paths()
-        self.set_brushes_enabled(True)
+        self.set_tools_enabled(True)
 
         forward_initial = self.forward_route
         forward_repeat = trim_duplicate_endpoint(self.forward_route)
@@ -355,7 +355,7 @@ class WaypointFollowerTester(Node):
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='Run the AMR Sweeper back and forth along a GeoJSON line while keeping the brushes on.',
+        description='Run the AMR Sweeper back and forth along a GeoJSON line while keeping the tools on.',
     )
     parser.add_argument(
         '--geojson',
@@ -365,7 +365,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         '--namespace',
         default='amr_sweeper',
-        help='ROS namespace that hosts Nav2 and the brush command topic.',
+        help='ROS namespace that hosts Nav2 and the tool command topic.',
     )
     parser.add_argument(
         '--frame-id',
@@ -390,22 +390,22 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help='Number of there-and-back cycles to run. Use 0 to keep looping until interrupted.',
     )
     parser.add_argument(
-        '--brush-linear',
+        '--tool-linear',
         type=float,
         default=0.1,
-        help='Brush command linear.x value. The layer 2 tool controller maps this into both brush motors.',
+        help='Tool command linear.x value. The layer 2 tool controller maps this into both tool motors.',
     )
     parser.add_argument(
-        '--brush-angular',
+        '--tool-angular',
         type=float,
         default=0.0,
-        help='Brush command angular.z value. Keep 0.0 to drive both brushes equally.',
+        help='Tool command angular.z value. Keep 0.0 to drive both tool motors equally.',
     )
     parser.add_argument(
-        '--brush-publish-hz',
+        '--tool-publish-hz',
         type=float,
         default=10.0,
-        help='How often to republish the brush command while the route is running.',
+        help='How often to republish the tool command while the route is running.',
     )
     parser.add_argument(
         '--max-segments-per-goal',
@@ -417,8 +417,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.round_trips < 0:
         parser.error('--round-trips must be >= 0')
-    if args.brush_publish_hz <= 0.0:
-        parser.error('--brush-publish-hz must be > 0')
+    if args.tool_publish_hz <= 0.0:
+        parser.error('--tool-publish-hz must be > 0')
     if args.fromll_timeout <= 0.0:
         parser.error('--fromll-timeout must be > 0')
     if args.max_segments_per_goal <= 0:
@@ -467,7 +467,7 @@ def main() -> int:
         return 0
     except KeyboardInterrupt:
         if node is not None:
-            node.get_logger().info('Interrupted by user. Cancelling any active route and stopping brushes.')
+            node.get_logger().info('Interrupted by user. Cancelling any active route and stopping tools.')
             node.cancel_active_goal()
         return 130
     except Exception as exc:
@@ -479,7 +479,7 @@ def main() -> int:
         return 1
     finally:
         if node is not None:
-            node.set_brushes_enabled(False)
+            node.set_tools_enabled(False)
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

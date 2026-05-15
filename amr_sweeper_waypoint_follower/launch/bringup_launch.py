@@ -95,8 +95,8 @@ def generate_launch_description():
             name='relay_cmd_vel',
             namespace=namespace,
             parameters=[{'use_sim_time': use_sim_time,
-                        'input_topic': '/amr_sweeper/cmd_vel',
-                        'output_topic': '/amr_sweeper/cmd_vel_navigation_input_wheels',
+                        'input_topic': 'cmd_vel',
+                        'output_topic': 'cmd_vel_navigation_input_wheels',
                         'lazy': False}]
     )
 
