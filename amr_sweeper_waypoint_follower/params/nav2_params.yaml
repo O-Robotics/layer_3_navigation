@@ -7,6 +7,7 @@
     bt_loop_duration: 200 # Behavior tree tick period in milliseconds. Common Nav2 default is 10 ms; this config runs a slower 5 Hz tree tick.
     default_server_timeout: 30 # Seconds to wait for BT action/service servers before timing out. Default in many examples is 20 s.
     wait_for_service_timeout: 2000 # Milliseconds to wait when connecting to required ROS services. Common default is 1000 ms.
+    error_code_names: ["compute_path_error_code", "follow_path_error_code"] # Jazzy bt_navigator expects these planner/controller result channels to be named explicitly.
 
 /**/bt_navigator_navigate_through_poses_rclcpp_node:
   ros__parameters:
