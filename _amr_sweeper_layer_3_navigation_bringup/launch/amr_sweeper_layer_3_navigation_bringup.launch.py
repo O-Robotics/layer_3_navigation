@@ -19,21 +19,21 @@ def _launch_file(package_name: str, launch_file_name: str):
 def generate_launch_description():
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
-    use_localization = LaunchConfiguration('use_localization')
-    use_navigation = LaunchConfiguration('use_navigation')
+    use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization')
+    use_amr_sweeper_waypoint_follower = LaunchConfiguration('use_amr_sweeper_waypoint_follower')
 
     return LaunchDescription([
         DeclareLaunchArgument('namespace', default_value='amr_sweeper'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('use_localization', default_value='true'),
-        DeclareLaunchArgument('use_navigation', default_value='true'),
+        DeclareLaunchArgument('use_amr_sweeper_localization', default_value='true'),
+        DeclareLaunchArgument('use_amr_sweeper_waypoint_follower', default_value='true'),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(_launch_file('amr_sweeper_localization', 'fusioncore.launch.py')),
             launch_arguments={
                 'namespace': namespace,
                 'use_sim_time': use_sim_time,
             }.items(),
-            condition=IfCondition(use_localization),
+            condition=IfCondition(use_amr_sweeper_localization),
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(_launch_file('amr_sweeper_waypoint_follower', 'bringup_launch.py')),
@@ -41,6 +41,6 @@ def generate_launch_description():
                 'namespace': namespace,
                 'use_sim_time': use_sim_time,
             }.items(),
-            condition=IfCondition(use_navigation),
+            condition=IfCondition(use_amr_sweeper_waypoint_follower),
         ),
     ])

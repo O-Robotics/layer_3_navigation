@@ -22,8 +22,8 @@ This package is the main entrypoint for the AMR Sweeper navigation layer.
 ## Launch Arguments
 - `namespace`: default `amr_sweeper`
 - `use_sim_time`: default `false`
-- `use_localization`: default `true`
-- `use_navigation`: default `true`
+- `use_amr_sweeper_localization`: default `true`
+- `use_amr_sweeper_waypoint_follower`: default `true`
 
 ## Overview
 `amr_sweeper_layer_3_navigation_bringup` starts the localization package and the Nav2/waypoint package together so the AMR Sweeper can estimate its pose and generate motion commands. It is the top-layer bringup for the real robot navigation stack.
