@@ -34,7 +34,7 @@
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
     outlier_threshold_gnss: 16.27    # Chi-square gate for GNSS position innovations.
-    outlier_threshold_imu: 1000000.00 # Chi-square gate for IMU innovations. #et @ 1000000.00 to remove filter on IMU during startup, defaul value is 15.09
+    outlier_threshold_imu: 1000000.00 # Chi-square gate for IMU innovations. #Set @ 1000000.00 to remove filter on IMU during startup, defaul value is 15.09
     outlier_threshold_enc: 11.34     # Chi-square gate for encoder twist innovations.
     outlier_threshold_hdg: 10.83     # Chi-square gate for heading innovations.
 
