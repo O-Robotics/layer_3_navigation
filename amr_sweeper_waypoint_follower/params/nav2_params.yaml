@@ -113,7 +113,7 @@
         enabled: True # Enable this layer. Default is effectively true when the layer is loaded.
         observation_sources: scan # Named sensor source list this layer should subscribe to. No single hardcoded default.
         scan:
-          topic: depth_camera/scan # LaserScan topic used to mark and clear obstacles. Under the default namespace this resolves to /amr_sweeper/depth_camera/scan.
+          topic: /amr_sweeper/depth_camera/scan # Absolute LaserScan topic used to mark and clear obstacles.
           max_obstacle_height: 0.75 # Ignore returns above this height in meters. Common examples often use 2.0 m.
           clearing: True # Use this sensor source to clear free space via raytracing. Common default/example is true.
           marking: True # Use this sensor source to mark obstacles. Common default/example is true.
@@ -146,7 +146,7 @@
         enabled: True # Enable this layer. Default is effectively true when the layer is loaded.
         observation_sources: scan # Named sensor source list this layer should subscribe to. No single hardcoded default.
         scan:
-          topic: depth_camera/scan # LaserScan topic used to mark and clear obstacles. Under the default namespace this resolves to /amr_sweeper/depth_camera/scan.
+          topic: /amr_sweeper/depth_camera/scan # Absolute LaserScan topic used to mark and clear obstacles.
           max_obstacle_height: 0.75 # Ignore returns above this height in meters. Common examples often use 2.0 m.
           clearing: True # Use this sensor source to clear free space via raytracing. Common default/example is true.
           marking: True # Use this sensor source to mark obstacles. Common default/example is true.
