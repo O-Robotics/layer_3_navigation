@@ -1,64 +1,72 @@
 /**:
   ros__parameters:
-    base_frame: base_footprint
-    odom_frame: odom
-    publish_rate: 50.0
-    publish.force_2d: true
-    publish.tf: true
+    base_frame: base_footprint       # Robot body frame used by FusionCore for state output and TF.
+    odom_frame: odom                 # Local odometry frame FusionCore publishes against.
+    publish_rate: 50.0               # Filter output publish rate in Hz.
+    publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch.
+    publish.tf: true                 # Broadcast the odom -> base_footprint transform.
 
-    imu.has_magnetometer: true
-    imu.gyro_noise: 0.005
-    imu.accel_noise: 0.1
-    imu.remove_gravitational_acceleration: false
-    imu.frame_id: imu_link
+    # ── IMU ───────────────────────────────────────────────────────────────────
+    imu.has_magnetometer: true       # 9-axis IMU: yaw can be initialized directly from the magnetometer.
+    imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
+    imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
+    imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.
+    imu.frame_id: imu_link           # Override IMU frame when the incoming message frame_id is missing or inconsistent.
 
-    encoder.vel_noise: 0.05
-    encoder.yaw_noise: 0.02
+    # ── Wheel encoders ────────────────────────────────────────────────────────
+    encoder.vel_noise: 0.05          # Linear velocity measurement noise in m/s.
+    encoder.yaw_noise: 0.02          # Yaw-rate measurement noise in rad/s.
 
-    gnss.base_noise_xy: 1.5
-    gnss.base_noise_z: 3.0
-    gnss.heading_noise: 0.02
-    gnss.max_hdop: 4.0
-    gnss.min_satellites: 4
-    gnss.min_fix_type: 1
-    gnss.fix2_topic: ""
-    gnss.heading_topic: ""
-    gnss.azimuth_topic: ""
-    gnss.lever_arm_x: 0.0
-    gnss.lever_arm_y: 0.0
-    gnss.lever_arm_z: 0.0
+    # ── GNSS ──────────────────────────────────────────────────────────────────
+    gnss.base_noise_xy: 1.5          # Baseline horizontal GNSS sigma in meters before HDOP/covariance scaling.
+    gnss.base_noise_z: 3.0           # Baseline vertical GNSS sigma in meters.
+    gnss.heading_noise: 0.02         # Heading measurement noise in radians for dual-antenna or azimuth inputs.
+    gnss.max_hdop: 4.0               # Reject fixes with worse horizontal dilution of precision than this.
+    gnss.min_satellites: 4           # Minimum satellite count required before fusing GNSS.
+    gnss.min_fix_type: 1             # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
+    gnss.fix2_topic: ""              # Optional second GNSS receiver topic; leave empty to disable.
+    gnss.heading_topic: ""           # Optional IMU-style dual-antenna heading topic.
+    gnss.azimuth_topic: ""           # Optional REP-145 compass_msgs/Azimuth heading topic.
+    gnss.lever_arm_x: 0.0            # Antenna offset from base frame in meters: X forward.
+    gnss.lever_arm_y: 0.0            # Antenna offset from base frame in meters: Y left.
+    gnss.lever_arm_z: 0.0            # Antenna offset from base frame in meters: Z up.
 
+    # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
-    outlier_threshold_gnss: 16.27
-    outlier_threshold_imu: 15.09
-    outlier_threshold_enc: 11.34
-    outlier_threshold_hdg: 10.83
+    outlier_threshold_gnss: 16.27    # Chi-square gate for GNSS position innovations.
+    outlier_threshold_imu: 15.09     # Chi-square gate for IMU innovations.
+    outlier_threshold_enc: 11.34     # Chi-square gate for encoder twist innovations.
+    outlier_threshold_hdg: 10.83     # Chi-square gate for heading innovations.
 
+    # ── Adaptive noise ────────────────────────────────────────────────────────
     adaptive.imu: true
     adaptive.encoder: true
     adaptive.gnss: true
-    adaptive.window: 50
-    adaptive.alpha: 0.01
+    adaptive.window: 50              # Number of recent samples tracked for online covariance adaptation.
+    adaptive.alpha: 0.01             # Learning rate for adaptive covariance updates.
 
-    init.stationary_window: 2.0
+    init.stationary_window: 2.0      # Seconds to observe a stationary robot for startup bias initialization.
 
+    # ── Zero-velocity updates ────────────────────────────────────────────────
     zupt.enabled: true
-    zupt.velocity_threshold: 0.05
-    zupt.angular_threshold: 0.05
-    zupt.noise_sigma: 0.01
+    zupt.velocity_threshold: 0.05    # Treat the robot as stopped below this linear speed in m/s.
+    zupt.angular_threshold: 0.05     # Treat the robot as not rotating below this angular speed in rad/s.
+    zupt.noise_sigma: 0.01           # ZUPT pseudo-measurement sigma in m/s.
 
+    # ── UKF process noise ─────────────────────────────────────────────────────
     ukf.q_position: 0.01
-    ukf.q_orientation: 1.0e-9
+    ukf.q_orientation: 1.0e-9        # Quaternion regularization / orientation process noise floor.
     ukf.q_velocity: 0.1
     ukf.q_angular_vel: 0.1
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
 
-    input.gnss_crs: "EPSG:4326"
-    output.crs: "EPSG:4978"
-    output.convert_to_enu_at_reference: true
-    reference.use_first_fix: true
-    reference.x: 0.0
-    reference.y: 0.0
-    reference.z: 0.0
+    # ── Coordinate systems ────────────────────────────────────────────────────
+    input.gnss_crs: "EPSG:4326"      # Incoming GNSS messages use WGS84 latitude/longitude.
+    output.crs: "EPSG:4978"          # Internal/global output CRS in ECEF XYZ.
+    output.convert_to_enu_at_reference: true  # Convert ECEF output into a local ENU frame at the chosen reference.
+    reference.use_first_fix: true    # Anchor the local ENU origin to the first accepted GNSS fix.
+    reference.x: 0.0                 # Manual reference X when not using first fix.
+    reference.y: 0.0                 # Manual reference Y when not using first fix.
+    reference.z: 0.0                 # Manual reference Z when not using first fix.
