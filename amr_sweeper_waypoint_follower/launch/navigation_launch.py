@@ -18,19 +18,17 @@ from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, SetEnvironmentVariable
-from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch_ros.actions import LoadComposableNodes
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.descriptions import ComposableNode, ParameterFile
+from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
 
 
 def generate_launch_description():
-    # Get the launch directory
     bringup_dir = get_package_share_directory('amr_sweeper_waypoint_follower')
 
     namespace = LaunchConfiguration('namespace')
+    map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     params_file = LaunchConfiguration('params_file')
@@ -45,15 +43,15 @@ def generate_launch_description():
                        'waypoint_follower',
                        'velocity_smoother']
 
-    # Create our own temporary YAML files that include substitutions
     param_substitutions = {
         'use_sim_time': use_sim_time,
-        'autostart': autostart}
+        'autostart': autostart,
+        'yaml_filename': map_yaml_file,
+    }
 
     configured_params = ParameterFile(
         RewrittenYaml(
             source_file=params_file,
-            # root_key=namespace,
             param_rewrites=param_substitutions,
             convert_types=True),
         allow_substs=True)
@@ -71,9 +69,14 @@ def generate_launch_description():
         default_value='false',
         description='Use ROS time if true')
 
+    declare_map_yaml_cmd = DeclareLaunchArgument(
+        'map',
+        default_value=os.path.join(bringup_dir, 'maps', 'map.yaml'),
+        description='Full path to map yaml file to inject into the Nav2 config')
+
     declare_params_file_cmd = DeclareLaunchArgument(
         'params_file',
-        default_value=os.path.join(bringup_dir, 'params', 'nav2_params.yaml'),
+        default_value=os.path.join(bringup_dir, 'config', 'nav2_params.yaml'),
         description='Full path to the ROS2 parameters file to use for all launched nodes')
 
     declare_autostart_cmd = DeclareLaunchArgument(
@@ -81,7 +84,7 @@ def generate_launch_description():
         description='Automatically startup the nav2 stack')
 
     declare_use_respawn_cmd = DeclareLaunchArgument(
-        'use_respawn', default_value='False',
+        'use_respawn', default_value='false',
         description='Whether to respawn if a node crashes. Applied when composition is disabled.')
 
     declare_log_level_cmd = DeclareLaunchArgument(
@@ -176,22 +179,15 @@ def generate_launch_description():
                             {'node_names': lifecycle_nodes}]),
         ]
     )
-
-
-    # Create the launch description and populate
     ld = LaunchDescription()
-
-    # Set environment variables
     ld.add_action(stdout_linebuf_envvar)
-
-    # Declare the launch options
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_use_sim_time_cmd)
+    ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
-    # Add the actions to launch all of the navigation nodes
     ld.add_action(load_nodes)
 
     return ld

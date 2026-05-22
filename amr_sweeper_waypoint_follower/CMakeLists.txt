@@ -9,7 +9,7 @@ find_package(ament_cmake REQUIRED)
 find_package(nav2_common REQUIRED)
 
 install(
-  DIRECTORY launch maps params
+  DIRECTORY launch maps config
   DESTINATION share/${PROJECT_NAME}
 )
 

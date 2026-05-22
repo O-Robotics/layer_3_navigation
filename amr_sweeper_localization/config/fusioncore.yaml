@@ -6,18 +6,18 @@
     publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch.
     publish.tf: true                 # Broadcast the odom -> base_footprint transform.
 
-    # ── IMU ───────────────────────────────────────────────────────────────────
+    # -- IMU -------------------------------------------------------------------
     imu.has_magnetometer: false      # The primary IMU stream carries accel/gyro only; yaw is fused separately through gnss.heading_topic.
     imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
     imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
     imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.
     imu.frame_id: imu_link           # Override IMU frame when the incoming message frame_id is missing or inconsistent.
 
-    # ── Wheel encoders ────────────────────────────────────────────────────────
+    # -- Wheel encoders --------------------------------------------------------
     encoder.vel_noise: 0.05          # Linear velocity measurement noise in m/s.
     encoder.yaw_noise: 0.02          # Yaw-rate measurement noise in rad/s.
 
-    # ── GNSS ──────────────────────────────────────────────────────────────────
+    # -- GNSS ------------------------------------------------------------------
     gnss.base_noise_xy: 1.5          # Baseline horizontal GNSS sigma in meters before HDOP/covariance scaling.
     gnss.base_noise_z: 3.0           # Baseline vertical GNSS sigma in meters.
     gnss.heading_noise: 0.02         # Heading measurement noise in radians for dual-antenna or azimuth inputs.
@@ -31,14 +31,14 @@
     gnss.lever_arm_y: 0.0            # Antenna offset from base frame in meters: Y left.
     gnss.lever_arm_z: 0.0            # Antenna offset from base frame in meters: Z up.
 
-    # ── Outlier rejection ─────────────────────────────────────────────────────
+    # -- Outlier rejection -----------------------------------------------------
     outlier_rejection: true
     outlier_threshold_gnss: 16.27    # Chi-square gate for GNSS position innovations.
-    outlier_threshold_imu: 1000000.00 # Chi-square gate for IMU innovations. #Set @ 1000000.00 to remove filter on IMU during startup, defaul value is 15.09
+    outlier_threshold_imu: 1000000.00 # Chi-square gate for IMU innovations. Set to 1000000.00 to effectively disable this filter during startup.
     outlier_threshold_enc: 11.34     # Chi-square gate for encoder twist innovations.
     outlier_threshold_hdg: 10.83     # Chi-square gate for heading innovations.
 
-    # ── Adaptive noise ────────────────────────────────────────────────────────
+    # -- Adaptive noise --------------------------------------------------------
     adaptive.imu: true
     adaptive.encoder: true
     adaptive.gnss: true
@@ -47,13 +47,13 @@
 
     init.stationary_window: 2.0      # Seconds to observe a stationary robot for startup bias initialization.
 
-    # ── Zero-velocity updates ────────────────────────────────────────────────
+    # -- Zero-velocity updates -------------------------------------------------
     zupt.enabled: true
     zupt.velocity_threshold: 0.05    # Treat the robot as stopped below this linear speed in m/s.
     zupt.angular_threshold: 0.05     # Treat the robot as not rotating below this angular speed in rad/s.
     zupt.noise_sigma: 0.01           # ZUPT pseudo-measurement sigma in m/s.
 
-    # ── UKF process noise ─────────────────────────────────────────────────────
+    # -- UKF process noise -----------------------------------------------------
     ukf.q_position: 0.01
     ukf.q_orientation: 1.0e-9        # Quaternion regularization / orientation process noise floor.
     ukf.q_velocity: 0.1
@@ -62,7 +62,7 @@
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
 
-    # ── Coordinate systems ────────────────────────────────────────────────────
+    # -- Coordinate systems ----------------------------------------------------
     input.gnss_crs: "EPSG:4326"      # Incoming GNSS messages use WGS84 latitude/longitude.
     output.crs: "EPSG:4978"          # Internal/global output CRS in ECEF XYZ.
     output.convert_to_enu_at_reference: true  # Convert ECEF output into a local ENU frame at the chosen reference.

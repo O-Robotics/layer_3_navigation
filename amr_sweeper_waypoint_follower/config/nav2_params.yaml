@@ -1,6 +1,6 @@
 /**/bt_navigator:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is being published. Nav2 default is typically false on real robots.
+    use_sim_time: false # Use simulated clock if /clock is being published. Nav2 default is typically false on real robots.
     global_frame: odom # Top-level navigation frame used by the behavior tree. Often map by default, but odom fits this rolling-window setup.
     robot_base_frame: base_footprint # Robot body frame Nav2 plans and controls against. Common default is base_link.
     odom_topic: odometry/fused # Odometry topic consumed by the navigator for robot motion estimates. Under the default namespace this resolves to /amr_sweeper/odometry/fused.
@@ -11,15 +11,15 @@
 
 /**/bt_navigator_navigate_through_poses_rclcpp_node:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
 
 /**/bt_navigator_navigate_to_pose_rclcpp_node:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
 
 /**/controller_server:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     controller_frequency: 10.0 # Controller update rate in Hz. Common Nav2 default is 20 Hz.
     min_x_velocity_threshold: 0.001 # Linear X deadband below which motion is treated as zero. Default is commonly 0.001 m/s.
     min_y_velocity_threshold: 0.001 # Linear Y deadband below which motion is treated as zero. Default is commonly 0.5 for holonomic robots; near-zero fits diff drive.
@@ -42,7 +42,7 @@
 
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner" # Local planner implementation used to follow the path. Common Nav2 example plugin is DWBLocalPlanner.
-      debug_trajectory_details: False # Publish extra trajectory scoring debug info. Default is typically false.
+      debug_trajectory_details: false # Publish extra trajectory scoring debug info. Default is typically false.
 
       min_vel_x: 0.0 # Minimum forward linear velocity in m/s. Common examples use 0.0.
       min_vel_y: 0.0 # Minimum lateral linear velocity in m/s. Diff-drive default stays 0.0.
@@ -74,8 +74,8 @@
 
       xy_goal_tolerance: 0.25 # Position tolerance in meters used internally by DWB near the goal. Common examples use 0.25 m.
       trans_stopped_velocity: 0.05 # Translational speed below which the robot is considered stopped. Common examples use 0.25 m/s.
-      short_circuit_trajectory_evaluation: True # Stop scoring once a clearly best trajectory is found. Common examples usually enable this.
-      stateful: True # Preserve planner state across cycles for smoother behavior. Common example configs often set true.
+      short_circuit_trajectory_evaluation: true # Stop scoring once a clearly best trajectory is found. Common examples usually enable this.
+      stateful: true # Preserve planner state across cycles for smoother behavior. Common example configs often set true.
 
       critics: ["Oscillation", "GoalAlign", "PathAlign", "PathDist", "GoalDist"] # Trajectory scoring critics loaded by DWB. This is a trimmed set versus larger example critic lists.
 
@@ -95,7 +95,7 @@
       publish_frequency: 2.0 # Costmap publish rate in Hz for downstream consumers and visualization. Common examples use 2 Hz.
       global_frame: odom # Frame the local rolling costmap is expressed in. Using odom is typical for local costmaps.
       robot_base_frame: base_footprint # Robot body frame used to place the footprint in the costmap. Common default is base_link.
-      use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+      use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
       rolling_window: true # Keep the local costmap centered on the robot instead of storing a fixed map. Common local costmap default is true.
       width: 3 # Width of the local rolling costmap in meters. Many examples use 3 m.
       height: 3 # Height of the local rolling costmap in meters. Many examples use 3 m.
@@ -110,13 +110,13 @@
 
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer" # Obstacle marking/clearing layer implementation. This is Nav2's standard obstacle plugin.
-        enabled: True # Enable this layer. Default is effectively true when the layer is loaded.
+        enabled: true # Enable this layer. Default is effectively true when the layer is loaded.
         observation_sources: scan # Named sensor source list this layer should subscribe to. No single hardcoded default.
         scan:
-          topic: /amr_sweeper/depth_camera/scan # Absolute LaserScan topic used to mark and clear obstacles.
+          topic: depth_camera/scan # LaserScan topic resolved under the selected robot namespace.
           max_obstacle_height: 0.75 # Ignore returns above this height in meters. Common examples often use 2.0 m.
-          clearing: True # Use this sensor source to clear free space via raytracing. Common default/example is true.
-          marking: True # Use this sensor source to mark obstacles. Common default/example is true.
+          clearing: true # Use this sensor source to clear free space via raytracing. Common default/example is true.
+          marking: true # Use this sensor source to mark obstacles. Common default/example is true.
           data_type: "LaserScan" # ROS message type expected from the source. Common options are LaserScan or PointCloud2.
           raytrace_max_range: 3.0 # Maximum range in meters used to clear free space. Common examples use 3.0 m.
           raytrace_min_range: 0.0 # Minimum range in meters used to clear free space. Common examples use 0.0 m.
@@ -124,7 +124,7 @@
           obstacle_min_range: 0.0 # Minimum range in meters used to insert obstacle cells. Common examples use 0.0 m.
           inf_is_valid: true # Treat infinite LaserScan ranges as valid free-space readings for clearing.
 
-      always_send_full_costmap: False # Publish incremental updates instead of the full map every cycle. Common default/example is false.
+      always_send_full_costmap: false # Publish incremental updates instead of the full map every cycle. Common default/example is false.
 
 /**/global_costmap:
   global_costmap:
@@ -134,7 +134,7 @@
       global_frame: odom # Frame the rolling global costmap is expressed in. Typical mapped setups use map instead.
       rolling_window: true # Keep the global costmap centered on the robot instead of using a static full map. Typical global default is false.
       robot_base_frame: base_footprint # Robot body frame used to place the footprint in the costmap. Common default is base_link.
-      use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+      use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
       footprint: "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]" # Same swept footprint as local_costmap. Replaces robot_radius=0.22 for better global planning around the tool.
       resolution: 0.1 # Costmap cell size in meters. Was 0.5 m; common mapped examples often use 0.05 m.
       width: 50 # Width of the rolling global costmap in meters. No single Nav2 default; this is intentionally large for short route chunking.
@@ -144,13 +144,13 @@
 
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer" # Obstacle marking/clearing layer implementation. This is Nav2's standard obstacle plugin.
-        enabled: True # Enable this layer. Default is effectively true when the layer is loaded.
+        enabled: true # Enable this layer. Default is effectively true when the layer is loaded.
         observation_sources: scan # Named sensor source list this layer should subscribe to. No single hardcoded default.
         scan:
-          topic: /amr_sweeper/depth_camera/scan # Absolute LaserScan topic used to mark and clear obstacles.
+          topic: depth_camera/scan # LaserScan topic resolved under the selected robot namespace.
           max_obstacle_height: 0.75 # Ignore returns above this height in meters. Common examples often use 2.0 m.
-          clearing: True # Use this sensor source to clear free space via raytracing. Common default/example is true.
-          marking: True # Use this sensor source to mark obstacles. Common default/example is true.
+          clearing: true # Use this sensor source to clear free space via raytracing. Common default/example is true.
+          marking: true # Use this sensor source to mark obstacles. Common default/example is true.
           data_type: "LaserScan" # ROS message type expected from the source. Common options are LaserScan or PointCloud2.
           raytrace_max_range: 3.0 # Maximum range in meters used to clear free space. Common examples use 3.0 m.
           raytrace_min_range: 0.0 # Minimum range in meters used to clear free space. Common examples use 0.0 m.
@@ -163,25 +163,25 @@
         cost_scaling_factor: 3.0 # How quickly inflated costs decay away from obstacles. Common examples use 3.0.
         inflation_radius: 0.55 # Distance in meters to inflate around obstacles. Common examples often use 0.55 m.
 
-      always_send_full_costmap: False # Publish incremental updates instead of the full map every cycle. Common default/example is false.
+      always_send_full_costmap: false # Publish incremental updates instead of the full map every cycle. Common default/example is false.
 
 /**/map_server:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     yaml_filename: "map.yaml" # Map YAML file to load if a static map server is used. Common examples point to an actual map file path.
 
 /**/map_saver:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     save_map_timeout: 5.0 # Seconds to wait for map save operations to complete. Common examples use 5.0 s.
     free_thresh_default: 0.25 # Probability threshold below which a cell is saved as free. Common examples use 0.25.
     occupied_thresh_default: 0.65 # Probability threshold above which a cell is saved as occupied. Common examples use 0.65.
-    map_subscribe_transient_local: True # Subscribe with transient-local durability so latched map data is received. Common examples use true.
+    map_subscribe_transient_local: true # Subscribe with transient-local durability so latched map data is received. Common examples use true.
 
 /**/planner_server:
   ros__parameters:
     expected_planner_frequency: 0.5 # Expected planner run rate in Hz for diagnostics. Common examples use 20 Hz or 1 Hz depending on workload.
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     planner_plugins: ["GridBased"] # Planner plugins available to generate global paths. Common examples load one GridBased planner.
 
     GridBased:
@@ -192,14 +192,14 @@
 
 /**/smoother_server:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     smoother_plugins: ["simple_smoother"] # Path smoother plugins available after planning. Common examples load one simple smoother.
 
     simple_smoother:
       plugin: "nav2_smoother::SimpleSmoother" # Smoother implementation. Common example plugin is SimpleSmoother.
       tolerance: 1.0e-10 # Convergence tolerance for smoothing iterations. Common examples use 1.0e-10.
       max_its: 1000 # Maximum smoothing iterations. Common examples use 1000.
-      do_refinement: True # Run a final refinement pass after smoothing. Common examples use true.
+      do_refinement: true # Run a final refinement pass after smoothing. Common examples use true.
 
 /**/behavior_server:
   ros__parameters:
@@ -228,7 +228,7 @@
     global_frame: odom # Frame used by recovery behaviors. Typical mapped setups use map, but odom fits this rolling-window stack.
     robot_base_frame: base_footprint # Robot body frame used by recovery behaviors. Common default is base_link.
     transform_tolerance: 0.1 # TF lookup tolerance in seconds for behavior execution. Common examples use 0.1 s.
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     simulate_ahead_time: 2.0 # Seconds to project motion ahead for some recovery behaviors. Common examples use 2.0 s.
     max_rotational_vel: 0.3 # Maximum rotational speed in rad/s for behavior server motions. Common examples are often higher, around 1.0.
     min_rotational_vel: 0.1 # Minimum commanded rotational speed in rad/s for behavior server motions. Common examples use 0.4.
@@ -236,21 +236,21 @@
 
 /**/waypoint_follower:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     loop_rate: 5 # Waypoint follower loop rate in Hz. Common examples use 20 Hz.
     stop_on_failure: false # Continue to later waypoints after a failure when false. Common examples often use false.
     waypoint_task_executor_plugin: "wait_at_waypoint" # Task executor plugin run at each waypoint. Common examples use wait_at_waypoint.
 
     wait_at_waypoint:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint" # Waypoint task executor that pauses at each waypoint. Standard Nav2 example plugin.
-      enabled: True # Enable the waypoint task executor. Common examples use true.
+      enabled: true # Enable the waypoint task executor. Common examples use true.
       waypoint_pause_duration: 200 # Pause duration in milliseconds at each waypoint. Common examples often use 200 ms.
 
 /**/velocity_smoother:
   ros__parameters:
-    use_sim_time: False # Use simulated clock if /clock is present. Default is typically false.
+    use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
     smoothing_frequency: 10.0 # Output smoothing rate in Hz. Was 15.0; common examples often use 20.0 Hz.
-    scale_velocities: False # Uniformly scale velocity components when one axis would violate limits. Common examples often use false.
+    scale_velocities: false # Uniformly scale velocity components when one axis would violate limits. Common examples often use false.
     feedback: "OPEN_LOOP" # Use commanded velocity instead of odometry feedback for smoothing. Common default/example is OPEN_LOOP.
 
     max_velocity: [0.26, 0.0, 0.3] # Maximum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was 0.25; common examples are often [0.5, 0.0, 2.5].

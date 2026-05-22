@@ -28,3 +28,4 @@ Layer 3 consumes wheel odometry, GNSS, IMU, transforms, and controller topics fr
 - Layer 3 depends on a running layer 1 and layer 2 stack.
 - This layer is configured for the trimmed real-robot stack only.
 - The localization launch bridges `/amr_sweeper/gnss/navsat` to `/amr_sweeper/gnss/navsat_reliable` so FusionCore can subscribe with reliable QoS while the upstream GNSS publisher remains best-effort compatible.
+- Nav2 runtime parameters live in `amr_sweeper_waypoint_follower/config/nav2_params.yaml`, and package-owned sensor topics are kept relative so the same files work under custom robot namespaces.
