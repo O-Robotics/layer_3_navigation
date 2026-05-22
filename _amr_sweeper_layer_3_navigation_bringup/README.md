@@ -32,5 +32,5 @@ This package is the main entrypoint for the AMR Sweeper navigation layer.
 - Use this package after the required layer 1 and layer 2 packages are already available.
 - The navigation commands produced here flow down through layer 2 and into the layer 1 drive interfaces.
 - With the default namespace, localization and Nav2 consume `/amr_sweeper/imu/data_raw`, `/amr_sweeper/gnss/navsat`, `/amr_sweeper/diff_cont/odom`, and `/amr_sweeper/depth_camera/scan`.
-- The localization stack republishes GNSS fixes onto `/amr_sweeper/gnss/navsat_reliable` before FusionCore consumes them, which avoids reliable-vs-best-effort DDS warnings on the raw GNSS topic.
+- The localization stack consumes `/amr_sweeper/gnss/navsat` directly from the local GNSS node.
 - The waypoint follower bringup rewrites `config/nav2_params.yaml` at launch time so relative sensor topics and the selected map file remain correct under both the default namespace and custom robot roots.
