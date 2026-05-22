@@ -36,16 +36,21 @@ class ImuFusionCoreBridge(Node):
             self.declare_parameter("default_yaw_variance", 0.01).value
         )
 
-        qos = QoSProfile(
+        input_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
+        )
+        output_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=10,
         )
 
         self._default_yaw_variance = max(default_yaw_variance, 1.0e-6)
-        self._imu_publisher = self.create_publisher(Imu, imu_output_topic, qos)
-        self._heading_publisher = self.create_publisher(Imu, heading_output_topic, qos)
-        self._subscription = self.create_subscription(Imu, input_topic, self._forward, qos)
+        self._imu_publisher = self.create_publisher(Imu, imu_output_topic, output_qos)
+        self._heading_publisher = self.create_publisher(Imu, heading_output_topic, output_qos)
+        self._subscription = self.create_subscription(Imu, input_topic, self._forward, input_qos)
 
         self.get_logger().info(
             f"Bridging IMU from '{input_topic}' to '{imu_output_topic}' "
