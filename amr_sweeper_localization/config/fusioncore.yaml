@@ -1,10 +1,10 @@
 /**:
   ros__parameters:
-    base_frame: base_footprint       # Robot body frame used by FusionCore for state output and TF.
+    base_frame: base_link            # Robot body frame used by FusionCore for state output and TF.
     odom_frame: odom                 # Local odometry frame FusionCore publishes against.
     publish_rate: 50.0               # Filter output publish rate in Hz.
     publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch.
-    publish.tf: true                 # Broadcast the odom -> base_footprint transform.
+    publish.tf: true                 # Broadcast the odom -> base_link transform.
 
     # ── IMU ───────────────────────────────────────────────────────────────────
     imu.has_magnetometer: true       # 9-axis IMU: yaw can be initialized directly from the magnetometer.

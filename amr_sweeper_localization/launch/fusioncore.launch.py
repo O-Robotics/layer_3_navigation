@@ -16,7 +16,7 @@ def _launch_fusioncore(context, *args, **kwargs):
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
     package_dir = get_package_share_directory("amr_sweeper_localization")
-    config_path = os.path.join(package_dir, "params", "fusioncore.yaml")
+    config_path = os.path.join(package_dir, "config", "fusioncore.yaml")
 
     navsat_qos_bridge = Node(
         package="amr_sweeper_localization",
@@ -43,7 +43,7 @@ def _launch_fusioncore(context, *args, **kwargs):
             config_path,
             {
                 "use_sim_time": use_sim_time,
-                "base_frame": "base_footprint",
+                "base_frame": "base_link",
                 "odom_frame": "odom",
             },
         ],
