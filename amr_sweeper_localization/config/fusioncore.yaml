@@ -7,7 +7,7 @@
     publish.tf: true                 # Broadcast the odom -> base_footprint transform.
 
     # ── IMU ───────────────────────────────────────────────────────────────────
-    imu.has_magnetometer: false      # Orientation is stripped from the primary IMU stream; yaw is fused separately through gnss.heading_topic.
+    imu.has_magnetometer: false      # The primary IMU stream carries accel/gyro only; yaw is fused separately through gnss.heading_topic.
     imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
     imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
     imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.
@@ -25,7 +25,7 @@
     gnss.min_satellites: 4           # Minimum satellite count required before fusing GNSS.
     gnss.min_fix_type: 1             # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic: ""              # Optional second GNSS receiver topic; leave empty to disable.
-    gnss.heading_topic: "imu/heading" # IMU-derived yaw-only heading stream for FusionCore.
+    gnss.heading_topic: "imu/data_heading" # IMU-derived yaw-only heading stream for FusionCore.
     gnss.azimuth_topic: ""           # Optional REP-145 compass_msgs/Azimuth heading topic.
     gnss.lever_arm_x: 0.0            # Antenna offset from base frame in meters: X forward.
     gnss.lever_arm_y: 0.0            # Antenna offset from base frame in meters: Y left.

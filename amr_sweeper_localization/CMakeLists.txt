@@ -15,7 +15,6 @@ install(
 install(
   PROGRAMS
     scripts/navsat_qos_bridge.py
-    scripts/imu_fusioncore_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

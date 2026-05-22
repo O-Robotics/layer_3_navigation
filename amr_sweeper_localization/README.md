@@ -29,6 +29,7 @@ The launch includes a small `NavSatFix` QoS bridge in front of FusionCore. It su
 
 ## Notes
 - Uses wheel odometry from the layer 1 wheel-control path.
+- Consumes `/amr_sweeper/imu/data_acc_gyro` for gyro/acceleration and `/amr_sweeper/imu/data_heading` for yaw-only heading so FusionCore does not fuse IMU roll/pitch orientation directly.
 - Uses IMU data from `amr_sweeper_imu` and GNSS data from `amr_sweeper_gnss`.
 - FusionCore consumes GNSS through the local `gnss/navsat_reliable` bridge topic, which is sourced from `gnss/navsat`.
 - Publishes a static `map -> odom` identity transform for visualization/debugging compatibility.
