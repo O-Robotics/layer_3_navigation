@@ -33,6 +33,22 @@ def _launch_fusioncore(context, *args, **kwargs):
         ],
     )
 
+    imu_fusioncore_bridge = Node(
+        package="amr_sweeper_localization",
+        executable="imu_fusioncore_bridge.py",
+        name="imu_fusioncore_bridge",
+        namespace=namespace,
+        output="screen",
+        parameters=[
+            {
+                "input_topic": "imu/data_raw",
+                "imu_output_topic": "imu/data_fusioncore",
+                "heading_output_topic": "imu/heading",
+                "use_sim_time": use_sim_time,
+            }
+        ],
+    )
+
     node = LifecycleNode(
         package="fusioncore_ros",
         executable="fusioncore_node",
@@ -43,12 +59,12 @@ def _launch_fusioncore(context, *args, **kwargs):
             config_path,
             {
                 "use_sim_time": use_sim_time,
-                "base_frame": "base_link",
+                "base_frame": "base_footprint",
                 "odom_frame": "odom",
             },
         ],
         remappings=[
-            ("/imu/data", "imu/data_raw"),
+            ("/imu/data", "imu/data_fusioncore"),
             ("/odom/wheels", "diff_cont/odom"),
             ("/gnss/fix", "gnss/navsat_reliable"),
             ("/fusion/odom", "odometry/fused"),
@@ -103,7 +119,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
-    return [navsat_qos_bridge, node, configure, activate, map_to_odom]
+    return [navsat_qos_bridge, imu_fusioncore_bridge, node, configure, activate, map_to_odom]
 
 
 def generate_launch_description():

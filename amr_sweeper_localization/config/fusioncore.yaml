@@ -1,13 +1,13 @@
 /**:
   ros__parameters:
-    base_frame: base_link            # Robot body frame used by FusionCore for state output and TF.
+    base_frame: base_footprint       # Robot body frame used by FusionCore for state output and TF.
     odom_frame: odom                 # Local odometry frame FusionCore publishes against.
     publish_rate: 50.0               # Filter output publish rate in Hz.
     publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch.
-    publish.tf: true                 # Broadcast the odom -> base_link transform.
+    publish.tf: true                 # Broadcast the odom -> base_footprint transform.
 
     # ── IMU ───────────────────────────────────────────────────────────────────
-    imu.has_magnetometer: true       # 9-axis IMU: yaw can be initialized directly from the magnetometer.
+    imu.has_magnetometer: false      # Orientation is stripped from the primary IMU stream; yaw is fused separately through gnss.heading_topic.
     imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
     imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
     imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.
@@ -25,7 +25,7 @@
     gnss.min_satellites: 4           # Minimum satellite count required before fusing GNSS.
     gnss.min_fix_type: 1             # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic: ""              # Optional second GNSS receiver topic; leave empty to disable.
-    gnss.heading_topic: ""           # Optional IMU-style dual-antenna heading topic.
+    gnss.heading_topic: "imu/heading" # IMU-derived yaw-only heading stream for FusionCore.
     gnss.azimuth_topic: ""           # Optional REP-145 compass_msgs/Azimuth heading topic.
     gnss.lever_arm_x: 0.0            # Antenna offset from base frame in meters: X forward.
     gnss.lever_arm_y: 0.0            # Antenna offset from base frame in meters: Y left.
