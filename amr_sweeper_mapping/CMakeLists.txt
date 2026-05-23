@@ -45,6 +45,7 @@ ament_target_dependencies(${PROJECT_NAME}
 )
 
 add_executable(amr_sweeper_slam_node src/slam_node.cpp)
+set_target_properties(amr_sweeper_slam_node PROPERTIES OUTPUT_NAME slam_node)
 target_compile_features(amr_sweeper_slam_node PUBLIC cxx_std_17)
 target_include_directories(amr_sweeper_slam_node
   PUBLIC
@@ -60,6 +61,7 @@ ament_target_dependencies(
 )
 
 add_executable(amr_sweeper_gaussian_node src/gaussian_node.cpp)
+set_target_properties(amr_sweeper_gaussian_node PROPERTIES OUTPUT_NAME gaussian_node)
 target_compile_features(amr_sweeper_gaussian_node PUBLIC cxx_std_17)
 target_include_directories(amr_sweeper_gaussian_node
   PUBLIC
@@ -78,6 +80,7 @@ ament_target_dependencies(
 )
 
 add_executable(amr_sweeper_mapping_node src/mapping_node.cpp)
+set_target_properties(amr_sweeper_mapping_node PROPERTIES OUTPUT_NAME mapping_node)
 target_compile_features(amr_sweeper_mapping_node PUBLIC cxx_std_17)
 target_include_directories(amr_sweeper_mapping_node
   PUBLIC

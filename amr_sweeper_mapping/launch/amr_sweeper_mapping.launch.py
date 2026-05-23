@@ -78,7 +78,7 @@ def _build_nodes(context):
     return [
         Node(
             package="amr_sweeper_mapping",
-            executable="amr_sweeper_slam_node",
+            executable="slam_node",
             name="amr_sweeper_slam_node",
             namespace=namespace,
             output="screen",
@@ -86,7 +86,7 @@ def _build_nodes(context):
         ),
         Node(
             package="amr_sweeper_mapping",
-            executable="amr_sweeper_gaussian_node",
+            executable="gaussian_node",
             name="amr_sweeper_gaussian_node",
             namespace=namespace,
             output="screen",
@@ -101,7 +101,7 @@ def _build_nodes(context):
         ),
         Node(
             package="amr_sweeper_mapping",
-            executable="amr_sweeper_mapping_node",
+            executable="mapping_node",
             name="amr_sweeper_mapping_node",
             namespace=namespace,
             output="screen",
