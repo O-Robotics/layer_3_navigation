@@ -1,4 +1,4 @@
-#include "mapping_node.hpp"
+#include "amr_sweeper_mapping_node.hpp"
 
 #include <algorithm>
 #include <cctype>

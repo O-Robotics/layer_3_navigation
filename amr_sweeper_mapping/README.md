@@ -20,7 +20,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - Writes mission runtime outputs into a per-run subfolder under the selected mission folder.
 
 ## Runtime Structure
-- `mapping_node.cpp/.hpp` contains both the Nav2 costmap plugin and the mapping coordinator node.
+- `amr_sweeper_mapping_node.cpp/.hpp` contains both the Nav2 costmap plugin and the mapping coordinator node.
 - `slam_node.cpp/.hpp` provides SLAM supervision and startup seeding for `slam_toolbox`.
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 

@@ -1,5 +1,5 @@
-#ifndef AMR_SWEEPER_MAPPING__MAPPING_NODE_HPP_
-#define AMR_SWEEPER_MAPPING__MAPPING_NODE_HPP_
+#ifndef AMR_SWEEPER_MAPPING__AMR_SWEEPER_MAPPING_NODE_HPP_
+#define AMR_SWEEPER_MAPPING__AMR_SWEEPER_MAPPING_NODE_HPP_
 
 #include <memory>
 #include <string>
@@ -128,4 +128,4 @@ private:
 
 }  // namespace amr_sweeper_mapping
 
-#endif  // AMR_SWEEPER_MAPPING__MAPPING_NODE_HPP_
+#endif  // AMR_SWEEPER_MAPPING__AMR_SWEEPER_MAPPING_NODE_HPP_
