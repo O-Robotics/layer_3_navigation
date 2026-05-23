@@ -6,6 +6,7 @@ ros2 launch amr_sweeper_layer_3_navigation_bringup amr_sweeper_layer_3_navigatio
 
 Dependencies to other AMR Sweeper packages:
 - `amr_sweeper_localization`
+- `amr_sweeper_mapping`
 - `amr_sweeper_waypoint_follower`
 - `amr_sweeper_layer_1_hardware_bringup`
 - `amr_sweeper_layer_2_controllers_bringup`
@@ -23,10 +24,11 @@ This package is the main entrypoint for the AMR Sweeper navigation layer.
 - `namespace`: default `amr_sweeper`
 - `use_sim_time`: default `false`
 - `use_amr_sweeper_localization`: default `true`
+- `use_amr_sweeper_mapping`: default `true`
 - `use_amr_sweeper_waypoint_follower`: default `true`
 
 ## Overview
-`amr_sweeper_layer_3_navigation_bringup` starts the localization package and the Nav2/waypoint package together so the AMR Sweeper can estimate its pose and generate motion commands. It is the top-layer bringup for the real robot navigation stack.
+`amr_sweeper_layer_3_navigation_bringup` starts localization, mapping, and the Nav2/waypoint package together so the AMR Sweeper can estimate its pose, build the runtime mapping stack, and generate motion commands. It is the top-layer bringup for the real robot navigation stack.
 
 ## Notes
 - Use this package after the required layer 1 and layer 2 packages are already available.

@@ -1,0 +1,7 @@
+<library path="amr_sweeper_mapping">
+  <class
+    type="amr_sweeper_mapping::Vda5050CostmapLayer"
+    base_class_type="nav2_costmap_2d::Layer">
+    <description>VDA5050-backed global costmap layer for working and no-go zones.</description>
+  </class>
+</library>

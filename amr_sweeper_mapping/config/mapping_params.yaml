@@ -1,0 +1,61 @@
+/**/global_costmap:
+  global_costmap:
+    ros__parameters:
+      geojson_layer:
+        enabled: true
+        plugin: "amr_sweeper_mapping::Vda5050CostmapLayer"
+        costmap_yaml_path: "src/missions/global_costmap.yaml"
+
+/**/amr_sweeper_slam_node:
+  ros__parameters:
+    slam_backend: "slam_toolbox"
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+    fusion_pose_topic: "/fusion/pose"
+    slam_pose_topic: "/pose"
+    scan_topic: "/amr_sweeper/depth_camera/scan"
+    seed_slam_from_fusion_pose: true
+    seed_period_seconds: 2.0
+    status_period_seconds: 2.0
+    max_seed_publications: 5
+
+/**/amr_sweeper_gaussian_node:
+  ros__parameters:
+    output_directory: "src/missions"
+    source_mode: "realsense_pointcloud"
+    representation_name: "global_gaussian_map"
+    world_frame: "map"
+    pointcloud_topic: "/amr_sweeper/depth_camera/depth/color/points"
+    enable_surface_texture_camera: true
+    surface_texture_topic: "/amr_sweeper/usb_cameras/tools_camera/image_raw"
+    voxel_size_meters: 0.10
+    min_range_meters: 0.30
+    max_range_meters: 8.00
+    process_every_nth_point: 12
+    max_voxels: 150000
+    max_debug_points: 25000
+    save_ply: true
+    save_json: true
+    status_period_seconds: 2.0
+    debug_publish_period_seconds: 3.0
+    artifact_save_period_seconds: 10.0
+
+/**/amr_sweeper_mapping_node:
+  ros__parameters:
+    mission_file: ""
+    mission_route_file: "src/missions/active_mission_path.geojson"
+    mission_id: ""
+    mission_output_directory: "src/missions"
+    mission_window_start: ""
+    mission_window_end: ""
+    slam_backend: "slam_toolbox"
+    gaussian_mode: "voxel_gaussians"
+    frame_id: "map"
+    fromll_service: "/fromLL"
+    auto_start_mission: true
+    repeat_mission: false
+    max_segments_per_goal: 4
+    status_period_seconds: 2.0
+    mission_tick_period_seconds: 1.0
+    follow_waypoints_action: "follow_waypoints"

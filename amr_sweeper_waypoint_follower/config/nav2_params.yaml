@@ -131,16 +131,23 @@
     ros__parameters:
       update_frequency: 1.0 # Global costmap update rate in Hz. Common example default is 1 Hz.
       publish_frequency: 1.0 # Global costmap publish rate in Hz. Common example default is 1 Hz.
-      global_frame: odom # Frame the rolling global costmap is expressed in. Typical mapped setups use map instead.
-      rolling_window: true # Keep the global costmap centered on the robot instead of using a static full map. Typical global default is false.
+      global_frame: map # Georeferenced global frame used for mission polygons and long-horizon planning.
+      rolling_window: false # Keep a fixed georeferenced planning surface instead of a robot-centered rolling window.
       robot_base_frame: base_footprint # Robot body frame used to place the footprint in the costmap. Common default is base_link.
       use_sim_time: false # Use simulated clock if /clock is present. Default is typically false.
       footprint: "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]" # Same swept footprint as local_costmap. Replaces robot_radius=0.22 for better global planning around the tool.
       resolution: 0.1 # Costmap cell size in meters. Was 0.5 m; common mapped examples often use 0.05 m.
       width: 50 # Width of the rolling global costmap in meters. No single Nav2 default; this is intentionally large for short route chunking.
       height: 50 # Height of the rolling global costmap in meters. No single Nav2 default; this matches the chosen rolling planning horizon.
+      origin_x: -25.0 # Fixed map origin X in meters for the current 50 m global planning window.
+      origin_y: -25.0 # Fixed map origin Y in meters for the current 50 m global planning window.
       track_unknown_space: false # Whether unknown cells remain unknown instead of being treated as free. Common mapped global examples often use true.
-      plugins: ["obstacle_layer", "inflation_layer"] # Global costmap layers to load. This setup uses only live obstacles plus inflation.
+      plugins: ["geojson_layer", "obstacle_layer", "inflation_layer"] # Global costmap layers to load. Mission geometry is applied before live obstacles and inflation.
+
+      geojson_layer:
+        plugin: "amr_sweeper_mapping::Vda5050CostmapLayer" # Mission-backed layer implementation for VDA5050 working zones and no-go areas.
+        enabled: true # Enable the mission geometry layer.
+        costmap_yaml_path: "src/missions/global_costmap.yaml" # Runtime layer consumes the generated costmap artifact from the mission builder.
 
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer" # Obstacle marking/clearing layer implementation. This is Nav2's standard obstacle plugin.

@@ -7,6 +7,7 @@ ros2 launch amr_sweeper_layer_3_navigation_bringup amr_sweeper_layer_3_navigatio
 Dependencies to other AMR Sweeper packages:
 - `amr_sweeper_layer_3_navigation_bringup`
 - `amr_sweeper_localization`
+- `amr_sweeper_mapping`
 - `amr_sweeper_waypoint_follower`
 - `amr_sweeper_layer_1_hardware_bringup`
 - `amr_sweeper_layer_2_controllers_bringup`
