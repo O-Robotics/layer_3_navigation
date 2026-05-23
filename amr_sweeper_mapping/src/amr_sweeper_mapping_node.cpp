@@ -37,6 +37,16 @@ std::string trim(const std::string & value)
   return value.substr(begin, end - begin + 1U);
 }
 
+std::string to_lower(std::string value)
+{
+  std::transform(
+    value.begin(),
+    value.end(),
+    value.begin(),
+    [](unsigned char character) {return static_cast<char>(std::tolower(character));});
+  return value;
+}
+
 double yawForSegment(
   const geometry_msgs::msg::PoseStamped & current,
   const geometry_msgs::msg::PoseStamped & next)
@@ -425,7 +435,14 @@ void MappingNode::ensureMissionLoaded()
 
 void MappingNode::convertMissionRoute()
 {
-  if (!fromll_client_->wait_for_service(std::chrono::seconds(1))) {
+  const std::vector<MissionCoordinate> coordinates = loadRouteCoordinates(routeGeoJsonPath());
+  if (coordinates.empty()) {
+    RCLCPP_WARN(get_logger(), "Mission route contained no coordinates.");
+    return;
+  }
+
+  const bool use_local_frame = coordinates.front().use_local_frame;
+  if (!use_local_frame && !fromll_client_->wait_for_service(std::chrono::seconds(1))) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
@@ -435,14 +452,25 @@ void MappingNode::convertMissionRoute()
     return;
   }
 
-  const std::vector<MissionCoordinate> coordinates = loadRouteCoordinates(routeGeoJsonPath());
   mission_route_.clear();
   mission_route_.reserve(coordinates.size());
 
   for (const MissionCoordinate & coordinate : coordinates) {
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header.frame_id = frame_id_;
+    pose.pose.position.z = 0.0;
+    pose.pose.orientation.w = 1.0;
+
+    if (coordinate.use_local_frame) {
+      pose.pose.position.x = coordinate.x;
+      pose.pose.position.y = coordinate.y;
+      mission_route_.push_back(pose);
+      continue;
+    }
+
     auto request = std::make_shared<fusioncore_ros::srv::FromLL::Request>();
-    request->ll_point.longitude = coordinate.longitude;
-    request->ll_point.latitude = coordinate.latitude;
+    request->ll_point.longitude = coordinate.x;
+    request->ll_point.latitude = coordinate.y;
     request->ll_point.altitude = 0.0;
     auto future = fromll_client_->async_send_request(request);
     if (rclcpp::spin_until_future_complete(get_node_base_interface(), future, std::chrono::seconds(5)) !=
@@ -453,12 +481,8 @@ void MappingNode::convertMissionRoute()
     }
 
     const auto response = future.get();
-    geometry_msgs::msg::PoseStamped pose;
-    pose.header.frame_id = frame_id_;
     pose.pose.position.x = response->map_point.x;
     pose.pose.position.y = response->map_point.y;
-    pose.pose.position.z = 0.0;
-    pose.pose.orientation.w = 1.0;
     mission_route_.push_back(pose);
   }
 
@@ -468,8 +492,9 @@ void MappingNode::convertMissionRoute()
   publishRouteMarker();
   RCLCPP_INFO(
     get_logger(),
-    "Converted %zu mission waypoint(s) through FusionCore and prepared %zu Nav2 chunk(s).",
+    "Prepared %zu mission waypoint(s) in %s frame and %zu Nav2 chunk(s).",
     mission_route_.size(),
+    use_local_frame ? "local" : "geographic",
     mission_chunks_.size());
 }
 
@@ -598,11 +623,22 @@ std::vector<MissionCoordinate> MappingNode::loadRouteCoordinates(const std::stri
       continue;
     }
 
+    bool use_local_frame = false;
+    if (feature.contains("properties") && feature.at("properties").is_object()) {
+      const auto & properties = feature.at("properties");
+      if (properties.contains("coordinate_frame") && properties.at("coordinate_frame").is_string()) {
+        const std::string coordinate_frame =
+          to_lower(properties.at("coordinate_frame").get<std::string>());
+        use_local_frame = coordinate_frame == "odom" || coordinate_frame == "local";
+      }
+    }
+
     std::vector<MissionCoordinate> coordinates;
     for (const auto & coordinate : geometry.at("coordinates")) {
       coordinates.push_back(MissionCoordinate{
         coordinate.at(0).get<double>(),
-        coordinate.at(1).get<double>()});
+        coordinate.at(1).get<double>(),
+        use_local_frame});
     }
     if (coordinates.size() >= 2U) {
       return coordinates;

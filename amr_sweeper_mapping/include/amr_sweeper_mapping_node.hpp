@@ -19,8 +19,9 @@ namespace amr_sweeper_mapping
 
 struct MissionCoordinate
 {
-  double longitude;
-  double latitude;
+  double x;
+  double y;
+  bool use_local_frame{false};
 };
 
 struct LoadedCostmapArtifact

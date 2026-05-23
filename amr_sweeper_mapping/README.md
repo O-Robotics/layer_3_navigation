@@ -15,6 +15,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 ## Current Capabilities
 - Loads generated costmap artifacts from `/missions` into a Nav2 global costmap plugin.
 - Converts generated mission routes through FusionCore `/fromLL` and executes them with Nav2 `follow_waypoints`.
+- Supports mission route GeoJSON features tagged with `properties.coordinate_frame: "odom"` or `"local"` so small built-in sweep patterns can run directly in the local navigation frame.
 - Supervises the selected SLAM backend and the gaussian-world builder during runtime.
 - Reads the exact scheduler-selected mission execution directory passed through the FSM RUNNING launch path and loads that folder's `execution_context.json` so the selected mission route, mission window, and mission output directory follow the active mission.
 - Writes mission runtime outputs into a per-run subfolder under the selected mission folder.
