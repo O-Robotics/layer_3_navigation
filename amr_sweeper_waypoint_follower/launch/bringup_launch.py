@@ -20,7 +20,6 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -83,17 +82,6 @@ def generate_launch_description():
                 'use_respawn': use_respawn,
                 'log_level': log_level,
             }.items(),
-        ),
-        Node(
-            package='topic_tools',
-            executable='relay',
-            output='screen',
-            name='relay_cmd_vel',
-            namespace=namespace,
-            parameters=[{'use_sim_time': use_sim_time,
-                        'input_topic': 'cmd_vel',
-                        'output_topic': 'cmd_vel_navigation_input_wheels',
-                        'lazy': False}]
         ),
     ])
 

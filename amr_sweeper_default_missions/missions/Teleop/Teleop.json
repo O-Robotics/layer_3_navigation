@@ -1,0 +1,7 @@
+{
+  "name": "Teleop",
+  "mission_type": "builtin_teleop",
+  "execution_mode": "teleoperation",
+  "description": "Manual teleoperation mission that brings up only the hardware and controller stack for direct operator driving.",
+  "manual_drive_required": true
+}

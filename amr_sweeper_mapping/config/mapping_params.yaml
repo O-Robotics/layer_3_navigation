@@ -47,6 +47,7 @@
     mission_route_file: "src/missions/active_mission_path.geojson"
     mission_id: ""
     mission_output_directory: "src/missions"
+    actual_path_output_file: "src/missions/actual_path.geojson"
     mission_window_start: ""
     mission_window_end: ""
     slam_backend: "slam_toolbox"

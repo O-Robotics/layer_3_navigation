@@ -26,6 +26,8 @@ constexpr char kEnabledParam[] = "enabled";
 constexpr char kCostmapYamlPathParam[] = "costmap_yaml_path";
 constexpr char kDefaultCostmapYamlPath[] = "src/missions/global_costmap.yaml";
 constexpr char kDefaultMissionRoutePath[] = "src/missions/active_mission_path.geojson";
+constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
+constexpr char kManualMappingExecutionMode[] = "manual_mapping";
 
 std::string trim(const std::string & value)
 {
@@ -62,6 +64,48 @@ geometry_msgs::msg::Quaternion quaternionFromYaw(const double yaw)
   quaternion.z = std::sin(yaw * 0.5);
   quaternion.w = std::cos(yaw * 0.5);
   return quaternion;
+}
+
+struct MissionRuntimeProfile
+{
+  std::string mission_type;
+  std::string execution_mode{kFollowWaypointsExecutionMode};
+};
+
+MissionRuntimeProfile loadMissionRuntimeProfile(const std::string & mission_file_path)
+{
+  MissionRuntimeProfile profile;
+  if (mission_file_path.empty()) {
+    return profile;
+  }
+
+  std::ifstream input_stream(mission_file_path);
+  if (!input_stream.is_open()) {
+    return profile;
+  }
+
+  nlohmann::json document;
+  input_stream >> document;
+
+  if (document.contains("mission_type") && document.at("mission_type").is_string()) {
+    profile.mission_type = document.at("mission_type").get<std::string>();
+  }
+
+  if (document.contains("execution_mode") && document.at("execution_mode").is_string()) {
+    profile.execution_mode = to_lower(document.at("execution_mode").get<std::string>());
+    return profile;
+  }
+
+  const std::string mission_type = to_lower(profile.mission_type);
+  if (
+    mission_type == "builtin_manual_mapping" ||
+    mission_type == "record_map" ||
+    mission_type == "manual_mapping")
+  {
+    profile.execution_mode = kManualMappingExecutionMode;
+  }
+
+  return profile;
 }
 
 }  // namespace
@@ -193,7 +237,7 @@ LoadedCostmapArtifact Vda5050CostmapLayer::parseCostmapArtifact(const std::strin
 
   std::string magic;
   image_stream >> magic;
-  if (magic != "P5") {
+  if (magic != "P5" && magic != "P2") {
     throw std::runtime_error("Unsupported costmap image format: " + magic);
   }
 
@@ -201,8 +245,6 @@ LoadedCostmapArtifact Vda5050CostmapLayer::parseCostmapArtifact(const std::strin
   unsigned int height = 0U;
   int max_value = 0;
   image_stream >> width >> height >> max_value;
-  image_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-
   LoadedCostmapArtifact artifact;
   artifact.width_cells = width;
   artifact.height_cells = height;
@@ -211,12 +253,27 @@ LoadedCostmapArtifact Vda5050CostmapLayer::parseCostmapArtifact(const std::strin
   artifact.origin_y = origin_y;
   artifact.costs.resize(static_cast<std::size_t>(width) * height);
 
+  if (magic == "P5") {
+    image_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
+      for (unsigned int col = 0; col < width; ++col) {
+        unsigned char pixel = 0U;
+        image_stream.read(reinterpret_cast<char *>(&pixel), 1);
+        const std::size_t index = static_cast<std::size_t>(row) * width + col;
+        artifact.costs[index] = static_cast<unsigned char>(255U - pixel);
+      }
+    }
+    return artifact;
+  }
+
   for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
     for (unsigned int col = 0; col < width; ++col) {
-      unsigned char pixel = 0U;
-      image_stream.read(reinterpret_cast<char *>(&pixel), 1);
+      int pixel_value = 0;
+      image_stream >> pixel_value;
+      const auto clamped_value = static_cast<unsigned char>(
+        std::clamp(pixel_value, 0, max_value) * 255 / std::max(1, max_value));
       const std::size_t index = static_cast<std::size_t>(row) * width + col;
-      artifact.costs[index] = static_cast<unsigned char>(255U - pixel);
+      artifact.costs[index] = static_cast<unsigned char>(255U - clamped_value);
     }
   }
 
@@ -263,6 +320,7 @@ MappingNode::MappingNode()
   declare_parameter("mission_route_file", std::string(kDefaultMissionRoutePath));
   declare_parameter("mission_id", std::string(""));
   declare_parameter("mission_output_directory", std::string("src/missions"));
+  declare_parameter("actual_path_output_file", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
   declare_parameter("mission_window_end", std::string(""));
   declare_parameter("slam_backend", std::string("slam_toolbox"));
@@ -275,20 +333,29 @@ MappingNode::MappingNode()
   declare_parameter("status_period_seconds", 2.0);
   declare_parameter("mission_tick_period_seconds", 1.0);
   declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
+  declare_parameter("end_mission_service", std::string("end_mission"));
 
   mission_file_ = get_parameter("mission_file").as_string();
+  const MissionRuntimeProfile mission_profile = loadMissionRuntimeProfile(resolveRuntimePath(mission_file_));
+  mission_type_ = mission_profile.mission_type;
+  execution_mode_ = mission_profile.execution_mode;
+  manual_mapping_mode_ = execution_mode_ == kManualMappingExecutionMode;
   mission_route_file_ = get_parameter("mission_route_file").as_string();
   mission_id_ = get_parameter("mission_id").as_string();
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
+  actual_path_output_file_ = get_parameter("actual_path_output_file").as_string();
   mission_window_start_ = get_parameter("mission_window_start").as_string();
   mission_window_end_ = get_parameter("mission_window_end").as_string();
   slam_backend_ = get_parameter("slam_backend").as_string();
   gaussian_mode_ = get_parameter("gaussian_mode").as_string();
   frame_id_ = get_parameter("frame_id").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
+  end_mission_service_name_ = get_parameter("end_mission_service").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
+  mission_loaded_ = manual_mapping_mode_;
+  mission_converted_ = manual_mapping_mode_;
 
   slam_status_subscription_ = create_subscription<std_msgs::msg::String>(
     "slam/status",
@@ -298,12 +365,18 @@ MappingNode::MappingNode()
     "gaussian/status",
     10,
     std::bind(&MappingNode::handleGaussianStatus, this, std::placeholders::_1));
+  odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
+    "odometry/fused",
+    50,
+    std::bind(&MappingNode::handleOdometry, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
   route_marker_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
     "mapping/route_marker",
     rclcpp::QoS(1).reliable().transient_local());
 
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(fromll_service_name_);
+  end_mission_client_ =
+    create_client<amr_sweeper_mission_executor::srv::EndMission>(end_mission_service_name_);
   follow_waypoints_client_ = rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(
     this,
     get_parameter("follow_waypoints_action").as_string());
@@ -319,12 +392,13 @@ MappingNode::MappingNode()
 
   RCLCPP_INFO(
     get_logger(),
-    "Mapping coordinator ready; mission=%s route=%s output_dir=%s slam_backend=%s gaussian_mode=%s",
+    "Mapping coordinator ready; mission=%s route=%s output_dir=%s slam_backend=%s gaussian_mode=%s execution_mode=%s",
     mission_file_.c_str(),
     mission_route_file_.c_str(),
     mission_output_directory_.c_str(),
     slam_backend_.c_str(),
-    gaussian_mode_.c_str());
+    gaussian_mode_.c_str(),
+    execution_mode_.c_str());
 }
 
 void MappingNode::handleSlamStatus(const std_msgs::msg::String::SharedPtr message)
@@ -337,11 +411,29 @@ void MappingNode::handleGaussianStatus(const std_msgs::msg::String::SharedPtr me
   last_gaussian_status_ = message->data;
 }
 
+void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message)
+{
+  const auto & position = message->pose.pose.position;
+  if (!traveled_path_points_.empty()) {
+    const auto & last = traveled_path_points_.back();
+    const double dx = position.x - last.x;
+    const double dy = position.y - last.y;
+    if ((dx * dx + dy * dy) < 0.01) {
+      return;
+    }
+  }
+
+  traveled_path_points_.push_back(position);
+  writeActualPathArtifact();
+}
+
 void MappingNode::publishCoordinatorStatus()
 {
   std_msgs::msg::String message;
   message.data =
     "amr_sweeper_mapping_node mission=" + mission_file_ +
+    "; mission_type=" + mission_type_ +
+    "; execution_mode=" + execution_mode_ +
     "; route=" + mission_route_file_ +
     "; mission_id=" + mission_id_ +
     "; mission_output_directory=" + mission_output_directory_ +
@@ -370,12 +462,16 @@ void MappingNode::writeMissionSessionMetadata() const
   nlohmann::json document{
     {"mission_id", mission_id_},
     {"mission_file", mission_file_},
+    {"mission_type", mission_type_},
+    {"execution_mode", execution_mode_},
     {"mission_route_file", mission_route_file_},
     {"mission_window_start", mission_window_start_},
     {"mission_window_end", mission_window_end_},
     {"slam_backend", slam_backend_},
     {"gaussian_mode", gaussian_mode_},
-    {"frame_id", frame_id_}};
+    {"frame_id", frame_id_},
+    {"manual_drive_required", manual_mapping_mode_},
+    {"actual_path_output_file", actual_path_output_file_}};
 
   std::ofstream output_stream(std::filesystem::path(mission_output_directory_) / "mapping_session.json");
   if (!output_stream.is_open()) {
@@ -388,9 +484,51 @@ void MappingNode::writeMissionSessionMetadata() const
   output_stream << document.dump(2) << "\n";
 }
 
+void MappingNode::writeActualPathArtifact() const
+{
+  if (actual_path_output_file_.empty()) {
+    return;
+  }
+
+  std::filesystem::create_directories(std::filesystem::path(actual_path_output_file_).parent_path());
+  nlohmann::json coordinates = nlohmann::json::array();
+  for (const auto & point : traveled_path_points_) {
+    coordinates.push_back({point.x, point.y});
+  }
+
+  nlohmann::json document{
+    {"type", "FeatureCollection"},
+    {"features", nlohmann::json::array({
+      {
+        {"type", "Feature"},
+        {"properties", {{"name", "actual_path"}, {"coordinate_frame", "odom"}}},
+        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
+      }
+    })}
+  };
+
+  std::ofstream output_stream(actual_path_output_file_, std::ios::trunc);
+  if (!output_stream.is_open()) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to write actual path artifact into %s",
+      actual_path_output_file_.c_str());
+    return;
+  }
+  output_stream << document.dump(2) << "\n";
+}
+
 void MappingNode::tickMissionExecution()
 {
   if (!auto_start_mission_ || waiting_for_goal_result_) {
+    return;
+  }
+
+  tryRequestMissionEnd();
+
+  if (manual_mapping_mode_) {
+    mission_loaded_ = true;
+    mission_converted_ = true;
     return;
   }
 
@@ -504,6 +642,9 @@ void MappingNode::startNextMissionChunk()
     mission_active_ = false;
     mission_completed_ = true;
     RCLCPP_INFO(get_logger(), "Mission waypoint execution completed.");
+    if (!repeat_mission_) {
+      markMissionTerminal("completed", "autonomous mission completed");
+    }
     return;
   }
 
@@ -546,7 +687,9 @@ void MappingNode::handleGoalResponse(
   if (!goal_handle) {
     waiting_for_goal_result_ = false;
     mission_active_ = false;
+    mission_completed_ = true;
     RCLCPP_ERROR(get_logger(), "Mission chunk was rejected by Nav2.");
+    markMissionTerminal("aborted", "Nav2 rejected the mission chunk");
   }
 }
 
@@ -557,7 +700,11 @@ void MappingNode::handleGoalResult(
   mission_active_ = false;
 
   if (result.code != rclcpp_action::ResultCode::SUCCEEDED) {
+    mission_completed_ = true;
     RCLCPP_ERROR(get_logger(), "Mission chunk failed with result code %d", static_cast<int>(result.code));
+    markMissionTerminal(
+      "aborted",
+      "Nav2 follow_waypoints ended with result code " + std::to_string(static_cast<int>(result.code)));
     return;
   }
 
@@ -565,7 +712,58 @@ void MappingNode::handleGoalResult(
   if (active_chunk_index_ >= mission_chunks_.size()) {
     mission_completed_ = true;
     RCLCPP_INFO(get_logger(), "All mission chunks completed successfully.");
+    if (!repeat_mission_) {
+      markMissionTerminal("completed", "autonomous mission completed");
+    }
   }
+}
+
+void MappingNode::tryRequestMissionEnd()
+{
+  if (!mission_end_pending_ || mission_end_requested_ || pending_end_reason_.empty()) {
+    return;
+  }
+
+  if (!end_mission_client_->wait_for_service(std::chrono::seconds(1))) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for mission executor end_mission service %s",
+      end_mission_service_name_.c_str());
+    return;
+  }
+
+  auto request = std::make_shared<amr_sweeper_mission_executor::srv::EndMission::Request>();
+  request->mission_id = mission_id_;
+  request->reason = pending_end_reason_;
+  request->outcome = pending_end_outcome_;
+  request->requester = "amr_sweeper_mapping_node";
+  request->priority = 0U;
+  request->force = false;
+  request->request_idling = true;
+
+  end_mission_client_->async_send_request(
+    request,
+    [this](rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedFuture future) {
+      try {
+        const auto response = future.get();
+        if (!response->success) {
+          RCLCPP_WARN(
+            get_logger(),
+            "Mission executor rejected mission end request: %s",
+            response->message.c_str());
+          mission_end_requested_ = false;
+          return;
+        }
+        mission_end_pending_ = false;
+        RCLCPP_INFO(get_logger(), "Mission executor finalized mission: %s", response->message.c_str());
+      } catch (const std::exception & exception) {
+        RCLCPP_WARN(get_logger(), "Mission end request failed: %s", exception.what());
+        mission_end_requested_ = false;
+      }
+    });
+  mission_end_requested_ = true;
 }
 
 void MappingNode::publishRouteMarker() const
@@ -595,8 +793,13 @@ void MappingNode::publishRouteMarker() const
 
 std::string MappingNode::routeGeoJsonPath() const
 {
+  return resolveRuntimePath(mission_route_file_);
+}
+
+std::string MappingNode::resolveRuntimePath(const std::string & configured_path) const
+{
   namespace fs = std::filesystem;
-  const fs::path configured(mission_route_file_);
+  const fs::path configured(configured_path);
   if (configured.is_absolute()) {
     return configured.string();
   }
@@ -685,6 +888,16 @@ std::vector<std::vector<geometry_msgs::msg::PoseStamped>> MappingNode::chunkRout
   }
 
   return chunks;
+}
+
+void MappingNode::markMissionTerminal(const std::string & outcome, const std::string & reason)
+{
+  if (repeat_mission_) {
+    return;
+  }
+  pending_end_outcome_ = outcome;
+  pending_end_reason_ = reason;
+  mission_end_pending_ = true;
 }
 
 }  // namespace amr_sweeper_mapping

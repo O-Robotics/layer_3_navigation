@@ -1,0 +1,20 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "teleop_reference",
+        "source": "builtin_teleop",
+        "coordinate_frame": "odom"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [0.0, 0.0],
+          [0.1, 0.0]
+        ]
+      }
+    }
+  ]
+}

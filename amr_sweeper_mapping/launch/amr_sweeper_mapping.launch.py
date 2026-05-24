@@ -8,6 +8,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -40,7 +41,7 @@ def _resolve_execution_context(missions_directory, execution_pointer_file, missi
 
 def _build_nodes(context):
     namespace = LaunchConfiguration("namespace").perform(context)
-    use_sim_time = LaunchConfiguration("use_sim_time").perform(context)
+    use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
     params_file = LaunchConfiguration("params_file").perform(context)
     missions_directory = LaunchConfiguration("missions_directory").perform(context)
     execution_pointer_file = LaunchConfiguration("execution_pointer_file").perform(context)
@@ -60,6 +61,14 @@ def _build_nodes(context):
     mission_run_directory = mission_context.get("mission_run_directory", missions_directory)
     mission_window_start = mission_context.get("mission_window_start", "")
     mission_window_end = mission_context.get("mission_window_end", "")
+    actual_path_output_file = mission_context.get(
+        "actual_path_file",
+        str(Path(mission_run_directory) / "actual_path.geojson"),
+    )
+    gaussian_output_directory = mission_context.get(
+        "gaussian_output_directory",
+        str(Path(mission_run_directory) / "gaussian"),
+    )
 
     gaussian_representation_name = (
         f"{mission_id}_gaussian_map" if mission_id else "global_gaussian_map"
@@ -71,8 +80,10 @@ def _build_nodes(context):
         "mission_route_file": mission_route_file,
         "mission_id": mission_id,
         "mission_output_directory": mission_run_directory,
+        "actual_path_output_file": actual_path_output_file,
         "mission_window_start": mission_window_start,
         "mission_window_end": mission_window_end,
+        "end_mission_service": "end_mission",
     }
 
     return [
@@ -94,7 +105,7 @@ def _build_nodes(context):
                 params_file,
                 {
                     "use_sim_time": use_sim_time,
-                    "output_directory": mission_run_directory,
+                    "output_directory": gaussian_output_directory,
                     "representation_name": gaussian_representation_name,
                 },
             ],

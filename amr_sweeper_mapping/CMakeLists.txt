@@ -6,8 +6,10 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(amr_sweeper_mission_executor REQUIRED)
 find_package(fusioncore_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
@@ -33,8 +35,10 @@ target_include_directories(${PROJECT_NAME}
     $<INSTALL_INTERFACE:include>
 )
 ament_target_dependencies(${PROJECT_NAME}
+  amr_sweeper_mission_executor
   fusioncore_ros
   geometry_msgs
+  nav_msgs
   nav2_costmap_2d
   nav2_msgs
   pluginlib
@@ -89,8 +93,10 @@ target_include_directories(amr_sweeper_mapping_node
 )
 ament_target_dependencies(
   amr_sweeper_mapping_node
+  amr_sweeper_mission_executor
   fusioncore_ros
   geometry_msgs
+  nav_msgs
   nav2_costmap_2d
   nav2_msgs
   pluginlib
@@ -128,8 +134,10 @@ ament_export_include_directories(include)
 ament_export_libraries(${PROJECT_NAME})
 ament_export_targets(export_${PROJECT_NAME})
 ament_export_dependencies(
+  amr_sweeper_mission_executor
   nav2_costmap_2d
   geometry_msgs
+  nav_msgs
   nav2_msgs
   pluginlib
   rclcpp
