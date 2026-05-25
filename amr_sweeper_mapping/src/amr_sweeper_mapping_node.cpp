@@ -79,13 +79,23 @@ MissionRuntimeProfile loadMissionRuntimeProfile(const std::string & mission_file
     return profile;
   }
 
+  const std::filesystem::path mission_path(mission_file_path);
+  std::error_code filesystem_error;
+  if (!std::filesystem::is_regular_file(mission_path, filesystem_error)) {
+    return profile;
+  }
+
   std::ifstream input_stream(mission_file_path);
   if (!input_stream.is_open()) {
     return profile;
   }
 
   nlohmann::json document;
-  input_stream >> document;
+  try {
+    input_stream >> document;
+  } catch (const std::exception &) {
+    return profile;
+  }
 
   if (document.contains("mission_type") && document.at("mission_type").is_string()) {
     profile.mission_type = document.at("mission_type").get<std::string>();
