@@ -1,5 +1,5 @@
-#ifndef AMR_SWEEPER_VISUAL_ODOMETRY__MONOCULAR_VISUAL_ODOMETRY_NODE_HPP_
-#define AMR_SWEEPER_VISUAL_ODOMETRY__MONOCULAR_VISUAL_ODOMETRY_NODE_HPP_
+#ifndef AMR_SWEEPER_VISUAL_ODOMETRY__VISUAL_ODOMETRY_NODE_HPP_
+#define AMR_SWEEPER_VISUAL_ODOMETRY__VISUAL_ODOMETRY_NODE_HPP_
 
 #include <array>
 #include <deque>
@@ -8,12 +8,14 @@
 #include <string>
 #include <vector>
 
+#include <Eigen/Dense>
 #include <opencv2/core.hpp>
 
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_ros/buffer.h>
@@ -23,10 +25,10 @@
 namespace amr_sweeper_visual_odometry
 {
 
-class MonocularVisualOdometryNode : public rclcpp::Node
+class VisualOdometryNode : public rclcpp::Node
 {
 public:
-  explicit MonocularVisualOdometryNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
+  explicit VisualOdometryNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
 private:
   struct TrackingResult
@@ -69,12 +71,20 @@ private:
     cv::Mat previous_gray_image;
     std::vector<cv::Point2f> previous_points;
     rclcpp::Time previous_image_stamp{0, 0, RCL_ROS_TIME};
-    nav_msgs::msg::Odometry previous_scale_reference;
-    bool have_previous_scale_reference{false};
+    bool have_previous_motion_reference{false};
+    tf2::Vector3 previous_motion_reference_position{0.0, 0.0, 0.0};
+    double previous_motion_reference_yaw_rad{0.0};
     bool extrinsics_resolved{false};
     tf2::Transform base_to_camera{tf2::Transform::getIdentity()};
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription;
+  };
+
+  struct MotionReferenceSample
+  {
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+    tf2::Vector3 planar_position{0.0, 0.0, 0.0};
+    double yaw_rad{0.0};
   };
 
   struct PendingEstimate
@@ -92,22 +102,23 @@ private:
     const std::shared_ptr<CameraState> & camera,
     const sensor_msgs::msg::Image::SharedPtr message);
   void wheelOdometryCallback(const nav_msgs::msg::Odometry::SharedPtr message);
+  void imuCallback(const sensor_msgs::msg::Imu::SharedPtr message);
 
   void initializeFromFrame(
     const std::shared_ptr<CameraState> & camera,
     const cv::Mat & gray_image,
-    const nav_msgs::msg::Odometry & scale_reference,
+    const MotionReferenceSample & motion_reference,
     const rclcpp::Time & stamp);
   [[nodiscard]] TrackingResult estimateMotion(
     const std::shared_ptr<CameraState> & camera,
     const cv::Mat & current_gray_image,
-    const nav_msgs::msg::Odometry & current_scale_reference,
+    const MotionReferenceSample & current_motion_reference,
     const rclcpp::Time & stamp);
   [[nodiscard]] std::vector<cv::Point2f> detectFeatures(const cv::Mat & gray_image) const;
   [[nodiscard]] std::vector<cv::Point2f> undistortPoints(
     const CameraCalibration & calibration,
     const std::vector<cv::Point2f> & points) const;
-  [[nodiscard]] std::optional<nav_msgs::msg::Odometry> lookupWheelOdom(
+  [[nodiscard]] std::optional<MotionReferenceSample> lookupMotionReference(
     const rclcpp::Time & stamp) const;
   bool resolveCameraExtrinsics(
     const std::shared_ptr<CameraState> & camera,
@@ -125,18 +136,22 @@ private:
     double dt_seconds);
   void publishStatus(const std::string & status_message) const;
   [[nodiscard]] double trackingConfidence(const TrackingResult & result) const;
+  [[nodiscard]] Eigen::Matrix3d makeMeasurementCovariance(const TrackingResult & result) const;
 
   static double normalizeAngle(double angle_rad);
   static double yawFromQuaternion(const geometry_msgs::msg::Quaternion & quaternion);
   static double planarDistance(
     const geometry_msgs::msg::Point & lhs,
     const geometry_msgs::msg::Point & rhs);
+  static double planarDistance(const tf2::Vector3 & lhs, const tf2::Vector3 & rhs);
   static tf2::Transform poseToTransform(const geometry_msgs::msg::Pose & pose);
   static geometry_msgs::msg::Pose transformToPose(const tf2::Transform & transform);
   [[nodiscard]] std::array<double, 36> makePoseCovariance(const TrackingResult & result) const;
   [[nodiscard]] std::array<double, 36> makeTwistCovariance(const TrackingResult & result) const;
 
+  std::string motion_reference_mode_;
   std::string wheel_odom_topic_;
+  std::string imu_topic_;
   std::string odom_topic_;
   std::string base_frame_;
   std::string odom_frame_;
@@ -158,8 +173,8 @@ private:
   double ransac_confidence_{0.999};
   double ransac_reprojection_threshold_px_{1.5};
   double min_seconds_between_keyframes_{0.05};
-  double wheel_lookup_tolerance_seconds_{0.25};
-  double wheel_history_seconds_{5.0};
+  double motion_reference_lookup_tolerance_seconds_{0.25};
+  double motion_reference_history_seconds_{5.0};
   double min_scale_translation_meters_{0.005};
   double camera_fusion_tolerance_seconds_{0.03};
   double pose_sigma_floor_m_{0.03};
@@ -167,15 +182,26 @@ private:
   double yaw_sigma_floor_rad_{0.02};
   double yaw_sigma_ceiling_rad_{0.35};
   int min_cameras_per_estimate_{1};
+  bool use_motion_reference_yaw_{true};
+  double imu_max_dt_seconds_{0.1};
+  double imu_planar_accel_deadband_mps2_{0.15};
+  double imu_velocity_damping_per_second_{1.5};
+  double imu_stationary_angular_velocity_threshold_rad_s_{0.05};
+  std::string fusion_method_{"ekf"};
 
   bool have_pose_estimate_{false};
   tf2::Transform odom_to_base_{tf2::Transform::getIdentity()};
+  bool have_previous_imu_sample_{false};
+  rclcpp::Time previous_imu_stamp_{0, 0, RCL_ROS_TIME};
+  tf2::Vector3 imu_planar_velocity_{0.0, 0.0, 0.0};
+  tf2::Vector3 imu_planar_position_{0.0, 0.0, 0.0};
 
   std::vector<std::shared_ptr<CameraState>> cameras_;
-  std::deque<nav_msgs::msg::Odometry> wheel_odom_history_;
+  std::deque<MotionReferenceSample> motion_reference_history_;
   std::deque<PendingEstimate> pending_estimates_;
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr wheel_odom_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
 
@@ -186,4 +212,4 @@ private:
 
 }  // namespace amr_sweeper_visual_odometry
 
-#endif  // AMR_SWEEPER_VISUAL_ODOMETRY__MONOCULAR_VISUAL_ODOMETRY_NODE_HPP_
+#endif  // AMR_SWEEPER_VISUAL_ODOMETRY__VISUAL_ODOMETRY_NODE_HPP_

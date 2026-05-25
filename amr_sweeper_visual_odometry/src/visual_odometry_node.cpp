@@ -1,8 +1,9 @@
 // Copyright (c) 2026 O-Robotics
 
-#include "monocular_visual_odometry_node.hpp"
+#include "visual_odometry_node.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -10,10 +11,11 @@
 #include <stdexcept>
 #include <utility>
 
+#include <Eigen/Dense>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
 
-#include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -28,10 +30,74 @@ namespace
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kLargeVariance = 1.0e6;
 
+cv::Mat convertRosImageToMono8(const sensor_msgs::msg::Image & message)
+{
+  const auto & encoding = message.encoding;
+
+  auto require_step = [&message](std::size_t min_step_bytes) {
+      if (message.step < min_step_bytes) {
+        throw std::runtime_error("Image step is smaller than expected for its encoding.");
+      }
+    };
+
+  if (encoding == sensor_msgs::image_encodings::MONO8) {
+    require_step(message.width);
+    cv::Mat mono(
+      static_cast<int>(message.height),
+      static_cast<int>(message.width),
+      CV_8UC1,
+      const_cast<unsigned char *>(message.data.data()),
+      message.step);
+    return mono.clone();
+  }
+
+  if (encoding == sensor_msgs::image_encodings::MONO16) {
+    require_step(message.width * sizeof(std::uint16_t));
+    cv::Mat mono16(
+      static_cast<int>(message.height),
+      static_cast<int>(message.width),
+      CV_16UC1,
+      const_cast<unsigned char *>(message.data.data()),
+      message.step);
+    cv::Mat mono8;
+    mono16.convertTo(mono8, CV_8UC1, 1.0 / 256.0);
+    return mono8;
+  }
+
+  auto convert_color = [&message](int cv_type, int conversion_code) {
+      const int channels = CV_MAT_CN(cv_type);
+      require_step(static_cast<std::size_t>(message.width) * static_cast<std::size_t>(channels));
+      cv::Mat color(
+        static_cast<int>(message.height),
+        static_cast<int>(message.width),
+        cv_type,
+        const_cast<unsigned char *>(message.data.data()),
+        message.step);
+      cv::Mat mono8;
+      cv::cvtColor(color, mono8, conversion_code);
+      return mono8;
+    };
+
+  if (encoding == sensor_msgs::image_encodings::BGR8) {
+    return convert_color(CV_8UC3, cv::COLOR_BGR2GRAY);
+  }
+  if (encoding == sensor_msgs::image_encodings::RGB8) {
+    return convert_color(CV_8UC3, cv::COLOR_RGB2GRAY);
+  }
+  if (encoding == sensor_msgs::image_encodings::BGRA8) {
+    return convert_color(CV_8UC4, cv::COLOR_BGRA2GRAY);
+  }
+  if (encoding == sensor_msgs::image_encodings::RGBA8) {
+    return convert_color(CV_8UC4, cv::COLOR_RGBA2GRAY);
+  }
+
+  throw std::runtime_error("Unsupported image encoding for visual odometry: " + encoding);
+}
+
 }  // namespace
 
-MonocularVisualOdometryNode::MonocularVisualOdometryNode(const rclcpp::NodeOptions & options)
-: Node("monocular_visual_odometry", options),
+VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions & options)
+: Node("visual_odometry_node", options),
   tf_buffer_(get_clock()),
   tf_listener_(tf_buffer_)
 {
@@ -41,7 +107,9 @@ MonocularVisualOdometryNode::MonocularVisualOdometryNode(const rclcpp::NodeOptio
   legacy_camera_info_topic_ = declare_parameter(
     "camera_info_topic",
     std::string("usb_cameras/tools_camera/tools_camera_info"));
+  motion_reference_mode_ = declare_parameter("motion_reference.mode", std::string("imu"));
   wheel_odom_topic_ = declare_parameter("wheel_odom_topic", std::string("diff_cont/odom"));
+  imu_topic_ = declare_parameter("motion_reference.imu_topic", std::string("imu/data_raw"));
   odom_topic_ = declare_parameter("odom_topic", std::string("visual_odometry/odom"));
   base_frame_ = declare_parameter("base_frame", std::string("base_footprint"));
   odom_frame_ = declare_parameter("odom_frame", std::string("odom"));
@@ -60,8 +128,10 @@ MonocularVisualOdometryNode::MonocularVisualOdometryNode(const rclcpp::NodeOptio
   ransac_confidence_ = declare_parameter("ransac_confidence", 0.999);
   ransac_reprojection_threshold_px_ = declare_parameter("ransac_reprojection_threshold_px", 1.5);
   min_seconds_between_keyframes_ = declare_parameter("min_seconds_between_keyframes", 0.05);
-  wheel_lookup_tolerance_seconds_ = declare_parameter("wheel_lookup_tolerance_seconds", 0.25);
-  wheel_history_seconds_ = declare_parameter("wheel_history_seconds", 5.0);
+  motion_reference_lookup_tolerance_seconds_ = declare_parameter(
+    "motion_reference.lookup_tolerance_seconds", 0.25);
+  motion_reference_history_seconds_ = declare_parameter(
+    "motion_reference.history_seconds", 5.0);
   min_scale_translation_meters_ = declare_parameter("min_scale_translation_meters", 0.005);
   camera_fusion_tolerance_seconds_ = declare_parameter("camera_fusion_tolerance_seconds", 0.03);
   pose_sigma_floor_m_ = declare_parameter("pose_sigma_floor_m", 0.03);
@@ -69,6 +139,15 @@ MonocularVisualOdometryNode::MonocularVisualOdometryNode(const rclcpp::NodeOptio
   yaw_sigma_floor_rad_ = declare_parameter("yaw_sigma_floor_rad", 0.02);
   yaw_sigma_ceiling_rad_ = declare_parameter("yaw_sigma_ceiling_rad", 0.35);
   min_cameras_per_estimate_ = declare_parameter("min_cameras_per_estimate", 1);
+  use_motion_reference_yaw_ = declare_parameter("motion_reference.use_yaw", true);
+  imu_max_dt_seconds_ = declare_parameter("motion_reference.imu_max_dt_seconds", 0.1);
+  imu_planar_accel_deadband_mps2_ = declare_parameter(
+    "motion_reference.imu_planar_accel_deadband_mps2", 0.15);
+  imu_velocity_damping_per_second_ = declare_parameter(
+    "motion_reference.imu_velocity_damping_per_second", 1.5);
+  imu_stationary_angular_velocity_threshold_rad_s_ = declare_parameter(
+    "motion_reference.imu_stationary_angular_velocity_threshold_rad_s", 0.05);
+  fusion_method_ = declare_parameter("fusion_method", std::string("ekf"));
 
   if (publish_tf_) {
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -76,10 +155,21 @@ MonocularVisualOdometryNode::MonocularVisualOdometryNode(const rclcpp::NodeOptio
 
   configureCameras();
 
-  wheel_odom_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
-    wheel_odom_topic_,
-    rclcpp::QoS(50),
-    std::bind(&MonocularVisualOdometryNode::wheelOdometryCallback, this, std::placeholders::_1));
+  if (motion_reference_mode_ == "wheel") {
+    wheel_odom_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
+      wheel_odom_topic_,
+      rclcpp::QoS(50),
+      std::bind(&VisualOdometryNode::wheelOdometryCallback, this, std::placeholders::_1));
+  } else if (motion_reference_mode_ == "imu") {
+    imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
+      imu_topic_,
+      rclcpp::SensorDataQoS(),
+      std::bind(&VisualOdometryNode::imuCallback, this, std::placeholders::_1));
+  } else {
+    throw std::runtime_error(
+            "Unsupported motion_reference.mode '" + motion_reference_mode_ +
+            "'. Expected 'imu' or 'wheel'.");
+  }
 
   odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
   status_publisher_ = create_publisher<std_msgs::msg::String>("visual_odometry/status", rclcpp::QoS(10));
@@ -94,16 +184,27 @@ MonocularVisualOdometryNode::MonocularVisualOdometryNode(const rclcpp::NodeOptio
 
   RCLCPP_INFO(
     get_logger(),
-    "Monocular visual odometry configured with cameras=[%s] wheel_odom=%s output=%s",
+    "Monocular visual odometry configured with cameras=[%s] motion_reference_mode=%s output=%s",
     camera_summary.str().c_str(),
-    wheel_odom_topic_.c_str(),
+    motion_reference_mode_.c_str(),
     odom_topic_.c_str());
 }
 
-void MonocularVisualOdometryNode::configureCameras()
+void VisualOdometryNode::configureCameras()
 {
-  const auto configured_camera_names =
+  auto configured_camera_names =
     declare_parameter("camera_names", std::vector<std::string>{});
+
+  if (configured_camera_names.empty()) {
+    configured_camera_names = {
+      "tool_camera",
+      "depth_camera",
+      "front_left_camera",
+      "front_right_camera",
+      "rear_left_camera",
+      "rear_right_camera",
+    };
+  }
 
   auto add_camera = [this](
     const std::string & name,
@@ -132,17 +233,14 @@ void MonocularVisualOdometryNode::configureCameras()
       cameras_.push_back(std::move(camera));
     };
 
-  if (configured_camera_names.empty()) {
-    add_camera(
-      "tool_camera",
-      legacy_camera_image_topic_,
-      legacy_camera_info_topic_,
-      legacy_camera_frame_override_);
-    return;
-  }
-
   for (const auto & camera_name : configured_camera_names) {
     const std::string prefix = "cameras." + camera_name + ".";
+    const bool enabled = declare_parameter(
+      prefix + "enabled",
+      camera_name == "tool_camera" || camera_name == "depth_camera");
+    if (!enabled) {
+      continue;
+    }
     const std::string image_topic = declare_parameter(prefix + "image_topic", std::string(""));
     const std::string camera_info_topic =
       declare_parameter(prefix + "camera_info_topic", std::string(""));
@@ -165,7 +263,7 @@ void MonocularVisualOdometryNode::configureCameras()
   }
 }
 
-void MonocularVisualOdometryNode::cameraInfoCallback(
+void VisualOdometryNode::cameraInfoCallback(
   const std::shared_ptr<CameraState> & camera,
   const sensor_msgs::msg::CameraInfo::SharedPtr message)
 {
@@ -194,22 +292,100 @@ void MonocularVisualOdometryNode::cameraInfoCallback(
   }
 }
 
-void MonocularVisualOdometryNode::wheelOdometryCallback(
+void VisualOdometryNode::wheelOdometryCallback(
   const nav_msgs::msg::Odometry::SharedPtr message)
 {
-  wheel_odom_history_.push_back(*message);
+  MotionReferenceSample sample;
+  sample.stamp = rclcpp::Time(message->header.stamp);
+  sample.planar_position = tf2::Vector3(
+    message->pose.pose.position.x,
+    message->pose.pose.position.y,
+    0.0);
+  sample.yaw_rad = yawFromQuaternion(message->pose.pose.orientation);
 
-  const rclcpp::Time newest_stamp(message->header.stamp);
-  while (!wheel_odom_history_.empty()) {
-    const rclcpp::Time oldest_stamp(wheel_odom_history_.front().header.stamp);
-    if ((newest_stamp - oldest_stamp).seconds() <= wheel_history_seconds_) {
+  motion_reference_history_.push_back(sample);
+
+  const rclcpp::Time newest_stamp = sample.stamp;
+  while (!motion_reference_history_.empty()) {
+    const rclcpp::Time oldest_stamp = motion_reference_history_.front().stamp;
+    if ((newest_stamp - oldest_stamp).seconds() <= motion_reference_history_seconds_) {
       break;
     }
-    wheel_odom_history_.pop_front();
+    motion_reference_history_.pop_front();
   }
 }
 
-void MonocularVisualOdometryNode::imageCallback(
+void VisualOdometryNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr message)
+{
+  const rclcpp::Time stamp(message->header.stamp);
+  if (stamp.nanoseconds() == 0) {
+    return;
+  }
+
+  const double yaw_rad = yawFromQuaternion(message->orientation);
+
+  if (!have_previous_imu_sample_) {
+    previous_imu_stamp_ = stamp;
+    have_previous_imu_sample_ = true;
+
+    MotionReferenceSample sample;
+    sample.stamp = stamp;
+    sample.planar_position = imu_planar_position_;
+    sample.yaw_rad = yaw_rad;
+    motion_reference_history_.push_back(sample);
+    return;
+  }
+
+  double dt_seconds = (stamp - previous_imu_stamp_).seconds();
+  previous_imu_stamp_ = stamp;
+  if (dt_seconds <= 0.0) {
+    return;
+  }
+  dt_seconds = std::min(dt_seconds, imu_max_dt_seconds_);
+
+  tf2::Quaternion orientation;
+  tf2::fromMsg(message->orientation, orientation);
+  const tf2::Vector3 accel_body(
+    message->linear_acceleration.x,
+    message->linear_acceleration.y,
+    message->linear_acceleration.z);
+  tf2::Vector3 accel_world = tf2::quatRotate(orientation, accel_body);
+  accel_world -= tf2::Vector3(0.0, 0.0, 9.8);
+
+  tf2::Vector3 planar_accel(accel_world.x(), accel_world.y(), 0.0);
+  if (planar_accel.length() < imu_planar_accel_deadband_mps2_) {
+    planar_accel = tf2::Vector3(0.0, 0.0, 0.0);
+  }
+
+  if (std::abs(message->angular_velocity.z) < imu_stationary_angular_velocity_threshold_rad_s_ &&
+    planar_accel.length2() == 0.0)
+  {
+    imu_planar_velocity_.setValue(0.0, 0.0, 0.0);
+  } else {
+    imu_planar_velocity_ += planar_accel * dt_seconds;
+    const double damping = std::exp(-imu_velocity_damping_per_second_ * dt_seconds);
+    imu_planar_velocity_ *= damping;
+  }
+
+  imu_planar_position_ += imu_planar_velocity_ * dt_seconds;
+
+  MotionReferenceSample sample;
+  sample.stamp = stamp;
+  sample.planar_position = imu_planar_position_;
+  sample.yaw_rad = yaw_rad;
+  motion_reference_history_.push_back(sample);
+
+  while (!motion_reference_history_.empty()) {
+    if ((stamp - motion_reference_history_.front().stamp).seconds() <=
+      motion_reference_history_seconds_)
+    {
+      break;
+    }
+    motion_reference_history_.pop_front();
+  }
+}
+
+void VisualOdometryNode::imageCallback(
   const std::shared_ptr<CameraState> & camera,
   const sensor_msgs::msg::Image::SharedPtr message)
 {
@@ -225,16 +401,16 @@ void MonocularVisualOdometryNode::imageCallback(
     return;
   }
 
-  auto scale_reference = lookupWheelOdom(stamp);
-  if (!scale_reference.has_value()) {
-    publishStatus(camera->name + ":waiting_for_wheel_odom");
+  auto motion_reference = lookupMotionReference(stamp);
+  if (!motion_reference.has_value()) {
+    publishStatus(camera->name + ":waiting_for_motion_reference");
     return;
   }
 
   cv::Mat gray_image;
   try {
-    gray_image = cv_bridge::toCvCopy(*message, sensor_msgs::image_encodings::MONO8)->image;
-  } catch (const cv_bridge::Exception & error) {
+    gray_image = convertRosImageToMono8(*message);
+  } catch (const std::exception & error) {
     RCLCPP_ERROR_THROTTLE(
       get_logger(),
       *get_clock(),
@@ -253,15 +429,15 @@ void MonocularVisualOdometryNode::imageCallback(
     return;
   }
 
-  if (!camera->have_previous_scale_reference || camera->previous_gray_image.empty()) {
-    initializeFromFrame(camera, gray_image, scale_reference.value(), stamp);
+  if (!camera->have_previous_motion_reference || camera->previous_gray_image.empty()) {
+    initializeFromFrame(camera, gray_image, motion_reference.value(), stamp);
     publishStatus(camera->name + ":initialized_first_frame");
     return;
   }
 
-  TrackingResult result = estimateMotion(camera, gray_image, scale_reference.value(), stamp);
+  TrackingResult result = estimateMotion(camera, gray_image, motion_reference.value(), stamp);
   if (!result.success) {
-    initializeFromFrame(camera, gray_image, scale_reference.value(), stamp);
+    initializeFromFrame(camera, gray_image, motion_reference.value(), stamp);
     publishStatus(camera->name + ":" + result.reason);
     return;
   }
@@ -272,8 +448,9 @@ void MonocularVisualOdometryNode::imageCallback(
     camera->previous_points = detectFeatures(camera->previous_gray_image);
   }
   camera->previous_image_stamp = stamp;
-  camera->previous_scale_reference = scale_reference.value();
-  camera->have_previous_scale_reference = true;
+  camera->previous_motion_reference_position = motion_reference->planar_position;
+  camera->previous_motion_reference_yaw_rad = motion_reference->yaw_rad;
+  camera->have_previous_motion_reference = true;
 
   queueEstimate(camera->name, result, stamp);
   flushPendingEstimates(stamp, cameras_.size() == 1U);
@@ -286,28 +463,29 @@ void MonocularVisualOdometryNode::imageCallback(
   publishStatus(status.str());
 }
 
-void MonocularVisualOdometryNode::initializeFromFrame(
+void VisualOdometryNode::initializeFromFrame(
   const std::shared_ptr<CameraState> & camera,
   const cv::Mat & gray_image,
-  const nav_msgs::msg::Odometry & scale_reference,
+  const MotionReferenceSample & motion_reference,
   const rclcpp::Time & stamp)
 {
   camera->previous_gray_image = gray_image.clone();
   camera->previous_points = detectFeatures(camera->previous_gray_image);
   camera->previous_image_stamp = stamp;
-  camera->previous_scale_reference = scale_reference;
-  camera->have_previous_scale_reference = true;
+  camera->previous_motion_reference_position = motion_reference.planar_position;
+  camera->previous_motion_reference_yaw_rad = motion_reference.yaw_rad;
+  camera->have_previous_motion_reference = true;
 
   if (!have_pose_estimate_) {
-    odom_to_base_ = poseToTransform(scale_reference.pose.pose);
+    odom_to_base_.setIdentity();
     have_pose_estimate_ = true;
   }
 }
 
-MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::estimateMotion(
+VisualOdometryNode::TrackingResult VisualOdometryNode::estimateMotion(
   const std::shared_ptr<CameraState> & camera,
   const cv::Mat & current_gray_image,
-  const nav_msgs::msg::Odometry & current_scale_reference,
+  const MotionReferenceSample & current_motion_reference,
   const rclcpp::Time & stamp)
 {
   TrackingResult result;
@@ -394,8 +572,8 @@ MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::estimat
   result.tracked_points = std::move(inlier_tracked_points);
 
   result.metric_translation_scale = planarDistance(
-    camera->previous_scale_reference.pose.pose.position,
-    current_scale_reference.pose.pose.position);
+    camera->previous_motion_reference_position,
+    current_motion_reference.planar_position);
   if (result.metric_translation_scale < min_scale_translation_meters_) {
     result.metric_translation_scale = 0.0;
   }
@@ -431,6 +609,10 @@ MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::estimat
   double yaw = 0.0;
   tf2::Matrix3x3(delta_base.getRotation()).getRPY(roll, pitch, yaw);
   result.delta_yaw_rad = normalizeAngle(yaw);
+  if (use_motion_reference_yaw_) {
+    result.delta_yaw_rad = normalizeAngle(
+      current_motion_reference.yaw_rad - camera->previous_motion_reference_yaw_rad);
+  }
 
   if (force_2d_) {
     tf2::Transform planar_delta(tf2::Transform::getIdentity());
@@ -451,7 +633,7 @@ MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::estimat
   return result;
 }
 
-std::vector<cv::Point2f> MonocularVisualOdometryNode::detectFeatures(const cv::Mat & gray_image) const
+std::vector<cv::Point2f> VisualOdometryNode::detectFeatures(const cv::Mat & gray_image) const
 {
   std::vector<cv::Point2f> features;
   cv::goodFeaturesToTrack(
@@ -473,7 +655,7 @@ std::vector<cv::Point2f> MonocularVisualOdometryNode::detectFeatures(const cv::M
   return features;
 }
 
-std::vector<cv::Point2f> MonocularVisualOdometryNode::undistortPoints(
+std::vector<cv::Point2f> VisualOdometryNode::undistortPoints(
   const CameraCalibration & calibration,
   const std::vector<cv::Point2f> & points) const
 {
@@ -502,24 +684,25 @@ std::vector<cv::Point2f> MonocularVisualOdometryNode::undistortPoints(
   return undistorted_points;
 }
 
-std::optional<nav_msgs::msg::Odometry> MonocularVisualOdometryNode::lookupWheelOdom(
+std::optional<VisualOdometryNode::MotionReferenceSample>
+VisualOdometryNode::lookupMotionReference(
   const rclcpp::Time & stamp) const
 {
-  if (wheel_odom_history_.empty()) {
+  if (motion_reference_history_.empty()) {
     return std::nullopt;
   }
 
-  const auto tolerance = rclcpp::Duration::from_seconds(wheel_lookup_tolerance_seconds_);
-  const nav_msgs::msg::Odometry * best_match = nullptr;
+  const auto tolerance = rclcpp::Duration::from_seconds(motion_reference_lookup_tolerance_seconds_);
+  const MotionReferenceSample * best_match = nullptr;
   auto best_delta = rclcpp::Duration::from_seconds(std::numeric_limits<double>::max());
 
-  for (const auto & message : wheel_odom_history_) {
-    const rclcpp::Time candidate_stamp(message.header.stamp);
+  for (const auto & sample : motion_reference_history_) {
+    const rclcpp::Time candidate_stamp(sample.stamp);
     const rclcpp::Duration delta =
       candidate_stamp > stamp ? (candidate_stamp - stamp) : (stamp - candidate_stamp);
     if (delta < best_delta) {
       best_delta = delta;
-      best_match = &message;
+      best_match = &sample;
     }
   }
 
@@ -529,7 +712,7 @@ std::optional<nav_msgs::msg::Odometry> MonocularVisualOdometryNode::lookupWheelO
   return *best_match;
 }
 
-bool MonocularVisualOdometryNode::resolveCameraExtrinsics(
+bool VisualOdometryNode::resolveCameraExtrinsics(
   const std::shared_ptr<CameraState> & camera,
   const std::string & camera_frame)
 {
@@ -563,7 +746,7 @@ bool MonocularVisualOdometryNode::resolveCameraExtrinsics(
   }
 }
 
-void MonocularVisualOdometryNode::queueEstimate(
+void VisualOdometryNode::queueEstimate(
   const std::string & camera_name,
   const TrackingResult & result,
   const rclcpp::Time & stamp)
@@ -583,7 +766,7 @@ void MonocularVisualOdometryNode::queueEstimate(
   pending_estimates_.insert(insertion_point, std::move(estimate));
 }
 
-void MonocularVisualOdometryNode::flushPendingEstimates(
+void VisualOdometryNode::flushPendingEstimates(
   const rclcpp::Time & reference_stamp,
   bool force_flush)
 {
@@ -650,7 +833,7 @@ void MonocularVisualOdometryNode::flushPendingEstimates(
   }
 }
 
-MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::fuseTrackingResults(
+VisualOdometryNode::TrackingResult VisualOdometryNode::fuseTrackingResults(
   const std::vector<PendingEstimate> & estimates) const
 {
   TrackingResult fused_result;
@@ -658,43 +841,35 @@ MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::fuseTra
     return fused_result;
   }
 
-  tf2::Vector3 translation_sum(0.0, 0.0, 0.0);
-  double quaternion_x_sum = 0.0;
-  double quaternion_y_sum = 0.0;
-  double quaternion_z_sum = 0.0;
-  double quaternion_w_sum = 0.0;
-  double weight_sum = 0.0;
+  if (fusion_method_ != "ekf") {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Unsupported fusion_method '%s'; falling back to ekf.",
+      fusion_method_.c_str());
+  }
+
+  Eigen::Vector3d state = Eigen::Vector3d::Zero();
+  Eigen::Matrix3d covariance = Eigen::Matrix3d::Identity() * 1.0e3;
   double scale_sum = 0.0;
   double dt_sum = 0.0;
-  bool have_reference_rotation = false;
-  tf2::Quaternion reference_rotation;
+  double weight_sum = 0.0;
 
   for (const auto & estimate : estimates) {
-    double weight = trackingConfidence(estimate.result);
-    if (weight <= 0.0) {
-      weight = 0.1;
-    }
-
-    translation_sum += estimate.result.delta_base.getOrigin() * weight;
-
-    tf2::Quaternion rotation = estimate.result.delta_base.getRotation();
-    if (!have_reference_rotation) {
-      reference_rotation = rotation;
-      have_reference_rotation = true;
-    }
-    const double dot =
-      (reference_rotation.x() * rotation.x()) +
-      (reference_rotation.y() * rotation.y()) +
-      (reference_rotation.z() * rotation.z()) +
-      (reference_rotation.w() * rotation.w());
-    if (dot < 0.0) {
-      rotation = tf2::Quaternion(-rotation.x(), -rotation.y(), -rotation.z(), -rotation.w());
-    }
-
-    quaternion_x_sum += weight * rotation.x();
-    quaternion_y_sum += weight * rotation.y();
-    quaternion_z_sum += weight * rotation.z();
-    quaternion_w_sum += weight * rotation.w();
+    const double weight = std::max(0.1, trackingConfidence(estimate.result));
+    Eigen::Vector3d measurement(
+      estimate.result.delta_base.getOrigin().x(),
+      estimate.result.delta_base.getOrigin().y(),
+      estimate.result.delta_yaw_rad);
+    Eigen::Matrix3d measurement_covariance = makeMeasurementCovariance(estimate.result);
+    const Eigen::Matrix3d innovation_covariance = covariance + measurement_covariance;
+    const Eigen::Matrix3d kalman_gain = covariance * innovation_covariance.inverse();
+    Eigen::Vector3d innovation = measurement - state;
+    innovation.z() = normalizeAngle(innovation.z());
+    state = state + (kalman_gain * innovation);
+    state.z() = normalizeAngle(state.z());
+    covariance = (Eigen::Matrix3d::Identity() - kalman_gain) * covariance;
 
     scale_sum += weight * estimate.result.metric_translation_scale;
     dt_sum += weight * estimate.result.dt_seconds;
@@ -703,35 +878,20 @@ MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::fuseTra
     weight_sum += weight;
   }
 
-  if (weight_sum <= 1.0e-6) {
+  if (weight_sum <= 1.0e-6 || !covariance.allFinite()) {
     return fused_result;
   }
 
-  tf2::Vector3 fused_translation = translation_sum / weight_sum;
-  tf2::Quaternion fused_rotation(
-    quaternion_x_sum / weight_sum,
-    quaternion_y_sum / weight_sum,
-    quaternion_z_sum / weight_sum,
-    quaternion_w_sum / weight_sum);
-  if (fused_rotation.length2() <= 1.0e-12) {
-    fused_rotation.setRPY(0.0, 0.0, 0.0);
-  } else {
-    fused_rotation.normalize();
-  }
-
   tf2::Transform fused_delta(tf2::Transform::getIdentity());
-  fused_delta.setOrigin(fused_translation);
+  fused_delta.setOrigin(tf2::Vector3(state.x(), state.y(), 0.0));
+  fused_result.delta_yaw_rad = normalizeAngle(state.z());
+  tf2::Quaternion fused_rotation;
+  fused_rotation.setRPY(0.0, 0.0, fused_result.delta_yaw_rad);
   fused_delta.setRotation(fused_rotation);
-
-  double roll = 0.0;
-  double pitch = 0.0;
-  double yaw = 0.0;
-  tf2::Matrix3x3(fused_rotation).getRPY(roll, pitch, yaw);
-  fused_result.delta_yaw_rad = normalizeAngle(yaw);
 
   if (force_2d_) {
     tf2::Transform planar_delta(tf2::Transform::getIdentity());
-    planar_delta.setOrigin(tf2::Vector3(fused_translation.x(), fused_translation.y(), 0.0));
+    planar_delta.setOrigin(tf2::Vector3(state.x(), state.y(), 0.0));
     tf2::Quaternion planar_quaternion;
     planar_quaternion.setRPY(0.0, 0.0, fused_result.delta_yaw_rad);
     planar_delta.setRotation(planar_quaternion);
@@ -745,7 +905,7 @@ MonocularVisualOdometryNode::TrackingResult MonocularVisualOdometryNode::fuseTra
   return fused_result;
 }
 
-void MonocularVisualOdometryNode::publishOdometry(
+void VisualOdometryNode::publishOdometry(
   const TrackingResult & result,
   const rclcpp::Time & stamp,
   double dt_seconds)
@@ -780,14 +940,14 @@ void MonocularVisualOdometryNode::publishOdometry(
   tf_broadcaster_->sendTransform(transform_message);
 }
 
-void MonocularVisualOdometryNode::publishStatus(const std::string & status_message) const
+void VisualOdometryNode::publishStatus(const std::string & status_message) const
 {
   std_msgs::msg::String message;
   message.data = status_message;
   status_publisher_->publish(message);
 }
 
-double MonocularVisualOdometryNode::trackingConfidence(const TrackingResult & result) const
+double VisualOdometryNode::trackingConfidence(const TrackingResult & result) const
 {
   if (result.tracked_features <= 0) {
     return 0.0;
@@ -798,7 +958,26 @@ double MonocularVisualOdometryNode::trackingConfidence(const TrackingResult & re
     1.0);
 }
 
-double MonocularVisualOdometryNode::normalizeAngle(double angle_rad)
+Eigen::Matrix3d VisualOdometryNode::makeMeasurementCovariance(
+  const TrackingResult & result) const
+{
+  Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
+  const double bounded_confidence = std::clamp(trackingConfidence(result), 0.1, 1.0);
+  const double position_sigma = std::clamp(
+    pose_sigma_floor_m_ / bounded_confidence,
+    pose_sigma_floor_m_,
+    pose_sigma_ceiling_m_);
+  const double yaw_sigma = std::clamp(
+    yaw_sigma_floor_rad_ / bounded_confidence,
+    yaw_sigma_floor_rad_,
+    yaw_sigma_ceiling_rad_);
+  covariance(0, 0) = position_sigma * position_sigma;
+  covariance(1, 1) = position_sigma * position_sigma;
+  covariance(2, 2) = yaw_sigma * yaw_sigma;
+  return covariance;
+}
+
+double VisualOdometryNode::normalizeAngle(double angle_rad)
 {
   while (angle_rad > kPi) {
     angle_rad -= 2.0 * kPi;
@@ -809,7 +988,7 @@ double MonocularVisualOdometryNode::normalizeAngle(double angle_rad)
   return angle_rad;
 }
 
-double MonocularVisualOdometryNode::yawFromQuaternion(
+double VisualOdometryNode::yawFromQuaternion(
   const geometry_msgs::msg::Quaternion & quaternion)
 {
   tf2::Quaternion tf_quaternion;
@@ -821,7 +1000,7 @@ double MonocularVisualOdometryNode::yawFromQuaternion(
   return yaw;
 }
 
-double MonocularVisualOdometryNode::planarDistance(
+double VisualOdometryNode::planarDistance(
   const geometry_msgs::msg::Point & lhs,
   const geometry_msgs::msg::Point & rhs)
 {
@@ -830,7 +1009,14 @@ double MonocularVisualOdometryNode::planarDistance(
   return std::sqrt((dx * dx) + (dy * dy));
 }
 
-tf2::Transform MonocularVisualOdometryNode::poseToTransform(
+double VisualOdometryNode::planarDistance(const tf2::Vector3 & lhs, const tf2::Vector3 & rhs)
+{
+  const double dx = lhs.x() - rhs.x();
+  const double dy = lhs.y() - rhs.y();
+  return std::sqrt((dx * dx) + (dy * dy));
+}
+
+tf2::Transform VisualOdometryNode::poseToTransform(
   const geometry_msgs::msg::Pose & pose)
 {
   tf2::Quaternion rotation(
@@ -842,7 +1028,7 @@ tf2::Transform MonocularVisualOdometryNode::poseToTransform(
   return transform;
 }
 
-geometry_msgs::msg::Pose MonocularVisualOdometryNode::transformToPose(
+geometry_msgs::msg::Pose VisualOdometryNode::transformToPose(
   const tf2::Transform & transform)
 {
   geometry_msgs::msg::Pose pose;
@@ -853,7 +1039,7 @@ geometry_msgs::msg::Pose MonocularVisualOdometryNode::transformToPose(
   return pose;
 }
 
-std::array<double, 36> MonocularVisualOdometryNode::makePoseCovariance(
+std::array<double, 36> VisualOdometryNode::makePoseCovariance(
   const TrackingResult & result) const
 {
   std::array<double, 36> covariance{};
@@ -878,7 +1064,7 @@ std::array<double, 36> MonocularVisualOdometryNode::makePoseCovariance(
   return covariance;
 }
 
-std::array<double, 36> MonocularVisualOdometryNode::makeTwistCovariance(
+std::array<double, 36> VisualOdometryNode::makeTwistCovariance(
   const TrackingResult & result) const
 {
   std::array<double, 36> covariance{};
@@ -908,7 +1094,7 @@ std::array<double, 36> MonocularVisualOdometryNode::makeTwistCovariance(
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<amr_sweeper_visual_odometry::MonocularVisualOdometryNode>();
+  auto node = std::make_shared<amr_sweeper_visual_odometry::VisualOdometryNode>();
   rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;

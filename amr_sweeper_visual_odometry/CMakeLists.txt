@@ -6,7 +6,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
-find_package(cv_bridge REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS calib3d core features2d imgproc video)
@@ -17,19 +16,18 @@ find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
-add_executable(monocular_visual_odometry_node
-  src/monocular_visual_odometry_node.cpp
+add_executable(visual_odometry_node
+  src/visual_odometry_node.cpp
 )
-target_include_directories(monocular_visual_odometry_node PUBLIC
+target_include_directories(visual_odometry_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_compile_features(monocular_visual_odometry_node PUBLIC cxx_std_17)
-target_link_libraries(monocular_visual_odometry_node
+target_compile_features(visual_odometry_node PUBLIC cxx_std_17)
+target_link_libraries(visual_odometry_node
   ${OpenCV_LIBS}
 )
-ament_target_dependencies(monocular_visual_odometry_node
-  cv_bridge
+ament_target_dependencies(visual_odometry_node
   geometry_msgs
   nav_msgs
   rclcpp
@@ -41,7 +39,7 @@ ament_target_dependencies(monocular_visual_odometry_node
 )
 
 install(
-  TARGETS monocular_visual_odometry_node
+  TARGETS visual_odometry_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

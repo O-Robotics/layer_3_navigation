@@ -21,6 +21,7 @@ This repository is the navigation layer for the AMR Sweeper. It contains localiz
 - `namespace`: default `amr_sweeper`
 - `use_sim_time`: default `false`
 - `use_amr_sweeper_localization`: default `true`
+- `use_amr_sweeper_visual_odometry`: default `true`
 - `use_amr_sweeper_mapping`: default `true`
 - `use_amr_sweeper_waypoint_follower`: default `true`
 - `execution_pointer_file`: default `active_execution.json`
@@ -36,4 +37,5 @@ The repository also ships `amr_sweeper_default_missions`, which owns the built-i
 - Layer 3 depends on a running layer 1 and layer 2 stack.
 - This layer is configured for the trimmed real-robot stack only.
 - The localization launch now consumes `/amr_sweeper/gnss/navsat` directly because the local GNSS node publishes a compatible `NavSatFix` stream without the old bridge workaround.
+- `amr_sweeper_visual_odometry` now publishes only `/amr_sweeper/visual_odometry/odom`; `amr_sweeper_localization` is the only package that launches FusionCore and it consumes that VO topic as `encoder2.topic`.
 - Nav2 runtime parameters live in `amr_sweeper_waypoint_follower/config/nav2_params.yaml`, and package-owned sensor topics are kept relative so the same files work under custom robot namespaces.

@@ -24,6 +24,7 @@ def generate_launch_description():
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization')
+    use_amr_sweeper_visual_odometry = LaunchConfiguration('use_amr_sweeper_visual_odometry')
     use_amr_sweeper_waypoint_follower = LaunchConfiguration('use_amr_sweeper_waypoint_follower')
     use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping')
     execution_pointer_file = LaunchConfiguration('execution_pointer_file')
@@ -33,10 +34,21 @@ def generate_launch_description():
         DeclareLaunchArgument('namespace', default_value='amr_sweeper'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('use_amr_sweeper_localization', default_value='true'),
+        DeclareLaunchArgument('use_amr_sweeper_visual_odometry', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_waypoint_follower', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_mapping', default_value='true'),
         DeclareLaunchArgument('execution_pointer_file', default_value='active_execution.json'),
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                _launch_file('amr_sweeper_visual_odometry', 'amr_sweeper_visual_odometry.launch.py')
+            ),
+            launch_arguments={
+                'namespace': namespace,
+                'use_sim_time': use_sim_time,
+            }.items(),
+            condition=IfCondition(use_amr_sweeper_visual_odometry),
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 _launch_file('amr_sweeper_localization', 'fusioncore.launch.py')

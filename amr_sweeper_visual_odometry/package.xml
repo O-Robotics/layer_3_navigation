@@ -3,13 +3,12 @@
 <package format="3">
   <name>amr_sweeper_visual_odometry</name>
   <version>0.0.0</version>
-  <description>Monocular tool-camera visual odometry and optional FusionCore integration for the AMR Sweeper.</description>
+  <description>Monocular tool-camera visual odometry for the AMR Sweeper.</description>
   <maintainer email="info@O-Robotics.com">O-Robotics</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>cv_bridge</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
@@ -24,10 +23,6 @@
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
-  <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>lifecycle_msgs</exec_depend>
-  <exec_depend>fusioncore_ros</exec_depend>
-
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
