@@ -1,0 +1,41 @@
+/**:
+  ros__parameters:
+    wheel_odom_topic: diff_cont/odom
+    odom_topic: visual_odometry/odom
+
+    base_frame: base_footprint
+    odom_frame: odom
+    publish_tf: false
+    force_2d: true
+
+    # Default single-camera setup. Add more camera names here later and define
+    # matching cameras.<name>.* topic entries below to fuse them into one VO output.
+    camera_names: [tool_camera]
+    camera_fusion_tolerance_seconds: 0.03
+    min_cameras_per_estimate: 1
+
+    cameras.tool_camera.image_topic: usb_cameras/tools_camera/image_raw
+    cameras.tool_camera.camera_info_topic: usb_cameras/tools_camera/tools_camera_info
+    cameras.tool_camera.camera_frame: ""
+
+    max_features: 500
+    min_tracked_features: 90
+    min_inliers: 40
+    feature_quality_level: 0.01
+    feature_min_distance_px: 10.0
+    corner_refinement_window_px: 5
+    optical_flow_window_px: 21
+    optical_flow_max_pyramid_level: 3
+    optical_flow_max_error: 20.0
+
+    ransac_confidence: 0.999
+    ransac_reprojection_threshold_px: 1.5
+    min_seconds_between_keyframes: 0.05
+    wheel_lookup_tolerance_seconds: 0.25
+    wheel_history_seconds: 5.0
+    min_scale_translation_meters: 0.005
+
+    pose_sigma_floor_m: 0.03
+    pose_sigma_ceiling_m: 0.50
+    yaw_sigma_floor_rad: 0.02
+    yaw_sigma_ceiling_rad: 0.35
