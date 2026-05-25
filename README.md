@@ -8,13 +8,14 @@ Dependencies to other AMR Sweeper packages:
 - `amr_sweeper_layer_3_navigation_bringup`
 - `amr_sweeper_localization`
 - `amr_sweeper_mapping`
+- `amr_sweeper_visual_odometry`
 - `amr_sweeper_default_missions`
 - `amr_sweeper_waypoint_follower`
 - `amr_sweeper_layer_1_hardware_bringup`
 - `amr_sweeper_layer_2_controllers_bringup`
 
 ## Purpose
-This repository is the navigation layer for the AMR Sweeper. It contains localization, Nav2 bringup, and waypoint-execution tools that use the hardware and controller layers to move the physical robot.
+This repository is the navigation layer for the AMR Sweeper. It contains localization, visual odometry, Nav2 bringup, and waypoint-execution tools that use the hardware and controller layers to move the physical robot.
 
 ## Launch Arguments
 - `namespace`: default `amr_sweeper`
