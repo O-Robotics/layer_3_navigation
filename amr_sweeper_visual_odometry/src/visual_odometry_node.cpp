@@ -64,7 +64,7 @@ cv::Mat convertRosImageToMono8(const sensor_msgs::msg::Image & message)
     return mono8;
   }
 
-  auto convert_color = [&message](int cv_type, int conversion_code) {
+  auto convert_color = [&message, &require_step](int cv_type, int conversion_code) {
       const int channels = CV_MAT_CN(cv_type);
       require_step(static_cast<std::size_t>(message.width) * static_cast<std::size_t>(channels));
       cv::Mat color(
