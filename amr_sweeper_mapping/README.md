@@ -29,11 +29,10 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
-- The runtime costmap alias is expected at `src/missions/global_costmap.yaml`.
-- The runtime route alias is expected at `src/missions/active_mission_path.geojson`.
 - The preferred runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
-- A scheduler-written execution pointer at `src/missions/active_execution.json` remains available as a fallback for manual launches.
-- The scheduler-prepared execution context is expected at `src/missions/<mission_id>/<execution_timestamp>/execution_context.json`.
+- The mission route and mission costmap are expected to come from that execution folder's `execution_context.json`, not from shared top-level alias files.
+- A scheduler-written execution pointer at `src/missions_log/active_execution.json` remains available as a fallback for manual launches.
+- The scheduler-prepared execution context is expected at `src/missions_log/<mission_id>/<execution_timestamp>/execution_context.json`.
 - Gaussian outputs are expected under the execution folder's `gaussian/` subdirectory.
 - VDA5050 mission parsing and artifact generation now live in layer 0 inside `amr_sweeper_vda5050_parser`.
 - The SLAM node and gaussian node are orchestration shells in this pass so backend selection stays flexible while we wire the package structure.

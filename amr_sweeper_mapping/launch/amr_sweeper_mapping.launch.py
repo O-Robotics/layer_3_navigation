@@ -54,10 +54,7 @@ def _build_nodes(context):
     )
     mission_id = mission_context.get("mission_id", "")
     mission_file = mission_context.get("mission_file", "")
-    mission_route_file = mission_context.get(
-        "mission_route_file",
-        str(Path(missions_directory) / "active_mission_path.geojson"),
-    )
+    mission_route_file = mission_context.get("mission_route_file", "")
     mission_run_directory = mission_context.get("mission_run_directory", missions_directory)
     mission_window_start = mission_context.get("mission_window_start", "")
     mission_window_end = mission_context.get("mission_window_end", "")
@@ -143,7 +140,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "missions_directory",
-                default_value="src/missions",
+                default_value="src/missions_log",
                 description="Root missions directory used for active runtime aliases and execution selection.",
             ),
             DeclareLaunchArgument(

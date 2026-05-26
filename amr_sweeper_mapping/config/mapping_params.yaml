@@ -5,7 +5,7 @@
       geojson_layer:
         enabled: true
         plugin: amr_sweeper_mapping::Vda5050CostmapLayer
-        costmap_yaml_path: src/missions/global_costmap.yaml  # Runtime mission costmap artifact consumed by Nav2 when this block is reused there.
+        costmap_yaml_path: src/missions_log/global_costmap.yaml  # Runtime mission costmap artifact consumed by Nav2 when this block is reused there.
 
 /**/amr_sweeper_slam_node:
   ros__parameters:
@@ -29,7 +29,7 @@
 /**/amr_sweeper_gaussian_node:
   ros__parameters:
     # -- Output artifacts -----------------------------------------------------
-    output_directory:              src/missions                      # Default artifact directory before launch-time mission overrides are injected.
+    output_directory:              src/missions_log                  # Default artifact directory before launch-time mission overrides are injected.
     source_mode:                   realsense_pointcloud             # Pointcloud ingestion mode used by the gaussian mapper.
     representation_name:           global_gaussian_map              # Default saved representation name when no mission-specific name is injected.
     world_frame:                   map                              # World frame used for saved gaussian data.
@@ -58,10 +58,10 @@
   ros__parameters:
     # -- Mission inputs and outputs -------------------------------------------
     mission_file:                  ""                               # Resolved launch-time mission file path. Leave empty until a mission is selected.
-    mission_route_file:            src/missions/active_mission_path.geojson  # Default runtime route artifact before launch-time overrides.
+    mission_route_file:            src/missions_log/active_mission_path.geojson  # Default runtime route artifact before launch-time overrides.
     mission_id:                    ""
-    mission_output_directory:      src/missions                     # Default artifact root before launch-time mission overrides are injected.
-    actual_path_output_file:       src/missions/actual_path.geojson # Default actual-path artifact before launch-time mission overrides are injected.
+    mission_output_directory:      src/missions_log                 # Default artifact root before launch-time mission overrides are injected.
+    actual_path_output_file:       src/missions_log/actual_path.geojson # Default actual-path artifact before launch-time overrides are injected.
     mission_window_start:          ""
     mission_window_end:            ""
 

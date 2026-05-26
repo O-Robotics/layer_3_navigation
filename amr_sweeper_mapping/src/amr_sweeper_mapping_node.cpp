@@ -24,8 +24,8 @@ namespace
 
 constexpr char kEnabledParam[] = "enabled";
 constexpr char kCostmapYamlPathParam[] = "costmap_yaml_path";
-constexpr char kDefaultCostmapYamlPath[] = "src/missions/global_costmap.yaml";
-constexpr char kDefaultMissionRoutePath[] = "src/missions/active_mission_path.geojson";
+constexpr char kDefaultCostmapYamlPath[] = "src/missions_log/global_costmap.yaml";
+constexpr char kDefaultMissionRoutePath[] = "src/missions_log/active_mission_path.geojson";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
 
@@ -329,7 +329,7 @@ MappingNode::MappingNode()
   declare_parameter("mission_file", std::string(""));
   declare_parameter("mission_route_file", std::string(kDefaultMissionRoutePath));
   declare_parameter("mission_id", std::string(""));
-  declare_parameter("mission_output_directory", std::string("src/missions"));
+  declare_parameter("mission_output_directory", std::string("src/missions_log"));
   declare_parameter("actual_path_output_file", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
   declare_parameter("mission_window_end", std::string(""));

@@ -32,6 +32,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     params_file = LaunchConfiguration('params_file')
+    mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml')
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
 
@@ -47,6 +48,7 @@ def generate_launch_description():
         'use_sim_time': use_sim_time,
         'autostart': autostart,
         'yaml_filename': map_yaml_file,
+        'costmap_yaml_path': mission_costmap_yaml,
     }
 
     configured_params = ParameterFile(
@@ -78,6 +80,11 @@ def generate_launch_description():
         'params_file',
         default_value=os.path.join(bringup_dir, 'config', 'nav2_params.yaml'),
         description='Full path to the ROS2 parameters file to use for all launched nodes')
+
+    declare_mission_costmap_yaml_cmd = DeclareLaunchArgument(
+        'mission_costmap_yaml',
+        default_value='src/missions_log/global_costmap.yaml',
+        description='Exact mission costmap YAML from execution_context.json. Leave empty outside mission execution.')
 
     declare_autostart_cmd = DeclareLaunchArgument(
         'autostart', default_value='true',
@@ -185,6 +192,7 @@ def generate_launch_description():
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_params_file_cmd)
+    ld.add_action(declare_mission_costmap_yaml_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)

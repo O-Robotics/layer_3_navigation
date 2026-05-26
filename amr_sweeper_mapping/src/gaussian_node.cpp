@@ -70,7 +70,7 @@ GaussianNode::GaussianNode()
   tf_buffer_(get_clock()),
   tf_listener_(tf_buffer_)
 {
-  declare_parameter("output_directory", std::string("src/missions"));
+  declare_parameter("output_directory", std::string("src/missions_log"));
   declare_parameter("source_mode", std::string("realsense_pointcloud"));
   declare_parameter("representation_name", std::string(kDefaultRepresentationName));
   declare_parameter("world_frame", std::string(kDefaultWorldFrame));

@@ -30,7 +30,7 @@ This repository is the navigation layer for the AMR Sweeper. It contains localiz
 ## Overview
 Layer 3 consumes wheel odometry, GNSS, IMU, transforms, and controller topics from the lower layers. It is responsible for estimating robot pose, hosting the Nav2 stack, and publishing navigation commands that flow down into the layer 2 controller chain. Under the default namespace, it consumes `/amr_sweeper/imu/data_raw`, `/amr_sweeper/gnss/navsat`, `/amr_sweeper/diff_cont/odom`, and `/amr_sweeper/depth_camera/scan`.
 
-The repository also ships `amr_sweeper_default_missions`, which owns the built-in manual mission templates so the runtime `/missions` directory can be reserved for mission history and schedule state.
+The repository also ships `amr_sweeper_default_missions`, which owns the built-in manual mission templates so `/missions_from_db` can stay dedicated to synced mission inputs and `/missions_log` can stay dedicated to runtime outputs.
 
 ## Notes
 - The default command launches the full layer 3 navigation bringup package.

@@ -147,7 +147,7 @@
       geojson_layer:
         plugin: "amr_sweeper_mapping::Vda5050CostmapLayer" # Mission-backed layer implementation for VDA5050 working zones and no-go areas.
         enabled: true # Enable the mission geometry layer.
-        costmap_yaml_path: "src/missions/global_costmap.yaml" # Runtime layer consumes the generated costmap artifact from the mission builder.
+        costmap_yaml_path: "src/missions_log/global_costmap.yaml" # Runtime layer consumes the generated costmap artifact from the mission builder.
 
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer" # Obstacle marking/clearing layer implementation. This is Nav2's standard obstacle plugin.

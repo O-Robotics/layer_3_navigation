@@ -31,6 +31,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     params_file = LaunchConfiguration('params_file')
+    mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml')
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
 
@@ -62,6 +63,12 @@ def generate_launch_description():
         description='Full path to the Nav2 parameter file',
     )
 
+    declare_mission_costmap_yaml_cmd = DeclareLaunchArgument(
+        'mission_costmap_yaml',
+        default_value='src/missions_log/global_costmap.yaml',
+        description='Exact mission costmap YAML from execution_context.json. Leave empty outside mission execution.',
+    )
+
     declare_use_respawn_cmd = DeclareLaunchArgument(
         'use_respawn', default_value='false',
         description='Whether to respawn if a node crashes. Applied when composition is disabled.')
@@ -78,6 +85,7 @@ def generate_launch_description():
                 'map': map_yaml_file,
                 'use_sim_time': use_sim_time,
                 'params_file': params_file,
+                'mission_costmap_yaml': mission_costmap_yaml,
                 'autostart': autostart,
                 'use_respawn': use_respawn,
                 'log_level': log_level,
@@ -92,6 +100,7 @@ def generate_launch_description():
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_params_file_cmd)
+    ld.add_action(declare_mission_costmap_yaml_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(bringup_cmd_group)
