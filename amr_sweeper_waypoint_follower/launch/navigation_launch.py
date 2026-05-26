@@ -60,6 +60,8 @@ def generate_launch_description():
 
     stdout_linebuf_envvar = SetEnvironmentVariable(
         'RCUTILS_LOGGING_BUFFERED_STREAM', '1')
+    colorized_logs_envvar = SetEnvironmentVariable(
+        'RCUTILS_COLORIZED_OUTPUT', '1')
 
     declare_namespace_cmd = DeclareLaunchArgument(
         'namespace',
@@ -104,6 +106,7 @@ def generate_launch_description():
                 namespace=namespace,
                 package='nav2_controller',
                 executable='controller_server',
+                name='controller_server',
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
@@ -188,6 +191,7 @@ def generate_launch_description():
     )
     ld = LaunchDescription()
     ld.add_action(stdout_linebuf_envvar)
+    ld.add_action(colorized_logs_envvar)
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_map_yaml_cmd)
