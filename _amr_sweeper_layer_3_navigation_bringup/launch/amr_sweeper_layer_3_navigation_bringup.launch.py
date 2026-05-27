@@ -12,6 +12,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
 
+DEFAULT_MISSION_COSTMAP_YAML = "src/missions_log/global_costmap.yaml"
+
 
 def _launch_file(package_name: str, launch_file_name: str):
     return PathJoinSubstitution(
@@ -62,7 +64,7 @@ def _build_launches(context):
         execution_pointer_file,
         mission_execution_directory,
     )
-    mission_costmap_yaml = mission_context.get("mission_costmap_yaml", "")
+    mission_costmap_yaml = mission_context.get("mission_costmap_yaml") or DEFAULT_MISSION_COSTMAP_YAML
 
     return [
         IncludeLaunchDescription(
