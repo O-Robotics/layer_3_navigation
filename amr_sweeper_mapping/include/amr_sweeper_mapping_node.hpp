@@ -139,6 +139,8 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr route_marker_publisher_;
+  rclcpp::CallbackGroup::SharedPtr mission_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr status_callback_group_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr mission_timer_;
   rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;

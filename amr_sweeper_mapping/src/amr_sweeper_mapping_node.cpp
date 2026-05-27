@@ -384,19 +384,31 @@ MappingNode::MappingNode()
     "mapping/route_marker",
     rclcpp::QoS(1).reliable().transient_local());
 
-  fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(fromll_service_name_);
+  mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  status_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+
+  fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(
+    fromll_service_name_,
+    rmw_qos_profile_services_default,
+    mission_callback_group_);
   end_mission_client_ =
-    create_client<amr_sweeper_mission_executor::srv::EndMission>(end_mission_service_name_);
+    create_client<amr_sweeper_mission_executor::srv::EndMission>(
+    end_mission_service_name_,
+    rmw_qos_profile_services_default,
+    mission_callback_group_);
   follow_waypoints_client_ = rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(
     this,
-    get_parameter("follow_waypoints_action").as_string());
+    get_parameter("follow_waypoints_action").as_string(),
+    mission_callback_group_);
 
   status_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("status_period_seconds").as_double()),
-    std::bind(&MappingNode::publishCoordinatorStatus, this));
+    std::bind(&MappingNode::publishCoordinatorStatus, this),
+    status_callback_group_);
   mission_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("mission_tick_period_seconds").as_double()),
-    std::bind(&MappingNode::tickMissionExecution, this));
+    std::bind(&MappingNode::tickMissionExecution, this),
+    mission_callback_group_);
 
   writeMissionSessionMetadata();
 
