@@ -2,8 +2,8 @@
   "name": "RecordMap",
   "mission_type": "builtin_manual_mapping",
   "execution_mode": "manual_mapping",
-  "description": "Manual mapping mission that keeps the mapping stack running while an operator drives the robot to record a map.",
+  "description": "Manual mapping mission that lets an operator trace the working-area perimeter while recording a reusable costmap with scanned obstacles.",
   "route_frame": "odom",
   "manual_drive_required": true,
-  "recommended_save_map_basename": "recorded_map"
+  "recommended_save_map_basename": "recorded_work_area"
 }
