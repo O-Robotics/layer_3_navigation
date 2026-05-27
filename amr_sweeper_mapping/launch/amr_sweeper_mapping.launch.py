@@ -42,7 +42,7 @@ def _resolve_execution_context(missions_directory, execution_pointer_file, missi
 def _build_nodes(context):
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
-    params_file = LaunchConfiguration("params_file").perform(context)
+    params_file = LaunchConfiguration("mapping_params_file").perform(context)
     missions_directory = LaunchConfiguration("missions_directory").perform(context)
     execution_pointer_file = LaunchConfiguration("execution_pointer_file").perform(context)
     mission_execution_directory = LaunchConfiguration("mission_execution_directory").perform(context)
@@ -132,7 +132,7 @@ def generate_launch_description():
                 description="Use ROS time if true",
             ),
             DeclareLaunchArgument(
-                "params_file",
+                "mapping_params_file",
                 default_value=PathJoinSubstitution(
                     [FindPackageShare("amr_sweeper_mapping"), "config", "mapping_params.yaml"]
                 ),
