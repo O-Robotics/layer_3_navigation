@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import os
-import tempfile
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -23,6 +22,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
 
 
@@ -56,18 +56,33 @@ def _rewrite_nav2_params(context) -> dict:
     return params_data
 
 
-def _write_temp_yaml(data: dict) -> str:
-    with tempfile.NamedTemporaryFile(
-        mode='w',
-        suffix='.yaml',
-        prefix='amr_sweeper_nav2_params_',
-        delete=False,
-    ) as handle:
-        yaml.safe_dump(data, handle, sort_keys=False)
-        return handle.name
+def _build_configured_params(context):
+    namespace = LaunchConfiguration('namespace')
+    map_yaml_file = LaunchConfiguration('map')
+    use_sim_time = LaunchConfiguration('use_sim_time')
+    autostart = LaunchConfiguration('autostart')
+    params_file = LaunchConfiguration('params_file')
+    mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml')
+
+    param_substitutions = {
+        'use_sim_time': use_sim_time,
+        'autostart': autostart,
+        'yaml_filename': map_yaml_file,
+        'costmap_yaml_path': mission_costmap_yaml,
+    }
+
+    return ParameterFile(
+        RewrittenYaml(
+            source_file=params_file,
+            root_key=namespace,
+            param_rewrites=param_substitutions,
+            convert_types=True,
+        ),
+        allow_substs=True,
+    )
 
 
-def _build_param_files(context) -> dict:
+def _validate_nav2_params(context) -> None:
     params_data = _rewrite_nav2_params(context)
     rewritten_params_path = params_data.pop("__rewritten_params_path__", "<unknown>")
     source_params_file = params_data.pop("__source_params_file__", "<unknown>")
@@ -96,38 +111,6 @@ def _build_param_files(context) -> dict:
             f"Rewritten params file: {rewritten_params_path}."
         )
 
-    return {
-        'controller_server': _write_temp_yaml({
-            'controller_server': params_data['controller_server'],
-            'local_costmap': params_data['local_costmap'],
-        }),
-        'smoother_server': _write_temp_yaml({
-            'smoother_server': params_data['smoother_server'],
-        }),
-        'planner_server': _write_temp_yaml({
-            'planner_server': params_data['planner_server'],
-            'global_costmap': params_data['global_costmap'],
-        }),
-        'behavior_server': _write_temp_yaml({
-            'behavior_server': params_data['behavior_server'],
-            'local_costmap': params_data['local_costmap'],
-            'global_costmap': params_data['global_costmap'],
-        }),
-        'bt_navigator': _write_temp_yaml({
-            'bt_navigator': params_data['bt_navigator'],
-            'bt_navigator_navigate_through_poses_rclcpp_node':
-                params_data['bt_navigator_navigate_through_poses_rclcpp_node'],
-            'bt_navigator_navigate_to_pose_rclcpp_node':
-                params_data['bt_navigator_navigate_to_pose_rclcpp_node'],
-        }),
-        'waypoint_follower': _write_temp_yaml({
-            'waypoint_follower': params_data['waypoint_follower'],
-        }),
-        'velocity_smoother': _write_temp_yaml({
-            'velocity_smoother': params_data['velocity_smoother'],
-        }),
-    }
-
 
 
 def _build_nav2_group(context):
@@ -147,7 +130,8 @@ def _build_nav2_group(context):
                        'waypoint_follower',
                        'velocity_smoother']
 
-    param_files = _build_param_files(context)
+    _validate_nav2_params(context)
+    configured_params = _build_configured_params(context)
 
     return [GroupAction(
         actions=[
@@ -159,7 +143,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[param_files['controller_server']],
+                parameters=[configured_params],
                 remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
                             ('odom', 'odometry/fused')]),
             Node(
@@ -170,7 +154,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[param_files['smoother_server']],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace_value,
                 package='nav2_planner',
@@ -179,7 +163,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[param_files['planner_server']],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace_value,
                 package='nav2_behaviors',
@@ -188,7 +172,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[param_files['behavior_server']],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace_value,
                 package='nav2_bt_navigator',
@@ -197,7 +181,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[param_files['bt_navigator']],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace_value,
                 package='nav2_waypoint_follower',
@@ -206,7 +190,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[param_files['waypoint_follower']],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace_value,
                 package='nav2_velocity_smoother',
@@ -215,7 +199,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[param_files['velocity_smoother']],
+                parameters=[configured_params],
                 remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
                             ('cmd_vel_smoothed', 'cmd_vel_nav'),
                             ('odom', 'odometry/fused')]),
