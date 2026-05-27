@@ -30,7 +30,7 @@ def _normalize_namespace(namespace: str) -> str:
     return namespace.strip().strip('/')
 
 
-def _build_namespaced_params_file(context, namespace_value: str) -> str:
+def _rewrite_nav2_params(context) -> dict:
     map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
@@ -50,20 +50,55 @@ def _build_namespaced_params_file(context, namespace_value: str) -> str:
         convert_types=True,
     ).perform(context)
 
-    params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
-    namespaced_params = {
-        f"/{namespace_value}/{node_name}": node_params
-        for node_name, node_params in params_data.items()
-    }
+    return yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
 
+
+def _write_temp_yaml(data: dict) -> str:
     with tempfile.NamedTemporaryFile(
         mode='w',
         suffix='.yaml',
         prefix='amr_sweeper_nav2_params_',
         delete=False,
     ) as handle:
-        yaml.safe_dump(namespaced_params, handle, sort_keys=False)
+        yaml.safe_dump(data, handle, sort_keys=False)
         return handle.name
+
+
+def _build_param_files(context) -> dict:
+    params_data = _rewrite_nav2_params(context)
+
+    return {
+        'controller_server': _write_temp_yaml({
+            'controller_server': params_data['controller_server'],
+            'local_costmap': params_data['local_costmap'],
+        }),
+        'smoother_server': _write_temp_yaml({
+            'smoother_server': params_data['smoother_server'],
+        }),
+        'planner_server': _write_temp_yaml({
+            'planner_server': params_data['planner_server'],
+            'global_costmap': params_data['global_costmap'],
+        }),
+        'behavior_server': _write_temp_yaml({
+            'behavior_server': params_data['behavior_server'],
+            'local_costmap': params_data['local_costmap'],
+            'global_costmap': params_data['global_costmap'],
+        }),
+        'bt_navigator': _write_temp_yaml({
+            'bt_navigator': params_data['bt_navigator'],
+            'bt_navigator_navigate_through_poses_rclcpp_node':
+                params_data['bt_navigator_navigate_through_poses_rclcpp_node'],
+            'bt_navigator_navigate_to_pose_rclcpp_node':
+                params_data['bt_navigator_navigate_to_pose_rclcpp_node'],
+        }),
+        'waypoint_follower': _write_temp_yaml({
+            'waypoint_follower': params_data['waypoint_follower'],
+        }),
+        'velocity_smoother': _write_temp_yaml({
+            'velocity_smoother': params_data['velocity_smoother'],
+        }),
+    }
+
 
 
 def _build_nav2_group(context):
@@ -83,7 +118,7 @@ def _build_nav2_group(context):
                        'waypoint_follower',
                        'velocity_smoother']
 
-    configured_params = _build_namespaced_params_file(context, namespace_value)
+    param_files = _build_param_files(context)
 
     return [GroupAction(
         actions=[
@@ -95,7 +130,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
+                parameters=[param_files['controller_server']],
                 remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
                             ('odom', 'odometry/fused')]),
             Node(
@@ -106,7 +141,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[param_files['smoother_server']],),
             Node(
                 namespace=namespace_value,
                 package='nav2_planner',
@@ -115,7 +150,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[param_files['planner_server']],),
             Node(
                 namespace=namespace_value,
                 package='nav2_behaviors',
@@ -124,7 +159,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[param_files['behavior_server']],),
             Node(
                 namespace=namespace_value,
                 package='nav2_bt_navigator',
@@ -133,7 +168,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[param_files['bt_navigator']],),
             Node(
                 namespace=namespace_value,
                 package='nav2_waypoint_follower',
@@ -142,7 +177,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[param_files['waypoint_follower']],),
             Node(
                 namespace=namespace_value,
                 package='nav2_velocity_smoother',
@@ -151,7 +186,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
+                parameters=[param_files['velocity_smoother']],
                 remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
                             ('cmd_vel_smoothed', 'cmd_vel_nav'),
                             ('odom', 'odometry/fused')]),
