@@ -13,14 +13,16 @@
 # limitations under the License.
 
 import os
+import tempfile
+from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
+import yaml
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
 
 
@@ -28,16 +30,49 @@ def _normalize_namespace(namespace: str) -> str:
     return namespace.strip().strip('/')
 
 
-def _build_nav2_group(context):
-    namespace_value = _normalize_namespace(LaunchConfiguration('namespace').perform(context))
-    if not namespace_value:
-        namespace_value = 'amr_sweeper'
-
+def _build_namespaced_params_file(context, namespace_value: str) -> str:
     map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     params_file = LaunchConfiguration('params_file')
     mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml')
+
+    param_substitutions = {
+        'use_sim_time': use_sim_time,
+        'autostart': autostart,
+        'yaml_filename': map_yaml_file,
+        'costmap_yaml_path': mission_costmap_yaml,
+    }
+
+    rewritten_params_path = RewrittenYaml(
+        source_file=params_file,
+        param_rewrites=param_substitutions,
+        convert_types=True,
+    ).perform(context)
+
+    params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
+    namespaced_params = {
+        f"/{namespace_value}/{node_name}": node_params
+        for node_name, node_params in params_data.items()
+    }
+
+    with tempfile.NamedTemporaryFile(
+        mode='w',
+        suffix='.yaml',
+        prefix='amr_sweeper_nav2_params_',
+        delete=False,
+    ) as handle:
+        yaml.safe_dump(namespaced_params, handle, sort_keys=False)
+        return handle.name
+
+
+def _build_nav2_group(context):
+    namespace_value = _normalize_namespace(LaunchConfiguration('namespace').perform(context))
+    if not namespace_value:
+        namespace_value = 'amr_sweeper'
+
+    use_sim_time = LaunchConfiguration('use_sim_time')
+    autostart = LaunchConfiguration('autostart')
     use_respawn = LaunchConfiguration('use_respawn')
 
     lifecycle_nodes = ['controller_server',
@@ -48,20 +83,7 @@ def _build_nav2_group(context):
                        'waypoint_follower',
                        'velocity_smoother']
 
-    param_substitutions = {
-        'use_sim_time': use_sim_time,
-        'autostart': autostart,
-        'yaml_filename': map_yaml_file,
-        'costmap_yaml_path': mission_costmap_yaml,
-    }
-
-    configured_params = ParameterFile(
-        RewrittenYaml(
-            source_file=params_file,
-            param_rewrites=param_substitutions,
-            root_key=namespace_value,
-            convert_types=True),
-        allow_substs=True)
+    configured_params = _build_namespaced_params_file(context, namespace_value)
 
     return [GroupAction(
         actions=[
