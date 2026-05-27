@@ -621,8 +621,7 @@ void MappingNode::convertMissionRoute()
     request->ll_point.latitude = coordinate.y;
     request->ll_point.altitude = 0.0;
     auto future = fromll_client_->async_send_request(request);
-    if (rclcpp::spin_until_future_complete(get_node_base_interface(), future, std::chrono::seconds(5)) !=
-      rclcpp::FutureReturnCode::SUCCESS)
+    if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
     {
       RCLCPP_WARN(get_logger(), "Timed out converting mission waypoint through %s", fromll_service_name_.c_str());
       return;
@@ -915,7 +914,9 @@ void MappingNode::markMissionTerminal(const std::string & outcome, const std::st
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<amr_sweeper_mapping::MappingNode>());
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(std::make_shared<amr_sweeper_mapping::MappingNode>());
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }
