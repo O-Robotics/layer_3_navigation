@@ -389,12 +389,12 @@ MappingNode::MappingNode()
 
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(
     fromll_service_name_,
-    rmw_qos_profile_services_default,
+    rclcpp::ServicesQoS(),
     mission_callback_group_);
   end_mission_client_ =
     create_client<amr_sweeper_mission_executor::srv::EndMission>(
     end_mission_service_name_,
-    rmw_qos_profile_services_default,
+    rclcpp::ServicesQoS(),
     mission_callback_group_);
   follow_waypoints_client_ = rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(
     this,
