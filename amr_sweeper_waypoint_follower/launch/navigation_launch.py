@@ -50,7 +50,10 @@ def _rewrite_nav2_params(context) -> dict:
         convert_types=True,
     ).perform(context)
 
-    return yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
+    params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
+    params_data["__rewritten_params_path__"] = rewritten_params_path
+    params_data["__source_params_file__"] = params_file.perform(context)
+    return params_data
 
 
 def _write_temp_yaml(data: dict) -> str:
@@ -66,6 +69,32 @@ def _write_temp_yaml(data: dict) -> str:
 
 def _build_param_files(context) -> dict:
     params_data = _rewrite_nav2_params(context)
+    rewritten_params_path = params_data.pop("__rewritten_params_path__", "<unknown>")
+    source_params_file = params_data.pop("__source_params_file__", "<unknown>")
+
+    required_keys = [
+        "controller_server",
+        "local_costmap",
+        "smoother_server",
+        "planner_server",
+        "global_costmap",
+        "behavior_server",
+        "bt_navigator",
+        "bt_navigator_navigate_through_poses_rclcpp_node",
+        "bt_navigator_navigate_to_pose_rclcpp_node",
+        "waypoint_follower",
+        "velocity_smoother",
+    ]
+    missing_keys = [key for key in required_keys if key not in params_data]
+    if missing_keys:
+        available_keys = sorted(params_data.keys())
+        raise RuntimeError(
+            "Nav2 params rewrite produced an unexpected structure. "
+            f"Missing top-level keys: {missing_keys}. "
+            f"Available top-level keys: {available_keys}. "
+            f"Source params file: {source_params_file}. "
+            f"Rewritten params file: {rewritten_params_path}."
+        )
 
     return {
         'controller_server': _write_temp_yaml({
