@@ -112,7 +112,6 @@ def generate_launch_description():
                 respawn=use_respawn,
                 respawn_delay=2.0,
                 parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],
                 remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
                             ('odom', 'odometry/fused')]),
             Node(
@@ -123,8 +122,7 @@ def generate_launch_description():
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace,
                 package='nav2_planner',
@@ -133,8 +131,7 @@ def generate_launch_description():
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace,
                 package='nav2_behaviors',
@@ -143,8 +140,7 @@ def generate_launch_description():
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace,
                 package='nav2_bt_navigator',
@@ -153,8 +149,7 @@ def generate_launch_description():
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace,
                 package='nav2_waypoint_follower',
@@ -163,8 +158,7 @@ def generate_launch_description():
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],),
+                parameters=[configured_params],),
             Node(
                 namespace=namespace,
                 package='nav2_velocity_smoother',
@@ -174,7 +168,6 @@ def generate_launch_description():
                 respawn=use_respawn,
                 respawn_delay=2.0,
                 parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],
                 remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
                             ('cmd_vel_smoothed', 'cmd_vel_nav'),
                             ('odom', 'odometry/fused')]),
@@ -184,7 +177,6 @@ def generate_launch_description():
                 executable='lifecycle_manager',
                 name='lifecycle_manager_navigation',
                 output='screen',
-                arguments=['--ros-args', '--log-level', log_level],
                 parameters=[{'use_sim_time': use_sim_time},
                             {'autostart': autostart},
                             {'node_names': lifecycle_nodes}]),
