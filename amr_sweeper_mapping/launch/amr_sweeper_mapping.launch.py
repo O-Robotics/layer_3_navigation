@@ -73,15 +73,22 @@ def _build_nodes(context):
 
     common_runtime_parameters = {
         "use_sim_time": use_sim_time,
-        "mission_file": mission_file,
-        "mission_route_file": mission_route_file,
-        "mission_id": mission_id,
-        "mission_output_directory": mission_run_directory,
-        "actual_path_output_file": actual_path_output_file,
-        "mission_window_start": mission_window_start,
-        "mission_window_end": mission_window_end,
         "end_mission_service": "end_mission",
     }
+    if mission_file:
+        common_runtime_parameters["mission_file"] = mission_file
+    if mission_route_file:
+        common_runtime_parameters["mission_route_file"] = mission_route_file
+    if mission_id:
+        common_runtime_parameters["mission_id"] = mission_id
+    if mission_run_directory:
+        common_runtime_parameters["mission_output_directory"] = mission_run_directory
+    if actual_path_output_file:
+        common_runtime_parameters["actual_path_output_file"] = actual_path_output_file
+    if mission_window_start:
+        common_runtime_parameters["mission_window_start"] = mission_window_start
+    if mission_window_end:
+        common_runtime_parameters["mission_window_end"] = mission_window_end
 
     return [
         Node(

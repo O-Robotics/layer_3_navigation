@@ -577,6 +577,26 @@ void MappingNode::tickMissionExecution()
 void MappingNode::ensureMissionLoaded()
 {
   const std::string path = routeGeoJsonPath();
+  if (path.empty()) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for mission route artifact path to be configured.");
+    return;
+  }
+
+  std::error_code filesystem_error;
+  if (!std::filesystem::is_regular_file(path, filesystem_error)) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for mission route artifact file at %s",
+      path.c_str());
+    return;
+  }
+
   if (!std::filesystem::exists(path)) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
@@ -820,6 +840,9 @@ std::string MappingNode::routeGeoJsonPath() const
 std::string MappingNode::resolveRuntimePath(const std::string & configured_path) const
 {
   namespace fs = std::filesystem;
+  if (configured_path.empty()) {
+    return "";
+  }
   const fs::path configured(configured_path);
   if (configured.is_absolute()) {
     return configured.string();
@@ -927,7 +950,8 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   rclcpp::executors::MultiThreadedExecutor executor;
-  executor.add_node(std::make_shared<amr_sweeper_mapping::MappingNode>());
+  auto node = std::make_shared<amr_sweeper_mapping::MappingNode>();
+  executor.add_node(node);
   executor.spin();
   rclcpp::shutdown();
   return 0;
