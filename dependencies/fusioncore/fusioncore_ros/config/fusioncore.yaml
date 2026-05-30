@@ -1,0 +1,177 @@
+fusioncore:
+  ros__parameters:
+    base_frame: base_link
+    odom_frame: odom
+    publish_rate: 100.0
+
+    # Force 2D output: zeroes position.z, velocity.z, and the TF translation.z.
+    # For ground robots where altitude is irrelevant (lawn mowers, AGVs, vacuums).
+    # Prevents GPS altitude noise or IMU Z drift from shifting the costmap plane.
+    # Orientation (roll/pitch) is untouched.
+    # Leave false for any robot that actually moves in 3D (drones, arms, boats).
+    publish.force_2d: false
+
+    # Broadcast the odom -> base_link TF transform.
+    # Set to false if another node already owns this transform (e.g. a separate
+    # sensor fusion layer, or when running two FusionCore instances where only
+    # one should broadcast TF). FusionCore will still publish /fusion/odom.
+    publish.tf: true
+
+    # Primary IMU topic. Override when your driver publishes at a non-default topic.
+    # Equivalent to a launch-time remap: -r /imu/data:=/your/imu/topic
+    # Common overrides: OAK-D: /imu   Realsense: /camera/imu   Clearpath: /sensors/imu_0/data
+    imu.topic: "/imu/data"
+    imu.gyro_noise: 0.005
+    # Set true if IMU has magnetometer (9-axis). False for 6-axis gyro/accel only.
+    imu.has_magnetometer: false
+    imu.accel_noise: 0.1
+    # Does your IMU driver subtract gravity before publishing?
+    #
+    #   false (default): IMU publishes raw specific force (~9.81 m/s² upward at rest).
+    #            This is the standard ROS convention (sensor_msgs/Imu spec).
+    #            Most drivers (Gazebo NavSat, Realsense D435i) do NOT remove gravity.
+    #            Leave false: the filter handles gravity internally.
+    #
+    #   true: Your driver already subtracted gravity and publishes true linear
+    #         acceleration (~0 m/s² at rest). Enable this so FusionCore adds
+    #         gravity back before fusing, keeping the measurement consistent
+    #         with what the filter expects.
+    #
+    # NOTE: this is the OPPOSITE of robot_localization's imu0_remove_gravitational_acceleration.
+    # robot_localization: set true to tell rl to remove gravity from the raw reading.
+    # fusioncore:         set true to tell fusioncore your driver already removed it.
+    # When in doubt: leave false and check linear_acceleration.z at rest.
+    #   ~9.8 → leave false.   ~0.0 → set true.
+    imu.remove_gravitational_acceleration: false
+    # Override the IMU TF frame. Leave empty to use msg->header.frame_id.
+    # Set to your IMU frame if the driver publishes with an empty frame_id.
+    imu.frame_id: "base_link"
+
+    # Optional second IMU source. When non-empty, FusionCore subscribes and
+    # calls update_imu() for each message, treating both sensors as independent
+    # measurements of the same state. Useful on platforms with two IMUs
+    # (e.g. VESC IMU + RealSense D435i) when you want redundancy without
+    # pre-merging them externally. Uses the same noise model as the primary IMU.
+    # Leave empty to disable.
+    imu2.topic: ""
+    imu2.frame_id: ""
+    imu2.remove_gravitational_acceleration: false
+
+    encoder.vel_noise: 0.05
+    encoder.yaw_noise: 0.02
+
+    # Optional second encoder-twist source (e.g. KISS-ICP LiDAR odometry).
+    # Must publish nav_msgs/Odometry with velocity in the twist field.
+    # Does not drive ZUPT or ground-constraint updates (anchored to primary encoder).
+    # Leave empty to disable.
+    # encoder2.topic: "/kiss/odometry"
+    encoder2.topic: ""
+    encoder2.vel_noise: 0.05   # m/s  fallback when message covariance is zero
+    encoder2.yaw_noise: 0.02   # rad/s fallback when message covariance is zero
+
+    gnss.base_noise_xy: 1.0
+    gnss.base_noise_z: 2.0
+    gnss.heading_noise: 0.02
+    gnss.max_hdop: 4.0
+    gnss.min_satellites: 4
+    # Minimum fix type for GNSS fusion: 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
+    # Note: NavSatFix status=2 maps to RTK_FIXED only.
+    # RTK_FLOAT (3) is unreachable with this message type.
+    # Use 4 to require RTK_FIXED, 2 to require any augmented fix.
+    gnss.min_fix_type: 1
+
+    # Antenna lever arm: offset from base_link to primary GNSS antenna in body frame
+    # x=forward, y=left, z=up (meters)
+    # Leave at 0.0 if antenna is directly above base_link origin
+    gnss.lever_arm_x: 0.0
+    gnss.lever_arm_y: 0.0
+    gnss.lever_arm_z: 0.0
+
+    # Optional second GNSS receiver: leave empty to disable
+    gnss.fix2_topic: ""
+
+    # Lever arm for the secondary GNSS receiver (fix2_topic).
+    # Set if the second antenna is at a different position than the first.
+    # Leave at 0.0 if fix2_topic is unused or both antennas are co-located.
+    gnss.lever_arm2_x: 0.0
+    gnss.lever_arm2_y: 0.0
+    gnss.lever_arm2_z: 0.0
+
+    # Dual antenna GNSS heading topic (sensor_msgs/Imu message carrying heading).
+    # Used with receivers that output a second IMU-style message for heading
+    # (e.g. u-blox F9H, Septentrio dual-antenna). Leave empty to disable.
+    # When provided, validates heading immediately without needing 5m of travel.
+    gnss.heading_topic: ""
+
+    # compass_msgs/Azimuth heading topic (REP-145 standard).
+    # Preferred over gnss.heading_topic when your receiver publishes Azimuth.
+    # Leave empty to disable.
+    gnss.azimuth_topic: ""
+
+    # Mahalanobis outlier rejection
+    # Rejects GPS jumps, encoder spikes, heading outliers
+    outlier_rejection: true
+    outlier_threshold_gnss: 16.27   # chi2(3, 0.999)
+    outlier_threshold_imu: 15.09    # applied to all IMU paths (raw 6D, orientation 2D/3D)
+    outlier_threshold_enc: 11.34    # chi2(3, 0.99)
+    outlier_threshold_hdg: 10.83    # chi2(1, 0.999)
+
+    # Static bias initialization window (seconds). Default 0.0 = disabled.
+    #
+    # All MEMS IMUs have a small accelerometer and gyro bias that varies by unit.
+    # By default the filter starts with zero bias and takes ~60 seconds to learn
+    # the true value, causing a small position drift (~5-10cm) at startup.
+    #
+    # When set > 0, the filter collects IMU data for this duration before starting,
+    # estimates the bias directly from the mean readings, and initializes with the
+    # correct values. Startup drift drops from ~10cm to under 1cm.
+    #
+    # Recommended: 2.0 seconds. Robot MUST be stationary during the window.
+    # If the robot moves during the window, it falls back to zero bias automatically.
+    # No benefit if you already have GPS (position corrections override bias drift).
+    init.stationary_window: 0.0
+
+    # Zero-velocity updates (ZUPT)
+    # When encoder speed and UKF angular rate are both below threshold,
+    # the robot is considered stationary and velocity is fused to zero.
+    # This suppresses IMU drift during standstill.
+    zupt.enabled: true
+    zupt.velocity_threshold: 0.05   # m/s: below this = stationary
+    zupt.angular_threshold: 0.05    # rad/s: below this = not rotating
+    zupt.noise_sigma: 0.01          # m/s: tighter = stronger correction
+
+    # Adaptive noise covariance
+    # Automatically estimates true sensor noise from innovation sequence
+    # Set to false to use fixed config params only
+    adaptive.imu: true
+    adaptive.encoder: true
+    adaptive.gnss: true
+    adaptive.window: 50       # number of updates to track (50 = ~0.5s at 100Hz)
+    adaptive.alpha: 0.01      # learning rate (0.01 = slow, stable)
+
+    ukf.q_position: 0.01
+    ukf.q_orientation: 1.0e-9  # quaternion regularization only: see ukf.hpp
+    ukf.q_velocity: 0.1
+    ukf.q_angular_vel: 0.1
+    ukf.q_acceleration: 1.0
+    ukf.q_gyro_bias: 1.0e-5
+    ukf.q_accel_bias: 1.0e-5
+
+    # PROJ coordinate reference system
+    # input.gnss_crs: CRS of incoming NavSatFix messages
+    #   EPSG:4326 = WGS84 lat/lon (standard GPS: use this for almost all receivers)
+    #   EPSG:32617 = UTM zone 17N (example for agricultural RTK receivers in Ontario)
+    # output.crs: internal computation CRS
+    #   EPSG:4978 = ECEF XYZ (default, globally valid)
+    # output.convert_to_enu_at_reference: convert output to local ENU frame
+    #   true = required when output.crs is ECEF (EPSG:4978)
+    #   false = when output.crs is already a local projected CRS (e.g. UTM)
+    # reference.use_first_fix: anchor local origin to the first GPS fix received
+    #   false = use fixed reference.x/y/z in output.crs coordinates
+    input.gnss_crs: "EPSG:4326"
+    output.crs: "EPSG:4978"
+    output.convert_to_enu_at_reference: true
+    reference.use_first_fix: true
+    reference.x: 0.0
+    reference.y: 0.0
+    reference.z: 0.0

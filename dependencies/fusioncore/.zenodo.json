@@ -1,0 +1,34 @@
+{
+  "title": "FusionCore: ROS 2 UKF Sensor Fusion",
+  "description": "FusionCore is an open source ROS 2 sensor fusion package that fuses IMU, wheel encoders, GPS, and visual SLAM pose using a 22-state unscented Kalman filter. It handles GPS natively in ECEF with no intermediate coordinate transform node, estimates IMU bias automatically, adapts noise covariance from the innovation sequence, and gates outliers with a chi-squared test on every sensor. Supports GPS-denied operation with LiDAR ICP odometry and visual SLAM (rtabmap, ORB-SLAM3) with map reinitialization recovery. Benchmarked against robot_localization EKF on 6 sequences from the NCLT public dataset (University of Michigan, RTK GPS ground truth). Apache 2.0, ROS 2 Jazzy native, in the Jazzy rosdistro.",
+  "creators": [
+    {
+      "name": "Kharwar, Manan",
+      "affiliation": "Independent Researcher"
+    }
+  ],
+  "keywords": [
+    "ros2",
+    "sensor-fusion",
+    "ukf",
+    "gps",
+    "imu",
+    "kalman-filter",
+    "robotics",
+    "localization",
+    "visual-slam",
+    "lidar",
+    "jazzy"
+  ],
+  "license": "Apache-2.0",
+  "upload_type": "software",
+  "access_right": "open",
+  "language": "eng",
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/manankharwar/fusioncore",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

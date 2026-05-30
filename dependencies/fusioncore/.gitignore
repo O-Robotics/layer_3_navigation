@@ -1,0 +1,90 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Linker files
+*.ilk
+
+# Debugger Files
+*.pdb
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# debug information files
+*.dwo
+
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# VS Code
+.vscode/
+
+frames_*.gv
+frames_*.pdf
+
+# Outreach / private contact data: never commit
+stargazers_outreach.tsv
+outreach_emails.md
+outreach_twitter.md
+outreach_linkedin.md
+new_stargazers.tsv
+check_new_stars.sh
+
+posts/
+
+# Article drafts, Word docs, and figure generation scripts: not for public repo
+outreach/
+tools/gen_architecture_fig.py
+tools/gen_article_docx.py
+tools/fix_paper_figures.py
+tools/gen_fusioncore_arch.py
+
+# External repos cloned locally for reference
+rtabmap_ros/
+
+# Demo bag: lives on GitHub Releases, not in the repo
+demo/*.mcap
+demo_result.png
+
+# Benchmark runtime artifacts: logs and raw bags are generated, not source
+benchmarks/**/launch.log
+benchmarks/**/bag/
+
+# Paper source: only the PDF is committed
+paper/*.tex
+paper/*.png
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+CLAUDE.md
