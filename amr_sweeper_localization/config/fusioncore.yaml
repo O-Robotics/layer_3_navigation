@@ -3,8 +3,9 @@
     base_frame: base_footprint       # Robot body frame used by FusionCore for state output and TF.
     odom_frame: odom                 # Local odometry frame FusionCore publishes against.
     publish_rate: 50.0               # Filter output publish rate in Hz.
-    publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch.
+    publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch in the internal filter state.
     publish.tf: true                 # Broadcast the odom -> base_footprint transform.
+    publish.yaw_only: true           # Publish odom -> base_footprint with yaw only; layer 2 already drives roll/pitch via base_footprint -> base_link.
 
     # -- IMU -------------------------------------------------------------------
     imu.has_magnetometer: false      # The primary IMU stream carries accel/gyro only; yaw is fused separately through gnss.heading_topic.
@@ -37,7 +38,7 @@
     # -- Outlier rejection -----------------------------------------------------
     outlier_rejection: true
     outlier_threshold_gnss: 16.27    # Chi-square gate for GNSS position innovations.
-    outlier_threshold_imu: 1000000.00 # Chi-square gate for IMU innovations. Set to 1000000.00 to effectively disable this filter during startup.
+    outlier_threshold_imu: 15.09     # Chi-square gate for IMU innovations after startup orientation is seeded from the IMU.
     outlier_threshold_enc: 11.34     # Chi-square gate for encoder twist innovations.
     outlier_threshold_hdg: 10.83     # Chi-square gate for heading innovations.
 
