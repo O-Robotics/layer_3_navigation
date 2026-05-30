@@ -9,6 +9,7 @@
 
     # -- IMU -------------------------------------------------------------------
     imu.has_magnetometer: true       # The physical IMU includes a magnetometer; this stack still feeds accel/gyro on /imu/data and yaw on gnss.heading_topic via imu/data_heading.
+    imu.init_topic: "/imu/init"      # Startup-only IMU stream used for bias/orientation seeding; remapped to imu/data_raw in launch.
     imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
     imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
     imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.

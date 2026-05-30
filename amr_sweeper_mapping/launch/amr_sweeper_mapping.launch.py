@@ -62,6 +62,10 @@ def _build_nodes(context):
         "actual_path_file",
         str(Path(mission_run_directory) / "actual_path.geojson"),
     )
+    actual_path_navsat_output_file = mission_context.get(
+        "actual_path_navsat_file",
+        str(Path(mission_run_directory) / "actual_path_navsat.geojson"),
+    )
     gaussian_output_directory = mission_context.get(
         "gaussian_output_directory",
         str(Path(mission_run_directory) / "gaussian"),
@@ -85,6 +89,8 @@ def _build_nodes(context):
         common_runtime_parameters["mission_output_directory"] = mission_run_directory
     if actual_path_output_file:
         common_runtime_parameters["actual_path_output_file"] = actual_path_output_file
+    if actual_path_navsat_output_file:
+        common_runtime_parameters["actual_path_navsat_output_file"] = actual_path_navsat_output_file
     if mission_window_start:
         common_runtime_parameters["mission_window_start"] = mission_window_start
     if mission_window_end:

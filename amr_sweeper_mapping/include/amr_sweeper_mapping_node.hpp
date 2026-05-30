@@ -110,6 +110,7 @@ private:
   std::string mission_id_;
   std::string mission_output_directory_;
   std::string actual_path_output_file_;
+  std::string actual_path_navsat_output_file_;
   std::string mission_window_start_;
   std::string mission_window_end_;
   std::string frame_id_;

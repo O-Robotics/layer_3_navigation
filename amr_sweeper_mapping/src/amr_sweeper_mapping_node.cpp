@@ -118,6 +118,29 @@ MissionRuntimeProfile loadMissionRuntimeProfile(const std::string & mission_file
   return profile;
 }
 
+nlohmann::json buildLocalPathGeoJson(
+  const nlohmann::json & coordinates,
+  const std::string & geographic_companion_file)
+{
+  nlohmann::json properties{
+    {"name", "actual_path"},
+    {"coordinate_frame", "odom"}};
+  if (!geographic_companion_file.empty()) {
+    properties["geographic_companion_file"] = geographic_companion_file;
+  }
+
+  return {
+    {"type", "FeatureCollection"},
+    {"features", nlohmann::json::array({
+      {
+        {"type", "Feature"},
+        {"properties", properties},
+        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
+      }
+    })}
+  };
+}
+
 }  // namespace
 
 Vda5050CostmapLayer::Vda5050CostmapLayer() = default;
@@ -331,6 +354,7 @@ MappingNode::MappingNode()
   declare_parameter("mission_id", std::string(""));
   declare_parameter("mission_output_directory", std::string("src/missions_log"));
   declare_parameter("actual_path_output_file", std::string(""));
+  declare_parameter("actual_path_navsat_output_file", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
   declare_parameter("mission_window_end", std::string(""));
   declare_parameter("slam_backend", std::string("slam_toolbox"));
@@ -354,6 +378,7 @@ MappingNode::MappingNode()
   mission_id_ = get_parameter("mission_id").as_string();
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
   actual_path_output_file_ = get_parameter("actual_path_output_file").as_string();
+  actual_path_navsat_output_file_ = get_parameter("actual_path_navsat_output_file").as_string();
   mission_window_start_ = get_parameter("mission_window_start").as_string();
   mission_window_end_ = get_parameter("mission_window_end").as_string();
   slam_backend_ = get_parameter("slam_backend").as_string();
@@ -493,7 +518,8 @@ void MappingNode::writeMissionSessionMetadata() const
     {"gaussian_mode", gaussian_mode_},
     {"frame_id", frame_id_},
     {"manual_drive_required", manual_mapping_mode_},
-    {"actual_path_output_file", actual_path_output_file_}};
+    {"actual_path_output_file", actual_path_output_file_},
+    {"actual_path_navsat_output_file", actual_path_navsat_output_file_}};
 
   std::ofstream output_stream(std::filesystem::path(mission_output_directory_) / "mapping_session.json");
   if (!output_stream.is_open()) {
@@ -518,16 +544,10 @@ void MappingNode::writeActualPathArtifact() const
     coordinates.push_back({point.x, point.y});
   }
 
-  nlohmann::json document{
-    {"type", "FeatureCollection"},
-    {"features", nlohmann::json::array({
-      {
-        {"type", "Feature"},
-        {"properties", {{"name", "actual_path"}, {"coordinate_frame", "odom"}}},
-        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
-      }
-    })}
-  };
+  const std::string navsat_companion_file = actual_path_navsat_output_file_.empty() ?
+    std::string{} :
+    std::filesystem::path(actual_path_navsat_output_file_).filename().string();
+  nlohmann::json document = buildLocalPathGeoJson(coordinates, navsat_companion_file);
 
   std::ofstream output_stream(actual_path_output_file_, std::ios::trunc);
   if (!output_stream.is_open()) {
