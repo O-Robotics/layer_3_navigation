@@ -77,7 +77,6 @@ public:
     // (e.g. Clearpath Microstrain at /sensors/imu_0/data, Realsense at /camera/imu).
     // Using a launch-time remap is equivalent and preferred for readability.
     declare_parameter("imu.topic", std::string("/imu/data"));
-    declare_parameter("imu.init_topic", std::string(""));
     declare_parameter("imu.gyro_noise",  0.005);
     // Set to true if IMU has a magnetometer (9-axis: BNO08x, VectorNav, Xsens)
     // Set to false for 6-axis IMUs: yaw from gyro integration drifts
@@ -271,7 +270,6 @@ public:
     config.imu.accel_noise_y = config.imu.accel_noise_x;
     config.imu.accel_noise_z = config.imu.accel_noise_x;
     imu_topic_          = get_parameter("imu.topic").as_string();
-    imu_init_topic_     = get_parameter("imu.init_topic").as_string();
     imu_remove_gravity_ = get_parameter("imu.remove_gravitational_acceleration").as_bool();
     imu_frame_override_ = get_parameter("imu.frame_id").as_string();
     RCLCPP_INFO(get_logger(), "IMU gravity removal: %s",
@@ -458,16 +456,6 @@ public:
         imu_callback(msg);
       }, sensor_opts);
     RCLCPP_INFO(get_logger(), "IMU topic: %s", imu_topic_.c_str());
-
-    if (!imu_init_topic_.empty()) {
-      imu_init_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-        imu_init_topic_, 50,
-        [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
-          std::lock_guard<std::mutex> lock(fc_mutex_);
-          imu_init_callback(msg);
-        }, sensor_opts);
-      RCLCPP_INFO(get_logger(), "Startup IMU topic: %s", imu_init_topic_.c_str());
-    }
 
     if (!imu2_topic_.empty()) {
       imu2_sub_ = create_subscription<sensor_msgs::msg::Imu>(
@@ -754,7 +742,6 @@ public:
   CallbackReturn on_deactivate(const rclcpp_lifecycle::State &)
   {
     imu_sub_.reset();
-    imu_init_sub_.reset();
     imu2_sub_.reset();
     encoder_sub_.reset();
     encoder2_sub_.reset();
@@ -1049,171 +1036,6 @@ private:
     return true;
   }
 
-  bool process_pending_init(const sensor_msgs::msg::Imu::SharedPtr msg)
-  {
-    double t = rclcpp::Time(msg->header.stamp).seconds();
-
-    if (wait_for_all_sensors_ && !sensor_wait_done_) {
-      if (sensors_received_ != sensors_expected_) {
-        double elapsed = this->now().seconds() - activate_time_;
-        if (elapsed < sensor_wait_timeout_) {
-          std::set<std::string> missing;
-          for (const auto& s : sensors_expected_)
-            if (!sensors_received_.count(s)) missing.insert(s);
-          RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
-            "Waiting for sensors (%.1fs / %.1fs): missing [%s]",
-            elapsed, sensor_wait_timeout_, format_sensor_set(missing).c_str());
-          return true;
-        }
-        std::set<std::string> missing;
-        for (const auto& s : sensors_expected_)
-          if (!sensors_received_.count(s)) missing.insert(s);
-        RCLCPP_WARN(get_logger(),
-          "Sensor wait timed out after %.1fs. Missing: [%s]. Starting anyway.",
-          sensor_wait_timeout_, format_sensor_set(missing).c_str());
-      } else {
-        RCLCPP_INFO(get_logger(),
-          "All %zu configured sensors ready. Starting filter.",
-          sensors_expected_.size());
-      }
-      sensor_wait_done_ = true;
-    }
-
-    if (init_window_duration_ <= 0.0) {
-      fusioncore::State initial;
-      initial.P = fusioncore::StateMatrix::Identity() * 0.1;
-      initial.P(0,0) = 1000.0;
-      initial.P(1,1) = 1000.0;
-      initial.P(2,2) = 1000.0;
-      if (!seed_initial_orientation_from_imu(&initial, msg, "first IMU")) {
-        return true;
-      }
-      fc_->init(initial, t);
-      pending_init_ = false;
-      init_window_collecting_ = false;
-      imu_init_sub_.reset();
-      RCLCPP_INFO(get_logger(), "Filter initialized at t=%.3f (first IMU)", t);
-      return true;
-    }
-
-    if (!init_window_collecting_) {
-      init_window_collecting_ = true;
-      init_window_start_is_msg_time_ = (t > 0.0);
-      init_window_start_ = init_window_start_is_msg_time_
-        ? t : this->now().seconds();
-      init_window_aborted_    = false;
-      init_win_n_             = 0;
-      init_win_wx_ = init_win_wy_ = init_win_wz_ = 0.0;
-      init_win_ax_ = init_win_ay_ = init_win_az_ = 0.0;
-      init_win_qw_ = init_win_qx_ = init_win_qy_ = init_win_qz_ = 0.0;
-      init_win_orient_n_ = 0;
-      RCLCPP_INFO(get_logger(),
-        "Collecting %.1fs bias window before init...", init_window_duration_);
-    }
-
-    init_win_wx_ += msg->angular_velocity.x;
-    init_win_wy_ += msg->angular_velocity.y;
-    init_win_wz_ += msg->angular_velocity.z;
-    init_win_ax_ += msg->linear_acceleration.x;
-    init_win_ay_ += msg->linear_acceleration.y;
-    init_win_az_ += msg->linear_acceleration.z;
-    ++init_win_n_;
-
-    tf2::Quaternion q_init_base;
-    if (try_get_base_orientation_quaternion(msg, &q_init_base)) {
-      init_win_qw_ += q_init_base.w();
-      init_win_qx_ += q_init_base.x();
-      init_win_qy_ += q_init_base.y();
-      init_win_qz_ += q_init_base.z();
-      ++init_win_orient_n_;
-    }
-
-    double window_elapsed = init_window_start_is_msg_time_
-      ? (t - init_window_start_)
-      : (this->now().seconds() - init_window_start_);
-    if (window_elapsed < init_window_duration_) {
-      return true;
-    }
-
-    fusioncore::State initial;
-    initial.P = fusioncore::StateMatrix::Identity() * 0.1;
-    initial.P(0,0) = 1000.0;
-    initial.P(1,1) = 1000.0;
-    initial.P(2,2) = 1000.0;
-
-    if (!init_window_aborted_ && init_win_n_ > 0) {
-      double n = static_cast<double>(init_win_n_);
-      initial.x[fusioncore::B_GX] = init_win_wx_ / n;
-      initial.x[fusioncore::B_GY] = init_win_wy_ / n;
-      initial.x[fusioncore::B_GZ] = init_win_wz_ / n;
-
-      if (init_win_orient_n_ > 0) {
-        double on = static_cast<double>(init_win_orient_n_);
-        double qw = init_win_qw_ / on, qx = init_win_qx_ / on;
-        double qy = init_win_qy_ / on, qz = init_win_qz_ / on;
-        double norm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
-        qw /= norm; qx /= norm; qy /= norm; qz /= norm;
-        initial.x[fusioncore::QW] = qw;
-        initial.x[fusioncore::QX] = qx;
-        initial.x[fusioncore::QY] = qy;
-        initial.x[fusioncore::QZ] = qz;
-        const double g = 9.80665;
-        double gx = 2.0*(qx*qz - qy*qw)*g;
-        double gy = 2.0*(qy*qz + qx*qw)*g;
-        double gz = (1.0 - 2.0*(qx*qx + qy*qy))*g;
-        initial.x[fusioncore::B_AX] = init_win_ax_ / n - gx;
-        initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
-        initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
-        RCLCPP_INFO(get_logger(),
-          "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] rad/s, m/s²",
-          initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
-          initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
-      } else {
-        RCLCPP_INFO(get_logger(),
-          "Bias window done (gyro only, no orientation): gyro=[%.4f,%.4f,%.4f]",
-          initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ]);
-      }
-    } else {
-      RCLCPP_WARN(get_logger(),
-        "Bias window aborted (robot moved). Starting with zero bias.");
-    }
-
-    if (init_win_orient_n_ == 0) {
-      if (!seed_initial_orientation_from_imu(&initial, msg, "bias window fallback")) {
-        if (heading_topic_.empty() ||
-            !seed_initial_yaw_from_heading(&initial, "bias window fallback"))
-        {
-          return true;
-        }
-      }
-    } else {
-      double roll, pitch, yaw;
-      fusioncore::quat_to_euler(
-        initial.x[fusioncore::QW], initial.x[fusioncore::QX],
-        initial.x[fusioncore::QY], initial.x[fusioncore::QZ],
-        roll, pitch, yaw);
-      RCLCPP_INFO(
-        get_logger(),
-        "Startup orientation seed (bias window): roll=%.2f pitch=%.2f yaw=%.2f deg",
-        roll * 180.0 / M_PI,
-        pitch * 180.0 / M_PI,
-        yaw * 180.0 / M_PI);
-    }
-
-    fc_->init(initial, t);
-    pending_init_ = false;
-    init_window_collecting_ = false;
-    imu_init_sub_.reset();
-    RCLCPP_INFO(get_logger(), "Filter initialized at t=%.3f", t);
-    return true;
-  }
-
-  void imu_init_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
-  {
-    if (!pending_init_) return;
-    process_pending_init(msg);
-  }
-
   void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
     double t = rclcpp::Time(msg->header.stamp).seconds();
@@ -1225,9 +1047,161 @@ private:
     mark_sensor_received("IMU");
 
     if (pending_init_) {
-      if (!imu_init_topic_.empty()) return;
-      process_pending_init(msg);
-      return;
+      // Sensor wait gate: hold initialization until all expected sensors checked in.
+      if (wait_for_all_sensors_ && !sensor_wait_done_) {
+        if (sensors_received_ != sensors_expected_) {
+          double elapsed = this->now().seconds() - activate_time_;
+          if (elapsed < sensor_wait_timeout_) {
+            std::set<std::string> missing;
+            for (const auto& s : sensors_expected_)
+              if (!sensors_received_.count(s)) missing.insert(s);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+              "Waiting for sensors (%.1fs / %.1fs): missing [%s]",
+              elapsed, sensor_wait_timeout_, format_sensor_set(missing).c_str());
+            return;
+          }
+          std::set<std::string> missing;
+          for (const auto& s : sensors_expected_)
+            if (!sensors_received_.count(s)) missing.insert(s);
+          RCLCPP_WARN(get_logger(),
+            "Sensor wait timed out after %.1fs. Missing: [%s]. Starting anyway.",
+            sensor_wait_timeout_, format_sensor_set(missing).c_str());
+        } else {
+          RCLCPP_INFO(get_logger(),
+            "All %zu configured sensors ready. Starting filter.",
+            sensors_expected_.size());
+        }
+        sensor_wait_done_ = true;
+      }
+
+      if (init_window_duration_ <= 0.0) {
+        fusioncore::State initial;
+        initial.P = fusioncore::StateMatrix::Identity() * 0.1;
+        initial.P(0,0) = 1000.0;
+        initial.P(1,1) = 1000.0;
+        initial.P(2,2) = 1000.0;
+        if (!seed_initial_orientation_from_imu(&initial, msg, "first IMU")) {
+          return;
+        }
+        fc_->init(initial, t);
+        pending_init_ = false;
+        RCLCPP_INFO(get_logger(), "Filter initialized at t=%.3f (first IMU)", t);
+      } else {
+        // Static bias window: collect IMU samples before starting the filter.
+        if (!init_window_collecting_) {
+          init_window_collecting_ = true;
+          // Use message timestamp when valid (non-zero): makes the window deterministic
+          // during bag replay with use_sim_time:true. Fall back to wall clock only for
+          // drivers that publish zero-stamped messages (the original bug fix path).
+          init_window_start_is_msg_time_ = (t > 0.0);
+          init_window_start_ = init_window_start_is_msg_time_
+            ? t : this->now().seconds();
+          init_window_aborted_    = false;
+          init_win_n_             = 0;
+          init_win_wx_ = init_win_wy_ = init_win_wz_ = 0.0;
+          init_win_ax_ = init_win_ay_ = init_win_az_ = 0.0;
+          init_win_qw_ = init_win_qx_ = init_win_qy_ = init_win_qz_ = 0.0;
+          init_win_orient_n_ = 0;
+          RCLCPP_INFO(get_logger(),
+            "Collecting %.1fs bias window before init...", init_window_duration_);
+        }
+
+        // Accumulate gyro and accel
+        init_win_wx_ += msg->angular_velocity.x;
+        init_win_wy_ += msg->angular_velocity.y;
+        init_win_wz_ += msg->angular_velocity.z;
+        init_win_ax_ += msg->linear_acceleration.x;
+        init_win_ay_ += msg->linear_acceleration.y;
+        init_win_az_ += msg->linear_acceleration.z;
+        ++init_win_n_;
+
+        // Accumulate orientation if available
+        tf2::Quaternion q_init_base;
+        if (try_get_base_orientation_quaternion(msg, &q_init_base)) {
+          init_win_qw_ += q_init_base.w();
+          init_win_qx_ += q_init_base.x();
+          init_win_qy_ += q_init_base.y();
+          init_win_qz_ += q_init_base.z();
+          ++init_win_orient_n_;
+        }
+
+        // Window complete? Use same time source that was chosen at window start.
+        double window_elapsed = init_window_start_is_msg_time_
+          ? (t - init_window_start_)
+          : (this->now().seconds() - init_window_start_);
+        if (window_elapsed >= init_window_duration_) {
+          fusioncore::State initial;
+          initial.P = fusioncore::StateMatrix::Identity() * 0.1;
+          initial.P(0,0) = 1000.0;
+          initial.P(1,1) = 1000.0;
+          initial.P(2,2) = 1000.0;
+
+          if (!init_window_aborted_ && init_win_n_ > 0) {
+            double n = static_cast<double>(init_win_n_);
+            initial.x[fusioncore::B_GX] = init_win_wx_ / n;
+            initial.x[fusioncore::B_GY] = init_win_wy_ / n;
+            initial.x[fusioncore::B_GZ] = init_win_wz_ / n;
+
+            if (init_win_orient_n_ > 0) {
+              double on = static_cast<double>(init_win_orient_n_);
+              double qw = init_win_qw_ / on, qx = init_win_qx_ / on;
+              double qy = init_win_qy_ / on, qz = init_win_qz_ / on;
+              double norm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
+              qw /= norm; qx /= norm; qy /= norm; qz /= norm;
+              initial.x[fusioncore::QW] = qw;
+              initial.x[fusioncore::QX] = qx;
+              initial.x[fusioncore::QY] = qy;
+              initial.x[fusioncore::QZ] = qz;
+              const double g = 9.80665;
+              double gx = 2.0*(qx*qz - qy*qw)*g;
+              double gy = 2.0*(qy*qz + qx*qw)*g;
+              double gz = (1.0 - 2.0*(qx*qx + qy*qy))*g;
+              initial.x[fusioncore::B_AX] = init_win_ax_ / n - gx;
+              initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
+              initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
+              RCLCPP_INFO(get_logger(),
+                "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] rad/s, m/s²",
+                initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
+                initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
+            } else {
+              RCLCPP_INFO(get_logger(),
+                "Bias window done (gyro only, no orientation): gyro=[%.4f,%.4f,%.4f]",
+                initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ]);
+            }
+          } else {
+            RCLCPP_WARN(get_logger(),
+              "Bias window aborted (robot moved). Starting with zero bias.");
+          }
+
+          if (init_win_orient_n_ == 0) {
+            if (!seed_initial_orientation_from_imu(&initial, msg, "bias window fallback")) {
+              if (heading_topic_.empty() ||
+                  !seed_initial_yaw_from_heading(&initial, "bias window fallback"))
+              {
+                return;  // Wait for a valid startup orientation or heading seed before initializing.
+              }
+            }
+          } else {
+            double roll, pitch, yaw;
+            fusioncore::quat_to_euler(
+              initial.x[fusioncore::QW], initial.x[fusioncore::QX],
+              initial.x[fusioncore::QY], initial.x[fusioncore::QZ],
+              roll, pitch, yaw);
+            RCLCPP_INFO(
+              get_logger(),
+              "Startup orientation seed (bias window): roll=%.2f pitch=%.2f yaw=%.2f deg",
+              roll * 180.0 / M_PI,
+              pitch * 180.0 / M_PI,
+              yaw * 180.0 / M_PI);
+          }
+
+          fc_->init(initial, t);
+          pending_init_         = false;
+          init_window_collecting_ = false;
+          RCLCPP_INFO(get_logger(), "Filter initialized at t=%.3f", t);
+        }
+        return;  // Don't process this IMU message through the filter yet
+      }
     }
 
     if (!fc_->is_initialized()) return;
@@ -2271,7 +2245,6 @@ private:
   std::shared_ptr<tf2_ros::TransformListener>    tf_listener_;
 
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr          imu_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr          imu_init_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr          imu2_sub_;
   rclcpp::Subscription<compass_msgs::msg::Azimuth>::SharedPtr     azimuth_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr          gnss_heading_sub_;
@@ -2334,7 +2307,6 @@ private:
   bool        gnss_ref_set_        = false;
   bool        imu_remove_gravity_  = false;
   std::string imu_topic_;
-  std::string imu_init_topic_;
   std::string imu_frame_override_;
   std::string imu_frame_resolved_;
   std::string imu2_topic_;

@@ -33,8 +33,7 @@ def _launch_fusioncore(context, *args, **kwargs):
             },
         ],
         remappings=[
-            ("/imu/data", "imu/data_acc_gyro"),
-            ("/imu/init", "imu/data_raw"),
+            ("/imu/data", "imu/data_raw"),
             ("/odom/wheels", "diff_cont/odom"),
             ("/gnss/fix", "gnss/navsat"),
             ("/fusion/odom", "odometry/fused"),

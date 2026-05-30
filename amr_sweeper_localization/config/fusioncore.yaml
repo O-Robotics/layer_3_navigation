@@ -8,8 +8,7 @@
     publish.yaw_only: true           # Publish odom -> base_footprint with yaw only; layer 2 already drives roll/pitch via base_footprint -> base_link.
 
     # -- IMU -------------------------------------------------------------------
-    imu.has_magnetometer: true       # The physical IMU includes a magnetometer; this stack still feeds accel/gyro on /imu/data and yaw on gnss.heading_topic via imu/data_heading.
-    imu.init_topic: "/imu/init"      # Startup-only IMU stream used for bias/orientation seeding; remapped to imu/data_raw in launch.
+    imu.has_magnetometer: true       # The physical IMU includes a magnetometer, and FusionCore now consumes the full imu/data_raw stream directly.
     imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
     imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
     imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.
@@ -30,7 +29,7 @@
     gnss.min_satellites: 4           # Minimum satellite count required before fusing GNSS.
     gnss.min_fix_type: 1             # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic: ""              # Optional second GNSS receiver topic; leave empty to disable.
-    gnss.heading_topic: "imu/data_heading" # IMU-derived yaw-only heading stream for FusionCore.
+    gnss.heading_topic: ""           # Disabled because yaw is fused directly from imu/data_raw.
     gnss.azimuth_topic: ""           # Optional REP-145 compass_msgs/Azimuth heading topic.
     gnss.lever_arm_x: 0.0            # Antenna offset from base frame in meters: X forward.
     gnss.lever_arm_y: 0.0            # Antenna offset from base frame in meters: Y left.
