@@ -8,7 +8,7 @@
     publish.yaw_only: true           # Publish odom -> base_footprint with yaw only; layer 2 already drives roll/pitch via base_footprint -> base_link.
 
     # -- IMU -------------------------------------------------------------------
-    imu.has_magnetometer: false      # The primary IMU stream carries accel/gyro only; yaw is fused separately through gnss.heading_topic.
+    imu.has_magnetometer: true       # The physical IMU includes a magnetometer; this stack still feeds accel/gyro on /imu/data and yaw on gnss.heading_topic via imu/data_heading.
     imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
     imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
     imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.

@@ -967,6 +967,75 @@ private:
     return true;
   }
 
+  bool extract_yaw_from_heading_msg(
+    const sensor_msgs::msg::Imu::SharedPtr& msg,
+    double* yaw_rad,
+    std::string* error_message = nullptr) const
+  {
+    bool orientation_valid = false;
+    for (double covariance : msg->orientation_covariance) {
+      if (covariance != 0.0) {
+        orientation_valid = true;
+        break;
+      }
+    }
+
+    if (msg->orientation_covariance[0] < 0.0 || !orientation_valid) {
+      if (error_message != nullptr) {
+        *error_message = "orientation unavailable";
+      }
+      return false;
+    }
+
+    tf2::Quaternion q(
+      msg->orientation.x,
+      msg->orientation.y,
+      msg->orientation.z,
+      msg->orientation.w);
+    if (q.length2() < 1e-12) {
+      if (error_message != nullptr) {
+        *error_message = "orientation quaternion is zero";
+      }
+      return false;
+    }
+
+    q.normalize();
+    double roll, pitch, yaw;
+    tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+    *yaw_rad = yaw;
+    return true;
+  }
+
+  bool seed_initial_yaw_from_heading(
+    fusioncore::State* initial,
+    const char* context)
+  {
+    if (!latest_heading_valid_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "Startup yaw seed skipped during %s: waiting for heading on %s",
+        context, heading_topic_.c_str());
+      return false;
+    }
+
+    tf2::Quaternion q_heading;
+    q_heading.setRPY(0.0, 0.0, latest_heading_yaw_rad_);
+    q_heading.normalize();
+
+    initial->x[fusioncore::QW] = q_heading.w();
+    initial->x[fusioncore::QX] = q_heading.x();
+    initial->x[fusioncore::QY] = q_heading.y();
+    initial->x[fusioncore::QZ] = q_heading.z();
+
+    RCLCPP_INFO(
+      get_logger(),
+      "Startup yaw seed (%s): yaw=%.2f deg from %s",
+      context,
+      latest_heading_yaw_rad_ * 180.0 / M_PI,
+      heading_topic_.c_str());
+    return true;
+  }
+
   void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
     double t = rclcpp::Time(msg->header.stamp).seconds();
@@ -1106,7 +1175,11 @@ private:
 
           if (init_win_orient_n_ == 0) {
             if (!seed_initial_orientation_from_imu(&initial, msg, "bias window fallback")) {
-              return;  // Wait for a valid IMU->base orientation seed before initializing.
+              if (heading_topic_.empty() ||
+                  !seed_initial_yaw_from_heading(&initial, "bias window fallback"))
+              {
+                return;  // Wait for a valid startup orientation or heading seed before initializing.
+              }
             }
           } else {
             double roll, pitch, yaw;
@@ -1770,40 +1843,21 @@ private:
   void gnss_heading_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
     mark_sensor_received("Heading");
-    if (!fc_->is_initialized()) return;
-
-    double t = rclcpp::Time(msg->header.stamp).seconds();
-
-    // Check orientation covariance: if all zeros the orientation is invalid
-    bool orientation_valid = false;
-    for (int i = 0; i < 9; ++i) {
-      if (msg->orientation_covariance[i] != 0.0) {
-        orientation_valid = true;
-        break;
-      }
-    }
-
-    // Some drivers set covariance[0] = -1 to signal "no orientation"
-    if (msg->orientation_covariance[0] < 0.0) {
-      orientation_valid = false;
-    }
-
-    if (!orientation_valid) {
+    double yaw = 0.0;
+    std::string error_message;
+    if (!extract_yaw_from_heading_msg(msg, &yaw, &error_message)) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 10000,
         "Dual antenna heading message has invalid orientation covariance."
         " Check your GPS driver configuration.");
       return;
     }
 
-    // Extract yaw from quaternion
-    tf2::Quaternion q(
-      msg->orientation.x,
-      msg->orientation.y,
-      msg->orientation.z,
-      msg->orientation.w);
+    latest_heading_yaw_rad_ = yaw;
+    latest_heading_valid_ = true;
 
-    double roll, pitch, yaw;
-    tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+    if (!fc_->is_initialized()) return;
+
+    double t = rclcpp::Time(msg->header.stamp).seconds();
 
     // Extract heading accuracy from orientation covariance
     // covariance[8] is the yaw variance (3rd diagonal element)
@@ -2248,6 +2302,8 @@ private:
   double init_win_ax_ = 0.0, init_win_ay_ = 0.0, init_win_az_ = 0.0;
   double init_win_qw_ = 0.0, init_win_qx_ = 0.0, init_win_qy_ = 0.0, init_win_qz_ = 0.0;
   int    init_win_orient_n_      = 0;
+  bool   latest_heading_valid_   = false;
+  double latest_heading_yaw_rad_ = 0.0;
   bool        gnss_ref_set_        = false;
   bool        imu_remove_gravity_  = false;
   std::string imu_topic_;
