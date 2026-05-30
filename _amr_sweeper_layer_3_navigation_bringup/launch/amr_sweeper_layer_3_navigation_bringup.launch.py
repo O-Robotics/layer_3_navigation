@@ -3,14 +3,20 @@
 # Copyright 2026 O-Robotics
 
 import json
+import os
 from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
+from lifecycle_msgs.msg import Transition
 
 DEFAULT_MISSION_COSTMAP_YAML = "src/missions_log/global_costmap.yaml"
 
@@ -52,10 +58,10 @@ def _resolve_execution_context(missions_directory: str, execution_pointer_file: 
 def _build_launches(context):
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
-    use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization')
+    use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization').perform(context).lower() == 'true'
     use_amr_sweeper_visual_odometry = LaunchConfiguration('use_amr_sweeper_visual_odometry')
-    use_amr_sweeper_waypoint_follower = LaunchConfiguration('use_amr_sweeper_waypoint_follower')
-    use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping')
+    use_amr_sweeper_waypoint_follower = LaunchConfiguration('use_amr_sweeper_waypoint_follower').perform(context).lower() == 'true'
+    use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping').perform(context).lower() == 'true'
     missions_directory = LaunchConfiguration('missions_directory').perform(context)
     execution_pointer_file = LaunchConfiguration('execution_pointer_file').perform(context)
     mission_execution_directory = LaunchConfiguration('mission_execution_directory').perform(context)
@@ -66,7 +72,7 @@ def _build_launches(context):
     )
     mission_costmap_yaml = mission_context.get("mission_costmap_yaml") or DEFAULT_MISSION_COSTMAP_YAML
 
-    return [
+    actions = [
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 _launch_file('amr_sweeper_visual_odometry', 'amr_sweeper_visual_odometry.launch.py')
@@ -77,41 +83,132 @@ def _build_launches(context):
             }.items(),
             condition=IfCondition(use_amr_sweeper_visual_odometry),
         ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                _launch_file('amr_sweeper_localization', 'fusioncore.launch.py')
-            ),
-            launch_arguments={
-                'namespace': namespace,
-                'use_sim_time': use_sim_time,
-            }.items(),
-            condition=IfCondition(use_amr_sweeper_localization),
-        ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                _launch_file('amr_sweeper_waypoint_follower', 'bringup_launch.py')
-            ),
-            launch_arguments={
-                'namespace': namespace,
-                'use_sim_time': use_sim_time,
-                'mission_costmap_yaml': mission_costmap_yaml,
-            }.items(),
-            condition=IfCondition(use_amr_sweeper_waypoint_follower),
-        ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                _launch_file('amr_sweeper_mapping', 'amr_sweeper_mapping.launch.py')
-            ),
-            launch_arguments={
-                'namespace': namespace,
-                'use_sim_time': use_sim_time,
-                'missions_directory': missions_directory,
-                'execution_pointer_file': execution_pointer_file,
-                'mission_execution_directory': mission_execution_directory,
-            }.items(),
-            condition=IfCondition(use_amr_sweeper_mapping),
-        ),
     ]
+
+    waypoint_follower_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            _launch_file('amr_sweeper_waypoint_follower', 'bringup_launch.py')
+        ),
+        launch_arguments={
+            'namespace': namespace,
+            'use_sim_time': use_sim_time,
+            'mission_costmap_yaml': mission_costmap_yaml,
+        }.items(),
+    )
+    mapping_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            _launch_file('amr_sweeper_mapping', 'amr_sweeper_mapping.launch.py')
+        ),
+        launch_arguments={
+            'namespace': namespace,
+            'use_sim_time': use_sim_time,
+            'missions_directory': missions_directory,
+            'execution_pointer_file': execution_pointer_file,
+            'mission_execution_directory': mission_execution_directory,
+        }.items(),
+    )
+
+    if use_amr_sweeper_localization:
+        localization_package_dir = get_package_share_directory("amr_sweeper_localization")
+        localization_config_path = os.path.join(localization_package_dir, "config", "fusioncore.yaml")
+        use_sim_time_bool = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
+
+        fusioncore_node = LifecycleNode(
+            package="fusioncore_ros",
+            executable="fusioncore_node",
+            name="fusioncore",
+            namespace=LaunchConfiguration("namespace").perform(context),
+            output="screen",
+            parameters=[
+                localization_config_path,
+                {
+                    "use_sim_time": use_sim_time_bool,
+                    "base_frame": "base_footprint",
+                    "odom_frame": "odom",
+                },
+            ],
+            remappings=[
+                ("/imu/data", "imu/data_acc_gyro"),
+                ("/odom/wheels", "diff_cont/odom"),
+                ("/gnss/fix", "gnss/navsat"),
+                ("/fusion/odom", "odometry/fused"),
+                ("/fusion/pose", "pose"),
+            ],
+        )
+
+        configure_fusioncore = TimerAction(
+            period=2.0,
+            actions=[
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda action: action is fusioncore_node,
+                        transition_id=Transition.TRANSITION_CONFIGURE,
+                    )
+                )
+            ],
+        )
+
+        activate_fusioncore = RegisterEventHandler(
+            OnStateTransition(
+                target_lifecycle_node=fusioncore_node,
+                start_state="configuring",
+                goal_state="inactive",
+                entities=[
+                    EmitEvent(
+                        event=ChangeState(
+                            lifecycle_node_matcher=lambda action: action is fusioncore_node,
+                            transition_id=Transition.TRANSITION_ACTIVATE,
+                        )
+                    )
+                ],
+            )
+        )
+
+        map_to_odom = Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="map_to_odom_static_tf",
+            namespace=LaunchConfiguration("namespace").perform(context),
+            output="screen",
+            arguments=[
+                "--x", "0",
+                "--y", "0",
+                "--z", "0",
+                "--roll", "0",
+                "--pitch", "0",
+                "--yaw", "0",
+                "--frame-id", "map",
+                "--child-frame-id", "odom",
+            ],
+            parameters=[{"use_sim_time": use_sim_time_bool}],
+        )
+
+        actions.extend([fusioncore_node, configure_fusioncore, activate_fusioncore, map_to_odom])
+
+        gated_entities = []
+        if use_amr_sweeper_waypoint_follower:
+            gated_entities.append(waypoint_follower_launch)
+        if use_amr_sweeper_mapping:
+            gated_entities.append(mapping_launch)
+
+        if gated_entities:
+            actions.append(
+                RegisterEventHandler(
+                    OnStateTransition(
+                        target_lifecycle_node=fusioncore_node,
+                        start_state="activating",
+                        goal_state="active",
+                        entities=gated_entities,
+                    )
+                )
+            )
+    else:
+        if use_amr_sweeper_waypoint_follower:
+            actions.append(waypoint_follower_launch)
+        if use_amr_sweeper_mapping:
+            actions.append(mapping_launch)
+
+    return actions
 
 
 def generate_launch_description():
