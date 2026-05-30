@@ -1011,7 +1011,9 @@ private:
         initial.P(0,0) = 1000.0;
         initial.P(1,1) = 1000.0;
         initial.P(2,2) = 1000.0;
-        seed_initial_orientation_from_imu(&initial, msg, "first IMU");
+        if (!seed_initial_orientation_from_imu(&initial, msg, "first IMU")) {
+          return;
+        }
         fc_->init(initial, t);
         pending_init_ = false;
         RCLCPP_INFO(get_logger(), "Filter initialized at t=%.3f (first IMU)", t);
@@ -1103,7 +1105,9 @@ private:
           }
 
           if (init_win_orient_n_ == 0) {
-            seed_initial_orientation_from_imu(&initial, msg, "bias window fallback");
+            if (!seed_initial_orientation_from_imu(&initial, msg, "bias window fallback")) {
+              return;  // Wait for a valid IMU->base orientation seed before initializing.
+            }
           } else {
             double roll, pitch, yaw;
             fusioncore::quat_to_euler(
