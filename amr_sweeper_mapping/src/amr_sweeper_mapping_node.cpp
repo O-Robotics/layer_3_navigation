@@ -24,7 +24,7 @@ namespace
 
 constexpr char kEnabledParam[] = "enabled";
 constexpr char kCostmapYamlPathParam[] = "costmap_yaml_path";
-constexpr char kDefaultCostmapYamlPath[] = "src/missions_log/global_costmap.yaml";
+constexpr char kDefaultCostmapYamlPath[] = "";
 constexpr char kDefaultMissionRoutePath[] = "src/missions_log/active_mission_path.geojson";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
@@ -226,7 +226,32 @@ void Vda5050CostmapLayer::loadArtifact()
 
   std::string yaml_path;
   node->get_parameter(getFullName(kCostmapYamlPathParam), yaml_path);
-  artifact_ = parseCostmapArtifact(resolveArtifactPath(yaml_path));
+  if (yaml_path.empty()) {
+    artifact_ = LoadedCostmapArtifact{};
+    artifact_loaded_ = false;
+    RCLCPP_WARN(
+      node->get_logger(),
+      "No mission costmap yaml was provided for %s. The geojson layer will stay inactive until a "
+      "mission-specific costmap artifact is configured.",
+      getName().c_str());
+    return;
+  }
+
+  const std::string resolved_path = resolveArtifactPath(yaml_path);
+  std::error_code filesystem_error;
+  if (!std::filesystem::is_regular_file(resolved_path, filesystem_error)) {
+    artifact_ = LoadedCostmapArtifact{};
+    artifact_loaded_ = false;
+    RCLCPP_WARN(
+      node->get_logger(),
+      "Mission costmap yaml for %s was configured as '%s' but no file was found there. "
+      "The geojson layer will stay inactive.",
+      getName().c_str(),
+      resolved_path.c_str());
+    return;
+  }
+
+  artifact_ = parseCostmapArtifact(resolved_path);
   artifact_loaded_ = true;
 }
 
@@ -352,9 +377,10 @@ MappingNode::MappingNode()
   declare_parameter("mission_file", std::string(""));
   declare_parameter("mission_route_file", std::string(kDefaultMissionRoutePath));
   declare_parameter("mission_id", std::string(""));
-  declare_parameter("mission_output_directory", std::string("src/missions_log"));
+  declare_parameter("mission_output_directory", std::string(""));
   declare_parameter("actual_path_output_file", std::string(""));
   declare_parameter("actual_path_navsat_output_file", std::string(""));
+  declare_parameter("mission_costmap_yaml", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
   declare_parameter("mission_window_end", std::string(""));
   declare_parameter("slam_backend", std::string("slam_toolbox"));
@@ -379,6 +405,7 @@ MappingNode::MappingNode()
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
   actual_path_output_file_ = get_parameter("actual_path_output_file").as_string();
   actual_path_navsat_output_file_ = get_parameter("actual_path_navsat_output_file").as_string();
+  mission_costmap_yaml_ = get_parameter("mission_costmap_yaml").as_string();
   mission_window_start_ = get_parameter("mission_window_start").as_string();
   mission_window_end_ = get_parameter("mission_window_end").as_string();
   slam_backend_ = get_parameter("slam_backend").as_string();
@@ -439,9 +466,10 @@ MappingNode::MappingNode()
 
   RCLCPP_INFO(
     get_logger(),
-    "Mapping coordinator ready; mission=%s route=%s output_dir=%s slam_backend=%s gaussian_mode=%s execution_mode=%s",
+    "Mapping coordinator ready; mission=%s route=%s costmap=%s output_dir=%s slam_backend=%s gaussian_mode=%s execution_mode=%s",
     mission_file_.c_str(),
     mission_route_file_.c_str(),
+    mission_costmap_yaml_.c_str(),
     mission_output_directory_.c_str(),
     slam_backend_.c_str(),
     gaussian_mode_.c_str(),
@@ -484,6 +512,7 @@ void MappingNode::publishCoordinatorStatus()
     "; route=" + mission_route_file_ +
     "; mission_id=" + mission_id_ +
     "; mission_output_directory=" + mission_output_directory_ +
+    "; mission_costmap_yaml=" + mission_costmap_yaml_ +
     "; mission_window_start=" + mission_window_start_ +
     "; mission_window_end=" + mission_window_end_ +
     "; slam_backend=" + slam_backend_ +
@@ -512,6 +541,7 @@ void MappingNode::writeMissionSessionMetadata() const
     {"mission_type", mission_type_},
     {"execution_mode", execution_mode_},
     {"mission_route_file", mission_route_file_},
+    {"mission_costmap_yaml", mission_costmap_yaml_},
     {"mission_window_start", mission_window_start_},
     {"mission_window_end", mission_window_end_},
     {"slam_backend", slam_backend_},

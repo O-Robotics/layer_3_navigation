@@ -68,6 +68,8 @@ def _build_launches(context):
     missions_directory = LaunchConfiguration('missions_directory').perform(context)
     execution_pointer_file = LaunchConfiguration('execution_pointer_file').perform(context)
     mission_execution_directory = LaunchConfiguration('mission_execution_directory').perform(context)
+    use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
+    test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
     mission_context = _resolve_execution_context(
         missions_directory,
         execution_pointer_file,
@@ -108,6 +110,8 @@ def _build_launches(context):
             'missions_directory': missions_directory,
             'execution_pointer_file': execution_pointer_file,
             'mission_execution_directory': mission_execution_directory,
+            'use_test': 'true' if use_test else 'false',
+            'test_output_directory': test_output_directory,
         }.items(),
     )
 
@@ -226,5 +230,7 @@ def generate_launch_description():
         DeclareLaunchArgument('missions_directory', default_value='src/missions_log'),
         DeclareLaunchArgument('execution_pointer_file', default_value='active_execution.json'),
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
+        DeclareLaunchArgument('use_test', default_value='false'),
+        DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
         OpaqueFunction(function=_build_launches),
     ])

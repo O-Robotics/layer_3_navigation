@@ -1322,6 +1322,23 @@ bool VisualOdometryNode::resolveCameraExtrinsics(
     tf2::fromMsg(transform.transform, camera->base_to_camera);
     return true;
   } catch (const tf2::TransformException & error) {
+    try {
+      const geometry_msgs::msg::TransformStamped latest_transform =
+        tf_buffer_.lookupTransform(base_frame_, camera_frame, tf2::TimePointZero);
+      tf2::fromMsg(latest_transform.transform, camera->base_to_camera);
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Using latest available transform from %s to %s for camera %s because the exact stamp lookup failed: %s",
+        base_frame_.c_str(),
+        camera_frame.c_str(),
+        camera->name.c_str(),
+        error.what());
+      return true;
+    } catch (const tf2::TransformException &) {
+    }
+
     RCLCPP_WARN_THROTTLE(
       get_logger(),
       *get_clock(),

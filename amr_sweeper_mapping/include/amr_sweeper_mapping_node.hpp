@@ -104,6 +104,7 @@ private:
   std::string mission_file_;
   std::string mission_type_;
   std::string execution_mode_{"follow_waypoints"};
+  std::string mission_costmap_yaml_;
   std::string slam_backend_;
   std::string gaussian_mode_;
   std::string mission_route_file_;

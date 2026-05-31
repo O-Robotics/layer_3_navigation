@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -46,6 +46,9 @@ def _build_nodes(context):
     missions_directory = LaunchConfiguration("missions_directory").perform(context)
     execution_pointer_file = LaunchConfiguration("execution_pointer_file").perform(context)
     mission_execution_directory = LaunchConfiguration("mission_execution_directory").perform(context)
+    use_test = LaunchConfiguration("use_test").perform(context).lower() == "true"
+    test_output_directory = LaunchConfiguration("test_output_directory").perform(context)
+    configured_mission_costmap_yaml = LaunchConfiguration("mission_costmap_yaml").perform(context)
 
     mission_context = _resolve_execution_context(
         missions_directory,
@@ -55,21 +58,29 @@ def _build_nodes(context):
     mission_id = mission_context.get("mission_id", "")
     mission_file = mission_context.get("mission_file", "")
     mission_route_file = mission_context.get("mission_route_file", "")
-    mission_run_directory = mission_context.get("mission_run_directory", missions_directory)
+    mission_run_directory = mission_context.get("mission_run_directory", "")
     mission_window_start = mission_context.get("mission_window_start", "")
     mission_window_end = mission_context.get("mission_window_end", "")
-    actual_path_output_file = mission_context.get(
-        "actual_path_file",
-        str(Path(mission_run_directory) / "actual_path.geojson"),
+    actual_path_output_file = mission_context.get("actual_path_file", "")
+    if not actual_path_output_file and mission_run_directory:
+        actual_path_output_file = str(Path(mission_run_directory) / "actual_path.geojson")
+    actual_path_navsat_output_file = mission_context.get("actual_path_navsat_file", "")
+    if not actual_path_navsat_output_file and mission_run_directory:
+        actual_path_navsat_output_file = str(Path(mission_run_directory) / "actual_path_navsat.geojson")
+    mission_costmap_yaml = configured_mission_costmap_yaml or mission_context.get(
+        "mission_costmap_yaml", ""
     )
-    actual_path_navsat_output_file = mission_context.get(
-        "actual_path_navsat_file",
-        str(Path(mission_run_directory) / "actual_path_navsat.geojson"),
-    )
-    gaussian_output_directory = mission_context.get(
-        "gaussian_output_directory",
-        str(Path(mission_run_directory) / "gaussian"),
-    )
+    gaussian_output_directory = mission_context.get("gaussian_output_directory", "")
+    if not gaussian_output_directory and mission_run_directory:
+        gaussian_output_directory = str(Path(mission_run_directory) / "gaussian")
+    if use_test and not mission_run_directory and test_output_directory:
+        mission_run_directory = test_output_directory
+        if not actual_path_output_file:
+            actual_path_output_file = str(Path(test_output_directory) / "actual_path.geojson")
+        if not actual_path_navsat_output_file:
+            actual_path_navsat_output_file = str(Path(test_output_directory) / "actual_path_navsat.geojson")
+        if not gaussian_output_directory:
+            gaussian_output_directory = test_output_directory
 
     gaussian_representation_name = (
         f"{mission_id}_gaussian_map" if mission_id else "global_gaussian_map"
@@ -91,12 +102,32 @@ def _build_nodes(context):
         common_runtime_parameters["actual_path_output_file"] = actual_path_output_file
     if actual_path_navsat_output_file:
         common_runtime_parameters["actual_path_navsat_output_file"] = actual_path_navsat_output_file
+    if mission_costmap_yaml:
+        common_runtime_parameters["mission_costmap_yaml"] = mission_costmap_yaml
     if mission_window_start:
         common_runtime_parameters["mission_window_start"] = mission_window_start
     if mission_window_end:
         common_runtime_parameters["mission_window_end"] = mission_window_end
 
-    return [
+    actions = []
+    if mission_costmap_yaml:
+        actions.append(
+            LogInfo(
+                msg=f"amr_sweeper_mapping using mission costmap from execution context: {mission_costmap_yaml}"
+            )
+        )
+    else:
+        actions.append(
+            LogInfo(
+                msg=(
+                    "amr_sweeper_mapping did not receive a mission-specific costmap yaml. "
+                    "Standalone launch will continue, and the geojson costmap layer will stay inactive "
+                    "until a mission_costmap_yaml is provided."
+                )
+            )
+        )
+
+    actions.extend([
         Node(
             package="amr_sweeper_mapping",
             executable="slam_node",
@@ -128,7 +159,9 @@ def _build_nodes(context):
             output="screen",
             parameters=[params_file, common_runtime_parameters],
         ),
-    ]
+    ])
+
+    return actions
 
 
 def generate_launch_description():
@@ -165,6 +198,24 @@ def generate_launch_description():
                 "mission_execution_directory",
                 default_value="",
                 description="Exact scheduler-selected mission execution folder for the active RUNNING mission.",
+            ),
+            DeclareLaunchArgument(
+                "use_test",
+                default_value="false",
+                description="When true and no mission execution folder is available, write generic mapping test artifacts into test_output_directory.",
+            ),
+            DeclareLaunchArgument(
+                "test_output_directory",
+                default_value="src/layer_3_navigation/tests",
+                description="Generic test artifact directory used only when use_test is enabled without a mission execution folder.",
+            ),
+            DeclareLaunchArgument(
+                "mission_costmap_yaml",
+                default_value="",
+                description=(
+                    "Exact mission costmap yaml. Leave empty to resolve it from execution_context.json "
+                    "or continue standalone with an inactive geojson layer."
+                ),
             ),
             OpaqueFunction(function=_build_nodes),
         ]
