@@ -1317,28 +1317,26 @@ bool VisualOdometryNode::resolveCameraExtrinsics(
   }
 
   try {
-    const geometry_msgs::msg::TransformStamped transform =
-      tf_buffer_.lookupTransform(base_frame_, camera_frame, stamp);
-    tf2::fromMsg(transform.transform, camera->base_to_camera);
-    return true;
-  } catch (const tf2::TransformException & error) {
-    try {
-      const geometry_msgs::msg::TransformStamped latest_transform =
-        tf_buffer_.lookupTransform(base_frame_, camera_frame, tf2::TimePointZero);
-      tf2::fromMsg(latest_transform.transform, camera->base_to_camera);
+    const geometry_msgs::msg::TransformStamped latest_transform =
+      tf_buffer_.lookupTransform(base_frame_, camera_frame, tf2::TimePointZero);
+    tf2::fromMsg(latest_transform.transform, camera->base_to_camera);
+
+    const rclcpp::Time transform_stamp(latest_transform.header.stamp, get_clock()->get_clock_type());
+    const double lag_seconds = (stamp - transform_stamp).seconds();
+    if (lag_seconds > 0.005) {
       RCLCPP_WARN_THROTTLE(
         get_logger(),
         *get_clock(),
         5000,
-        "Using latest available transform from %s to %s for camera %s because the exact stamp lookup failed: %s",
+        "Latest transform from %s to %s for camera %s is %.3f ms older than the image stamp",
         base_frame_.c_str(),
         camera_frame.c_str(),
         camera->name.c_str(),
-        error.what());
-      return true;
-    } catch (const tf2::TransformException &) {
+        lag_seconds * 1000.0);
     }
 
+    return true;
+  } catch (const tf2::TransformException & error) {
     RCLCPP_WARN_THROTTLE(
       get_logger(),
       *get_clock(),
