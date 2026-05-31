@@ -26,16 +26,16 @@
     stereo_max_reprojection_error_m:                       0.20                  # Reject stereo 3D correspondences that do not fit a rigid transform well.
 
     # -- Enabled cameras ------------------------------------------------------
-    camera_names: [tool_camera, depth_camera, depth_camera_infra1, depth_camera_infra2, front_left_camera, front_right_camera, rear_left_camera, rear_right_camera]
+    camera_names: [depth_camera_infra1, depth_camera_infra2]
     stereo_pairs: [depth_camera_infra_stereo]
 
-    cameras.tool_camera.enabled:                            true
+    cameras.tool_camera.enabled:                            false
     cameras.tool_camera.image_topic:                        usb_cameras/tools_camera/image_raw
     cameras.tool_camera.camera_info_topic:                  usb_cameras/tools_camera/tools_camera_info
     cameras.tool_camera.camera_frame:                       ""
     cameras.tool_camera.fusion_weight:                      0.5                   # Lower confidence than the depth camera because this stream is low-rate and low-resolution.
 
-    cameras.depth_camera.enabled:                           true
+    cameras.depth_camera.enabled:                           false
     cameras.depth_camera.image_topic:                       depth_camera/color/image_raw
     cameras.depth_camera.camera_info_topic:                 depth_camera/color/camera_info
     cameras.depth_camera.camera_frame:                      depth_camera_color_optical_frame
