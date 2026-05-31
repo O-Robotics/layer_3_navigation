@@ -1,16 +1,16 @@
 /**:
   ros__parameters:
     # -- Motion reference -----------------------------------------------------
-    motion_reference.mode: imu                 # Use IMU-integrated short-horizon motion as the default scale and yaw reference.
-    motion_reference.imu_topic: imu/data_raw  # IMU topic that provides orientation plus linear acceleration for short-horizon scale estimation.
-    motion_reference.use_yaw: true            # Override visual yaw with motion-reference yaw when available.
+    motion_reference.imu_topic: imu/data_raw  # IMU topic used as the yaw reference for monocular VO.
+    motion_reference.use_imu_yaw: true        # Use IMU yaw to stabilize per-frame heading.
+    motion_reference.use_wheel_scale: true    # Use wheel odometry only for metric translation scale.
     motion_reference.lookup_tolerance_seconds: 0.20  # Maximum timestamp mismatch allowed when pairing camera frames to the motion reference.
     motion_reference.history_seconds: 5.0     # Motion-reference history retained for timestamp alignment.
     motion_reference.imu_max_dt_seconds: 0.10  # Clamp IMU integration steps to avoid large jumps after delayed messages.
-    motion_reference.imu_planar_accel_deadband_mps2: 0.15  # Treat smaller planar accelerations as zero to reduce drift.
-    motion_reference.imu_velocity_damping_per_second: 1.5  # Exponential damping applied to the integrated planar IMU velocity.
-    motion_reference.imu_stationary_angular_velocity_threshold_rad_s: 0.05  # Zero the IMU-integrated velocity when the robot is effectively stationary.
-    wheel_odom_topic: diff_cont/odom          # Optional fallback motion reference topic when motion_reference.mode is set to wheel.
+    motion_reference.imu_planar_accel_deadband_mps2: 0.15  # Retained for IMU-history timing; not used for metric scale.
+    motion_reference.imu_velocity_damping_per_second: 1.5  # Retained for IMU-history timing; not used for metric scale.
+    motion_reference.imu_stationary_angular_velocity_threshold_rad_s: 0.05  # Retained for IMU-history timing; not used for metric scale.
+    wheel_odom_topic: diff_cont/odom          # Wheel odometry topic used for translation scale.
 
     # -- VO output ------------------------------------------------------------
     odom_topic: visual_odometry/odom          # Single fused VO topic published for downstream localization.
@@ -21,39 +21,66 @@
     fusion_method: ekf                        # Sequential Kalman-style fusion across all enabled camera delta estimates.
     min_cameras_per_estimate: 1               # Allow single-camera operation while still supporting multi-camera fusion.
     camera_fusion_tolerance_seconds: 0.05     # Group per-camera estimates that land close in time into one fused VO update.
+    stereo_match_max_error: 20.0              # LK error gate when matching left-to-right stereo correspondences.
+    stereo_min_disparity_px: 1.0              # Ignore nearly-zero disparity matches because they triangulate poorly.
+    stereo_max_reprojection_error_m: 0.20     # Reject stereo 3D correspondences that do not fit a rigid transform well.
 
     # -- Enabled cameras ------------------------------------------------------
-    camera_names: [tool_camera, depth_camera, front_left_camera, front_right_camera, rear_left_camera, rear_right_camera]
+    camera_names: [tool_camera, depth_camera, depth_camera_infra1, depth_camera_infra2, front_left_camera, front_right_camera, rear_left_camera, rear_right_camera]
+    stereo_pairs: [depth_camera_infra_stereo]
 
     cameras.tool_camera.enabled: true
     cameras.tool_camera.image_topic: usb_cameras/tools_camera/image_raw
     cameras.tool_camera.camera_info_topic: usb_cameras/tools_camera/tools_camera_info
     cameras.tool_camera.camera_frame: ""
+    cameras.tool_camera.fusion_weight: 0.5    # Lower confidence than the depth camera because this stream is low-rate and low-resolution.
 
     cameras.depth_camera.enabled: true
     cameras.depth_camera.image_topic: depth_camera/color/image_raw
     cameras.depth_camera.camera_info_topic: depth_camera/color/camera_info
     cameras.depth_camera.camera_frame: depth_camera_color_optical_frame
+    cameras.depth_camera.fusion_weight: 1.0   # Prefer the native depth-camera color stream when both cameras are available.
+
+    cameras.depth_camera_infra1.enabled: true
+    cameras.depth_camera_infra1.image_topic: depth_camera/infra1/image_rect_raw
+    cameras.depth_camera_infra1.camera_info_topic: depth_camera/infra1/camera_info
+    cameras.depth_camera_infra1.camera_frame: depth_camera_infra1_optical_frame
+    cameras.depth_camera_infra1.fusion_weight: 1.1
+
+    cameras.depth_camera_infra2.enabled: true
+    cameras.depth_camera_infra2.image_topic: depth_camera/infra2/image_rect_raw
+    cameras.depth_camera_infra2.camera_info_topic: depth_camera/infra2/camera_info
+    cameras.depth_camera_infra2.camera_frame: depth_camera_infra2_optical_frame
+    cameras.depth_camera_infra2.fusion_weight: 1.1
 
     cameras.front_left_camera.enabled: false
     cameras.front_left_camera.image_topic: usb_cameras/front_left_camera/image_raw
     cameras.front_left_camera.camera_info_topic: usb_cameras/front_left_camera/front_left_camera_info
     cameras.front_left_camera.camera_frame: ""
+    cameras.front_left_camera.fusion_weight: 0.5
 
     cameras.front_right_camera.enabled: false
     cameras.front_right_camera.image_topic: usb_cameras/front_right_camera/image_raw
     cameras.front_right_camera.camera_info_topic: usb_cameras/front_right_camera/front_right_camera_info
     cameras.front_right_camera.camera_frame: ""
+    cameras.front_right_camera.fusion_weight: 0.5
 
     cameras.rear_left_camera.enabled: false
     cameras.rear_left_camera.image_topic: usb_cameras/rear_left_camera/image_raw
     cameras.rear_left_camera.camera_info_topic: usb_cameras/rear_left_camera/rear_left_camera_info
     cameras.rear_left_camera.camera_frame: ""
+    cameras.rear_left_camera.fusion_weight: 0.5
 
     cameras.rear_right_camera.enabled: false
     cameras.rear_right_camera.image_topic: usb_cameras/rear_right_camera/image_raw
     cameras.rear_right_camera.camera_info_topic: usb_cameras/rear_right_camera/rear_right_camera_info
     cameras.rear_right_camera.camera_frame: ""
+    cameras.rear_right_camera.fusion_weight: 0.5
+
+    stereo_pairs.depth_camera_infra_stereo.left_camera: depth_camera_infra1
+    stereo_pairs.depth_camera_infra_stereo.right_camera: depth_camera_infra2
+    stereo_pairs.depth_camera_infra_stereo.fusion_weight: 1.25
+    stereo_pairs.depth_camera_infra_stereo.sync_tolerance_seconds: 0.02
 
     # -- Feature tracking -----------------------------------------------------
     max_features: 500

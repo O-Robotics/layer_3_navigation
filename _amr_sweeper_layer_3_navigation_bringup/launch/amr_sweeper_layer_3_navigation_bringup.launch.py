@@ -60,6 +60,9 @@ def _build_launches(context):
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization').perform(context).lower() == 'true'
     use_amr_sweeper_visual_odometry = LaunchConfiguration('use_amr_sweeper_visual_odometry')
+    use_amr_sweeper_visual_odometry_bool = (
+        use_amr_sweeper_visual_odometry.perform(context).lower() == 'true'
+    )
     use_amr_sweeper_waypoint_follower = LaunchConfiguration('use_amr_sweeper_waypoint_follower').perform(context).lower() == 'true'
     use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping').perform(context).lower() == 'true'
     missions_directory = LaunchConfiguration('missions_directory').perform(context)
@@ -125,6 +128,7 @@ def _build_launches(context):
                     "use_sim_time": use_sim_time_bool,
                     "base_frame": "base_footprint",
                     "odom_frame": "odom",
+                    "encoder2.topic": "visual_odometry/odom" if use_amr_sweeper_visual_odometry_bool else "",
                 },
             ],
             remappings=[
