@@ -13,6 +13,7 @@
 
 #include <action_msgs/msg/goal_status.hpp>
 #include <geometry_msgs/msg/point.hpp>
+#include <lifecycle_msgs/msg/state.hpp>
 #include <nlohmann/json.hpp>
 #include <pluginlib/class_list_macros.hpp>
 
@@ -393,6 +394,7 @@ MappingNode::MappingNode()
   declare_parameter("status_period_seconds", 2.0);
   declare_parameter("mission_tick_period_seconds", 1.0);
   declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
+  declare_parameter("waypoint_follower_state_service", std::string("waypoint_follower/get_state"));
   declare_parameter("end_mission_service", std::string("end_mission"));
 
   mission_file_ = get_parameter("mission_file").as_string();
@@ -413,6 +415,8 @@ MappingNode::MappingNode()
   frame_id_ = get_parameter("frame_id").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
+  waypoint_follower_state_service_name_ =
+    get_parameter("waypoint_follower_state_service").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
@@ -446,6 +450,11 @@ MappingNode::MappingNode()
   end_mission_client_ =
     create_client<amr_sweeper_mission_executor::srv::EndMission>(
     end_mission_service_name_,
+    rclcpp::ServicesQoS(),
+    mission_callback_group_);
+  waypoint_follower_state_client_ =
+    create_client<lifecycle_msgs::srv::GetState>(
+    waypoint_follower_state_service_name_,
     rclcpp::ServicesQoS(),
     mission_callback_group_);
   follow_waypoints_client_ = rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(
@@ -748,6 +757,10 @@ void MappingNode::startNextMissionChunk()
     return;
   }
 
+  if (!isWaypointFollowerActive()) {
+    return;
+  }
+
   nav2_msgs::action::FollowWaypoints::Goal goal;
   const auto stamp = now();
   for (auto pose : mission_chunks_.at(active_chunk_index_)) {
@@ -772,12 +785,69 @@ void MappingNode::startNextMissionChunk()
     goal.poses.size());
 }
 
+bool MappingNode::isWaypointFollowerActive()
+{
+  if (!waypoint_follower_state_client_->wait_for_service(std::chrono::milliseconds(0))) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for waypoint follower lifecycle service %s.",
+      waypoint_follower_state_service_name_.c_str());
+    return false;
+  }
+
+  auto request = std::make_shared<lifecycle_msgs::srv::GetState::Request>();
+  auto future = waypoint_follower_state_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(250)) != std::future_status::ready) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for waypoint follower lifecycle state from %s.",
+      waypoint_follower_state_service_name_.c_str());
+    return false;
+  }
+
+  const auto response = future.get();
+  if (!response) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waypoint follower lifecycle state request returned no response.");
+    return false;
+  }
+
+  if (response->current_state.id != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for waypoint follower to become active. Current state: %s (%u).",
+      response->current_state.label.c_str(),
+      static_cast<unsigned int>(response->current_state.id));
+    return false;
+  }
+
+  return true;
+}
+
 void MappingNode::handleGoalResponse(
   rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::SharedPtr goal_handle)
 {
   if (!goal_handle) {
     waiting_for_goal_result_ = false;
     mission_active_ = false;
+    if (!isWaypointFollowerActive()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Mission chunk was rejected before waypoint follower became active. Retrying.");
+      return;
+    }
+
     mission_completed_ = true;
     RCLCPP_ERROR(get_logger(), "Mission chunk was rejected by Nav2.");
     markMissionTerminal("aborted", "Nav2 rejected the mission chunk");

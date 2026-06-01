@@ -1,16 +1,16 @@
 /**:
   ros__parameters:
     # -- Motion reference -----------------------------------------------------
-    motion_reference.imu_topic:                            imu/data_raw  # IMU topic used as the yaw reference for monocular VO.
-    motion_reference.use_imu_yaw:                         true          # Use IMU yaw to stabilize per-frame heading.
-    motion_reference.use_wheel_scale:                     true          # Use wheel odometry only for metric translation scale.
-    motion_reference.lookup_tolerance_seconds: 0.20  # Maximum timestamp mismatch allowed when pairing camera frames to the motion reference.
-    motion_reference.history_seconds:                    5.0           # Motion-reference history retained for timestamp alignment.
-    motion_reference.imu_max_dt_seconds:                0.10          # Clamp IMU integration steps to avoid large jumps after delayed messages.
-    motion_reference.imu_planar_accel_deadband_mps2: 0.15  # Retained for IMU-history timing; not used for metric scale.
-    motion_reference.imu_velocity_damping_per_second: 1.5  # Retained for IMU-history timing; not used for metric scale.
-    motion_reference.imu_stationary_angular_velocity_threshold_rad_s: 0.05  # Retained for IMU-history timing; not used for metric scale.
-    wheel_odom_topic:                                       diff_cont/odom  # Wheel odometry topic used for translation scale.
+    motion_reference.imu_topic:                            imu/data_raw          # IMU topic used as the yaw reference for monocular VO.
+    motion_reference.use_imu_yaw:                          true                  # Use IMU yaw to stabilize per-frame heading.
+    motion_reference.use_wheel_scale:                      true                  # Use wheel odometry only for metric translation scale.
+    motion_reference.lookup_tolerance_seconds:             0.20                  # Maximum timestamp mismatch allowed when pairing camera frames to the motion reference.
+    motion_reference.history_seconds:                      5.0                   # Motion-reference history retained for timestamp alignment.
+    motion_reference.imu_max_dt_seconds:                   0.10                  # Clamp IMU integration steps to avoid large jumps after delayed messages.
+    motion_reference.imu_planar_accel_deadband_mps2:       0.15                  # Retained for IMU-history timing; not used for metric scale.
+    motion_reference.imu_velocity_damping_per_second:      1.5                   # Retained for IMU-history timing; not used for metric scale.
+    motion_reference.imu_stationary_angular_velocity_threshold_rad_s: 0.05       # Retained for IMU-history timing; not used for metric scale.
+    wheel_odom_topic:                                      diff_cont/odom        # Wheel odometry topic used for translation scale.
 
     # -- VO output ------------------------------------------------------------
     odom_topic:                                            visual_odometry/odom  # Single fused VO topic published for downstream localization.

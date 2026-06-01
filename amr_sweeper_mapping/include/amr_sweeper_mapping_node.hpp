@@ -8,6 +8,7 @@
 #include <amr_sweeper_mission_executor/srv/end_mission.hpp>
 #include <fusioncore_ros/srv/from_ll.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <lifecycle_msgs/srv/get_state.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav2_costmap_2d/costmap_layer.hpp>
 #include <nav2_msgs/action/follow_waypoints.hpp>
@@ -85,6 +86,7 @@ private:
   void ensureMissionLoaded();
   void convertMissionRoute();
   void startNextMissionChunk();
+  [[nodiscard]] bool isWaypointFollowerActive();
   void handleGoalResponse(
     rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::SharedPtr goal_handle);
   void handleGoalResult(
@@ -117,6 +119,7 @@ private:
   std::string frame_id_;
   std::string fromll_service_name_;
   std::string end_mission_service_name_;
+  std::string waypoint_follower_state_service_name_;
   bool auto_start_mission_{true};
   bool repeat_mission_{false};
   bool manual_mapping_mode_{false};
@@ -147,6 +150,7 @@ private:
   rclcpp::TimerBase::SharedPtr mission_timer_;
   rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;
   rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedPtr end_mission_client_;
+  rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr waypoint_follower_state_client_;
   rclcpp_action::Client<nav2_msgs::action::FollowWaypoints>::SharedPtr follow_waypoints_client_;
 };
 
