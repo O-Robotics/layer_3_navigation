@@ -239,6 +239,7 @@ private:
   double motion_reference_history_seconds_{5.0};
   double min_scale_translation_meters_{0.005};
   double camera_fusion_tolerance_seconds_{0.03};
+  double tf_warning_tolerance_ms_{5.0};
   double stereo_match_max_error_{20.0};
   double stereo_min_disparity_px_{1.0};
   double stereo_max_reprojection_error_m_{0.20};

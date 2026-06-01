@@ -18,6 +18,7 @@
     odom_frame:                                            odom
     publish_tf:                                            false
     force_2d:                                              true
+    tf_warning_tolerance_ms:                               50                    # Warn only when the latest TF is more than 50 ms older than the image timestamp.
     fusion_method:                                         ekf                   # Sequential Kalman-style fusion across all enabled camera delta estimates.
     min_cameras_per_estimate:                              1                     # Allow single-camera operation while still supporting multi-camera fusion.
     camera_fusion_tolerance_seconds:                       0.05                  # Group per-camera estimates that land close in time into one fused VO update.

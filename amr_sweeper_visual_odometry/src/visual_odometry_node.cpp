@@ -133,6 +133,7 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions & options)
     "motion_reference.history_seconds", 5.0);
   min_scale_translation_meters_ = declare_parameter("min_scale_translation_meters", 0.005);
   camera_fusion_tolerance_seconds_ = declare_parameter("camera_fusion_tolerance_seconds", 0.03);
+  tf_warning_tolerance_ms_ = declare_parameter("tf_warning_tolerance_ms", 5.0);
   stereo_match_max_error_ = declare_parameter("stereo_match_max_error", 20.0);
   stereo_min_disparity_px_ = declare_parameter("stereo_min_disparity_px", 1.0);
   stereo_max_reprojection_error_m_ = declare_parameter("stereo_max_reprojection_error_m", 0.20);
@@ -1323,7 +1324,7 @@ bool VisualOdometryNode::resolveCameraExtrinsics(
 
     const rclcpp::Time transform_stamp(latest_transform.header.stamp, get_clock()->get_clock_type());
     const double lag_seconds = (stamp - transform_stamp).seconds();
-    if (lag_seconds > 0.005) {
+    if (lag_seconds * 1000.0 > tf_warning_tolerance_ms_) {
       RCLCPP_WARN_THROTTLE(
         get_logger(),
         *get_clock(),
