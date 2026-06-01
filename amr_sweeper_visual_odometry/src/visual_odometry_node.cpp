@@ -803,6 +803,8 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateStereoMotion(
 
   std::vector<Eigen::Vector3d> previous_points_3d;
   std::vector<Eigen::Vector3d> current_points_3d;
+  std::vector<unsigned char> previous_valid_mask;
+  std::vector<unsigned char> current_valid_mask;
   const tf2::Transform previous_left_to_right =
     previous_frame.base_to_left.inverse() * previous_frame.base_to_right;
   const tf2::Transform current_left_to_right = base_to_left.inverse() * base_to_right;
@@ -812,7 +814,8 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateStereoMotion(
         previous_left_to_right,
         previous_left_stereo_points,
         previous_right_stereo_points,
-        previous_points_3d))
+        previous_points_3d,
+        &previous_valid_mask))
   {
     result.reason = "reinitializing_stereo_triangulation_failed";
     return result;
@@ -823,14 +826,44 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateStereoMotion(
         current_left_to_right,
         current_left_stereo_points,
         current_right_stereo_points,
-        current_points_3d))
+        current_points_3d,
+        &current_valid_mask))
   {
     result.reason = "reinitializing_stereo_triangulation_failed";
     return result;
   }
-  if (previous_points_3d.size() != current_points_3d.size() ||
-    previous_points_3d.size() < static_cast<std::size_t>(min_inliers_))
-  {
+  std::vector<Eigen::Vector3d> previous_points_3d_joint;
+  std::vector<Eigen::Vector3d> current_points_3d_joint;
+  previous_points_3d_joint.reserve(previous_left_stereo_points.size());
+  current_points_3d_joint.reserve(previous_left_stereo_points.size());
+
+  std::size_t previous_point_index = 0U;
+  std::size_t current_point_index = 0U;
+  for (std::size_t index = 0; index < previous_left_stereo_points.size(); ++index) {
+    const bool previous_valid =
+      index < previous_valid_mask.size() && previous_valid_mask[index] != 0U;
+    const bool current_valid =
+      index < current_valid_mask.size() && current_valid_mask[index] != 0U;
+
+    if (previous_valid && current_valid &&
+      previous_point_index < previous_points_3d.size() &&
+      current_point_index < current_points_3d.size())
+    {
+      previous_points_3d_joint.push_back(previous_points_3d[previous_point_index]);
+      current_points_3d_joint.push_back(current_points_3d[current_point_index]);
+    }
+
+    if (previous_valid) {
+      ++previous_point_index;
+    }
+    if (current_valid) {
+      ++current_point_index;
+    }
+  }
+
+  previous_points_3d = std::move(previous_points_3d_joint);
+  current_points_3d = std::move(current_points_3d_joint);
+  if (previous_points_3d.size() < static_cast<std::size_t>(min_inliers_)) {
     result.reason = "reinitializing_stereo_triangulation_inconsistent";
     return result;
   }
@@ -1107,11 +1140,19 @@ bool VisualOdometryNode::triangulateStereoCorrespondences(
   const tf2::Transform & left_to_right,
   const std::vector<cv::Point2f> & left_points,
   const std::vector<cv::Point2f> & right_points,
-  std::vector<Eigen::Vector3d> & points_3d) const
+  std::vector<Eigen::Vector3d> & points_3d,
+  std::vector<unsigned char> * valid_mask) const
 {
   points_3d.clear();
   if (left_points.size() != right_points.size() || left_points.size() < 4U) {
+    if (valid_mask != nullptr) {
+      valid_mask->clear();
+    }
     return false;
+  }
+
+  if (valid_mask != nullptr) {
+    valid_mask->assign(left_points.size(), 0U);
   }
 
   std::vector<cv::Point2f> left_undistorted;
@@ -1172,6 +1213,9 @@ bool VisualOdometryNode::triangulateStereoCorrespondences(
       homogeneous_points.at<double>(2, column) / w);
     if (!point.allFinite() || point.z() <= 0.0) {
       continue;
+    }
+    if (valid_mask != nullptr) {
+      (*valid_mask)[static_cast<std::size_t>(column)] = 1U;
     }
     points_3d.push_back(point);
   }

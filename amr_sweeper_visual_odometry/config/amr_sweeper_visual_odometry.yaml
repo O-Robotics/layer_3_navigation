@@ -1,30 +1,30 @@
 /**:
   ros__parameters:
     # -- Motion reference -----------------------------------------------------
-    motion_reference.imu_topic:                            imu/data_raw          # IMU topic used as the yaw reference for monocular VO.
-    motion_reference.use_imu_yaw:                          true                  # Use IMU yaw to stabilize per-frame heading.
-    motion_reference.use_wheel_scale:                      true                  # Use wheel odometry only for metric translation scale.
-    motion_reference.lookup_tolerance_seconds:             0.20                  # Maximum timestamp mismatch allowed when pairing camera frames to the motion reference.
-    motion_reference.history_seconds:                      5.0                   # Motion-reference history retained for timestamp alignment.
-    motion_reference.imu_max_dt_seconds:                   0.10                  # Clamp IMU integration steps to avoid large jumps after delayed messages.
-    motion_reference.imu_planar_accel_deadband_mps2:       0.15                  # Retained for IMU-history timing; not used for metric scale.
-    motion_reference.imu_velocity_damping_per_second:      1.5                   # Retained for IMU-history timing; not used for metric scale.
+    motion_reference.imu_topic:                             imu/data_raw          # IMU topic used as the yaw reference for monocular VO.
+    motion_reference.use_imu_yaw:                           true                  # Use IMU yaw to stabilize per-frame heading.
+    motion_reference.use_wheel_scale:                       true                  # Use wheel odometry only for metric translation scale.
+    motion_reference.lookup_tolerance_seconds:              0.20                  # Maximum timestamp mismatch allowed when pairing camera frames to the motion reference.
+    motion_reference.history_seconds:                       5.0                   # Motion-reference history retained for timestamp alignment.
+    motion_reference.imu_max_dt_seconds:                    0.10                  # Clamp IMU integration steps to avoid large jumps after delayed messages.
+    motion_reference.imu_planar_accel_deadband_mps2:        0.15                  # Retained for IMU-history timing; not used for metric scale.
+    motion_reference.imu_velocity_damping_per_second:       1.5                   # Retained for IMU-history timing; not used for metric scale.
     motion_reference.imu_stationary_angular_velocity_threshold_rad_s: 0.05       # Retained for IMU-history timing; not used for metric scale.
-    wheel_odom_topic:                                      diff_cont/odom        # Wheel odometry topic used for translation scale.
+    wheel_odom_topic:                                       diff_cont/odom        # Wheel odometry topic used for translation scale.
 
     # -- VO output ------------------------------------------------------------
-    odom_topic:                                            visual_odometry/odom  # Single fused VO topic published for downstream localization.
-    base_frame:                                            base_footprint
-    odom_frame:                                            odom
-    publish_tf:                                            false
-    force_2d:                                              true
-    tf_warning_tolerance_ms:                               50.0                    # Warn only when the latest TF is more than 50 ms older than the image timestamp.
-    fusion_method:                                         ekf                   # Sequential Kalman-style fusion across all enabled camera delta estimates.
-    min_cameras_per_estimate:                              1                     # Allow single-camera operation while still supporting multi-camera fusion.
-    camera_fusion_tolerance_seconds:                       0.05                  # Group per-camera estimates that land close in time into one fused VO update.
-    stereo_match_max_error:                                20.0                  # LK error gate when matching left-to-right stereo correspondences.
-    stereo_min_disparity_px:                               1.0                   # Ignore nearly-zero disparity matches because they triangulate poorly.
-    stereo_max_reprojection_error_m:                       0.20                  # Reject stereo 3D correspondences that do not fit a rigid transform well.
+    odom_topic:                                             visual_odometry/odom  # Single fused VO topic published for downstream localization.
+    base_frame:                                             base_footprint
+    odom_frame:                                             odom
+    publish_tf:                                             false
+    force_2d:                                               true
+    tf_warning_tolerance_ms:                                50.0                    # Warn only when the latest TF is more than 50 ms older than the image timestamp.
+    fusion_method:                                          ekf                   # Sequential Kalman-style fusion across all enabled camera delta estimates.
+    min_cameras_per_estimate:                               1                     # Allow single-camera operation while still supporting multi-camera fusion.
+    camera_fusion_tolerance_seconds:                        0.05                  # Group per-camera estimates that land close in time into one fused VO update.
+    stereo_match_max_error:                                 20.0                  # LK error gate when matching left-to-right stereo correspondences.
+    stereo_min_disparity_px:                                1.0                   # Ignore nearly-zero disparity matches because they triangulate poorly.
+    stereo_max_reprojection_error_m:                        0.20                  # Reject stereo 3D correspondences that do not fit a rigid transform well.
 
     # -- Enabled cameras ------------------------------------------------------
     camera_names: [depth_camera_infra1, depth_camera_infra2]

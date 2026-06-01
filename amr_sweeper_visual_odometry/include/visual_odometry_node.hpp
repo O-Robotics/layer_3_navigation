@@ -174,7 +174,8 @@ private:
     const tf2::Transform & left_to_right,
     const std::vector<cv::Point2f> & left_points,
     const std::vector<cv::Point2f> & right_points,
-    std::vector<Eigen::Vector3d> & points_3d) const;
+    std::vector<Eigen::Vector3d> & points_3d,
+    std::vector<unsigned char> * valid_mask = nullptr) const;
   [[nodiscard]] bool estimateRigidTransform(
     const std::vector<Eigen::Vector3d> & previous_points,
     const std::vector<Eigen::Vector3d> & current_points,
