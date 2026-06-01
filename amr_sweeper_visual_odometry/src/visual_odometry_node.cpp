@@ -1377,7 +1377,8 @@ void VisualOdometryNode::flushPendingEstimates(
   const rclcpp::Time & reference_stamp,
   bool force_flush)
 {
-  const bool multi_camera_mode = cameras_.size() > 1U;
+  const bool waiting_for_multiple_sources =
+    cameras_.size() > 1U && min_cameras_per_estimate_ > 1;
 
   while (!pending_estimates_.empty()) {
     const rclcpp::Time anchor_stamp = pending_estimates_.front().stamp;
@@ -1386,7 +1387,11 @@ void VisualOdometryNode::flushPendingEstimates(
       (reference_stamp - anchor_stamp).seconds() :
       0.0;
 
-    if (!force_flush && multi_camera_mode && anchor_age_seconds < camera_fusion_tolerance_seconds_) {
+    if (
+      !force_flush &&
+      waiting_for_multiple_sources &&
+      anchor_age_seconds < camera_fusion_tolerance_seconds_)
+    {
       break;
     }
 
