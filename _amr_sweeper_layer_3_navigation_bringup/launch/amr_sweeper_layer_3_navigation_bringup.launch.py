@@ -117,7 +117,8 @@ def _build_launches(context):
 
     if use_amr_sweeper_localization:
         localization_package_dir = get_package_share_directory("amr_sweeper_localization")
-        localization_config_path = os.path.join(localization_package_dir, "config", "fusioncore.yaml")
+        localization_config_path = os.path.join(
+            localization_package_dir, "config", "amr_sweeper_localization.yaml")
         use_sim_time_bool = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
 
         fusioncore_node = LifecycleNode(
@@ -132,12 +133,11 @@ def _build_launches(context):
                     "use_sim_time": use_sim_time_bool,
                     "base_frame": "base_footprint",
                     "odom_frame": "odom",
+                    "encoder.topic": "diff_cont/odom",
                     "encoder2.topic": "visual_odometry/odom" if use_amr_sweeper_visual_odometry_bool else "",
                 },
             ],
             remappings=[
-                ("/imu/data", "imu/data_raw"),
-                ("/odom/wheels", "diff_cont/odom"),
                 ("/gnss/fix", "gnss/navsat"),
                 ("/fusion/odom", "odometry/fused"),
                 ("/fusion/pose", "pose"),

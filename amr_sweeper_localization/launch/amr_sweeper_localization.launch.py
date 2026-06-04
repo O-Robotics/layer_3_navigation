@@ -17,7 +17,7 @@ def _launch_fusioncore(context, *args, **kwargs):
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
     use_visual_odometry = LaunchConfiguration("use_visual_odometry").perform(context).lower() == "true"
     package_dir = get_package_share_directory("amr_sweeper_localization")
-    config_path = os.path.join(package_dir, "config", "fusioncore.yaml")
+    config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
 
     node = LifecycleNode(
         package="fusioncore_ros",
@@ -31,12 +31,11 @@ def _launch_fusioncore(context, *args, **kwargs):
                 "use_sim_time": use_sim_time,
                 "base_frame": "base_footprint",
                 "odom_frame": "odom",
+                "encoder.topic": "diff_cont/odom",
                 "encoder2.topic": "visual_odometry/odom" if use_visual_odometry else "",
             },
         ],
         remappings=[
-            ("/imu/data", "imu/data_raw"),
-            ("/odom/wheels", "diff_cont/odom"),
             ("/gnss/fix", "gnss/navsat"),
             ("/fusion/odom", "odometry/fused"),
             ("/fusion/pose", "pose"),
