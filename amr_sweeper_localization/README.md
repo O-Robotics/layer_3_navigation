@@ -21,6 +21,11 @@ This package provides the real-robot localization stack for the AMR Sweeper.
 ## Launch Arguments
 - `namespace`: default `amr_sweeper`
 - `use_sim_time`: default `false`
+- `use_imu`: default comes from `config/amr_sweeper_localization.yaml`
+- `use_imu2`: default comes from `config/amr_sweeper_localization.yaml`
+- `use_encoder`: default comes from `config/amr_sweeper_localization.yaml`
+- `use_visual_odometry`: default comes from `config/amr_sweeper_localization.yaml`
+- `use_gnss`: default comes from `config/amr_sweeper_localization.yaml`
 
 ## Overview
 `amr_sweeper_localization` contains the FusionCore launch path plus the parameter file `config/amr_sweeper_localization.yaml` used to fuse wheel odometry, IMU data, and GNSS data into a single robot odometry estimate. It is the localization foundation for the navigation layer and is normally launched as part of layer 3 bringup. The launch also publishes an identity `map -> odom` static transform so tools such as Foxglove can use a `map` fixed frame even when navigation is running directly in FusionCore's `odom` frame.
@@ -32,3 +37,30 @@ This package provides the real-robot localization stack for the AMR Sweeper.
 - FusionCore consumes GNSS directly from `/amr_sweeper/gnss/navsat`.
 - FusionCore is configured to publish `odom -> base_footprint` as yaw-only. Chassis roll/pitch is owned by the layer 2 attitude controller through the `base_footprint -> base_link` chain.
 - Publishes a static `map -> odom` identity transform for visualization/debugging compatibility.
+
+## Sensor Isolation
+The default sensor enables now live in `config/amr_sweeper_localization.yaml`:
+
+```yaml
+use_imu: true
+use_imu2: false
+use_encoder: true
+use_visual_odometry: false
+use_gnss: true
+```
+
+You can still override any of them at launch time without editing the YAML:
+
+```bash
+ros2 launch amr_sweeper_localization amr_sweeper_localization.launch.py \
+  use_imu:=true \
+  use_imu2:=false \
+  use_encoder:=true \
+  use_visual_odometry:=false \
+  use_gnss:=true
+```
+
+Notes:
+- `use_visual_odometry` controls the `encoder2.topic` input and is separate from launching the standalone `amr_sweeper_visual_odometry` package.
+- `use_gnss:=false` disables the primary `/gnss/fix` remap and clears optional GNSS heading/fix2 inputs inside FusionCore.
+- `use_imu2:=true` preserves whatever `imu2.topic` is configured in `config/amr_sweeper_localization.yaml`; `use_imu2:=false` forces it off.
