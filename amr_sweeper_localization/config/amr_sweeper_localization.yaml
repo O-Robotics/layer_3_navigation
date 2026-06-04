@@ -21,12 +21,12 @@
     imu2.remove_gravitational_acceleration: false          # Same semantics as imu.remove_gravitational_acceleration for the second IMU.
 
     # -- Wheel Odometry --------------------------------------------------------
-    encoder.topic:                         diff_cont/odom  # Primary wheel-odometry topic consumed by FusionCore; resolves under the selected robot namespace.
+    encoder.topic:                         ""              #diff_cont/odom  # Primary wheel-odometry topic consumed by FusionCore; resolves under the selected robot namespace.
     encoder.vel_noise:                     0.05            # Linear velocity measurement noise in m/s for wheel odometry.
     encoder.yaw_noise:                     0.02            # Yaw-rate measurement noise in rad/s for wheel odometry.
 
     # -- Visual Odometry -------------------------------------------------------
-    encoder2.topic:                        visual_odometry/odom  # Optional visual-odometry topic published by amr_sweeper_visual_odometry inside the robot namespace.
+    encoder2.topic:                        ""              #visual_odometry/odom  # Optional visual-odometry topic published by amr_sweeper_visual_odometry inside the robot namespace.
     encoder2.vel_noise:                    0.03            # Visual-odometry linear-velocity measurement noise in m/s.
     encoder2.yaw_noise:                    0.01            # Visual-odometry yaw-rate measurement noise in rad/s.
 
