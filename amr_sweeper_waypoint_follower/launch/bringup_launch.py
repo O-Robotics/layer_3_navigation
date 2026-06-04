@@ -65,8 +65,8 @@ def generate_launch_description():
 
     declare_mission_costmap_yaml_cmd = DeclareLaunchArgument(
         'mission_costmap_yaml',
-        default_value='src/missions_log/global_costmap.yaml',
-        description='Exact mission costmap YAML from execution_context.json. Leave empty outside mission execution.',
+        default_value='',
+        description='Exact mission run costmap YAML from execution_context.json. Leave empty outside mission execution.',
     )
 
     declare_use_respawn_cmd = DeclareLaunchArgument(

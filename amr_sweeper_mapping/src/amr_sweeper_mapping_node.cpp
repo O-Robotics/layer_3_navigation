@@ -26,7 +26,7 @@ namespace
 constexpr char kEnabledParam[] = "enabled";
 constexpr char kCostmapYamlPathParam[] = "costmap_yaml_path";
 constexpr char kDefaultCostmapYamlPath[] = "";
-constexpr char kDefaultMissionRoutePath[] = "src/missions_log/active_mission_path.geojson";
+constexpr char kDefaultMissionRoutePath[] = "";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
 

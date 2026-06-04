@@ -104,6 +104,7 @@ public:
     declare_parameter("imu2.frame_id", std::string(""));
     declare_parameter("imu2.remove_gravitational_acceleration", false);
 
+    declare_parameter("encoder.topic", std::string("/odom/wheels"));
     declare_parameter("encoder.vel_noise", 0.05);
     declare_parameter("encoder.yaw_noise", 0.02);
 
@@ -281,6 +282,7 @@ public:
     imu2_frame_override_ = get_parameter("imu2.frame_id").as_string();
     imu2_remove_gravity_ = get_parameter("imu2.remove_gravitational_acceleration").as_bool();
 
+    encoder_topic_          = get_parameter("encoder.topic").as_string();
     config.encoder.vel_noise_x  = get_parameter("encoder.vel_noise").as_double();
     config.encoder.vel_noise_y  = config.encoder.vel_noise_x;
     config.encoder.vel_noise_wz = get_parameter("encoder.yaw_noise").as_double();
@@ -469,11 +471,12 @@ public:
     }
 
     encoder_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-      "/odom/wheels", 50,
+      encoder_topic_, 50,
       [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
         std::lock_guard<std::mutex> lock(fc_mutex_);
         encoder_callback(msg);
       }, sensor_opts);
+    RCLCPP_INFO(get_logger(), "Primary wheel odometry topic: %s", encoder_topic_.c_str());
 
     // Second encoder-twist source (e.g. KISS-ICP LiDAR odometry). Created
     // lazily only when encoder2.topic is non-empty to keep the default
@@ -2311,6 +2314,7 @@ private:
   std::string imu_frame_resolved_;
   std::string imu2_topic_;
   std::string imu2_frame_override_;
+  std::string encoder_topic_;
   bool        imu2_remove_gravity_ = false;
   double      last_imu_time_       = 0.0;   // timestamp of most recent IMU message
   fusioncore::sensors::LLAPoint  gnss_ref_lla_;
