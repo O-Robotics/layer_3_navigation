@@ -268,7 +268,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_amr_sweeper_localization', default_value='true'),
         DeclareLaunchArgument(
             'use_amr_sweeper_visual_odometry',
-            default_value=localization_defaults['use_visual_odometry']),
+            default_value='false'),
         DeclareLaunchArgument('use_imu', default_value=localization_defaults['use_imu']),
         DeclareLaunchArgument('use_imu2', default_value=localization_defaults['use_imu2']),
         DeclareLaunchArgument('use_encoder', default_value=localization_defaults['use_encoder']),

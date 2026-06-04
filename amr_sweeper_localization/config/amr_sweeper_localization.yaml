@@ -48,7 +48,7 @@
     gnss.azimuth_topic:                    ""              # Optional REP-145 compass_msgs/Azimuth heading topic.
     gnss.lever_arm_x:                      0.0             # Antenna offset from base frame in meters: X forward.
     gnss.lever_arm_y:                      0.0             # Antenna offset from base frame in meters: Y left.
-    gnss.lever_arm_z:                      0.0             # Antenna offset from base frame in meters: Z up.
+    gnss.lever_arm_z:                      0.199           # Antenna offset from base frame in meters: Z up.
 
     # -- Outlier rejection -----------------------------------------------------
     outlier_rejection:                     true
