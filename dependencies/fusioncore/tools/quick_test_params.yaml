@@ -1,0 +1,3 @@
+fusioncore:
+  ros__parameters:
+    imu.has_magnetometer: true

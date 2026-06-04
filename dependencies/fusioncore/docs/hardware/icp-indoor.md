@@ -1,0 +1,151 @@
+# Indoor / GPS-denied robots (LiDAR ICP odometry)
+
+For robots operating indoors, underground, or anywhere GPS isn't available. FusionCore runs fine without GPS: it starts at the origin and builds a local odometry frame from IMU + LiDAR ICP alone.
+
+---
+
+## Common setups this covers
+
+- Indoor mobile robots (warehouses, offices, labs)
+- Robots with a LiDAR running KISS-ICP or rtabmap `icp_odometry`
+- Robots where wheel odometry is unreliable or unavailable
+- OAK-D camera + Velodyne/RPLiDAR + any ground robot
+
+---
+
+## Quick start
+
+```bash
+ros2 launch fusioncore_ros fusioncore.launch.py \
+  fusioncore_config:=$(ros2 pkg prefix fusioncore_ros)/share/fusioncore_ros/config/icp_indoor.yaml \
+  --ros-args \
+  -r /odom/wheels:=/kiss/odometry
+```
+
+Replace `/kiss/odometry` with whatever your ICP pipeline publishes:
+
+| ICP pipeline | Default topic | Type |
+|---|---|---|
+| KISS-ICP | `/kiss/odometry` | `nav_msgs/Odometry` |
+| rtabmap `icp_odometry` | `/icp_odom` | `nav_msgs/Odometry` |
+| rf2o_laser_odometry | `/odom` | `nav_msgs/Odometry` |
+| cartographer | `/tracked_pose` | `PoseStamped` — needs twist wrapper |
+| slam_toolbox | `/pose` | `PoseWithCovarianceStamped` — needs twist wrapper |
+
+> **FusionCore does not accept `sensor_msgs/LaserScan` or `PointCloud2` directly.**
+> A scan-matching node must convert your LiDAR data to `nav_msgs/Odometry` first.
+> Nodes that publish pose-only (cartographer, slam_toolbox) need a wrapper that
+> differentiates the pose to produce a velocity in the twist field.
+
+FusionCore treats LiDAR ICP odometry exactly like wheel odometry: same outlier gate, same adaptive noise, same ZUPT logic. The only difference is the noise values: ICP is more accurate than wheels so `icp_indoor.yaml` uses tighter defaults (`encoder.vel_noise: 0.02` instead of `0.05`).
+
+---
+
+## If you also have wheel odometry
+
+If your wheel odom is reliable, use it as primary and add ICP as a second cross-check via `encoder2.topic`:
+
+```yaml
+# in icp_indoor.yaml
+encoder2.topic: "/kiss/odometry"
+```
+
+Then launch without the remap: FusionCore subscribes to `/odom/wheels` natively and picks up ICP as a second velocity source.
+
+---
+
+## Using RTABMAP alongside FusionCore (Madgwick separation)
+
+RTABMAP's `icp_odometry` and the `rtabmap_slam` node both expect IMU data on `/imu/data`. FusionCore also subscribes to `/imu/data`: but it needs **raw** gyro and accelerometer data, not a Madgwick-filtered orientation.
+
+If you run `imu_filter_madgwick` in your stack, do **not** remap FusionCore's IMU input to the Madgwick output. The Madgwick filter bakes in a coordinate frame rotation based on its world-frame orientation estimate. When FusionCore receives that, it tries to fuse an already-rotated orientation as if it were raw rates: the result is the robot appearing to spin or roll when it isn't.
+
+**Correct setup:**
+
+```
+/imu  (raw from driver)
+  ├── → FusionCore    (via -r /imu/data:=/imu)
+  └── → imu_filter_madgwick  → /imu/data  → RTABMAP + icp_odometry
+```
+
+In your launch file:
+
+```python
+# FusionCore reads raw IMU directly
+fc = LifecycleNode(
+    ...
+    remappings=[
+        ("/imu/data", "/imu"),     # raw, not Madgwick output
+    ]
+)
+
+# Madgwick runs separately for RTABMAP and ICP
+Node(
+    package='imu_filter_madgwick', executable='imu_filter_madgwick_node',
+    parameters=[{'use_mag': False, 'world_frame': 'enu', 'publish_tf': False}],
+    remappings=[('imu/data_raw', '/imu')],   # reads same raw /imu
+),
+```
+
+FusionCore handles orientation estimation internally from raw gyro + accel. Madgwick is only needed to give RTABMAP and ICP odometry the filtered `/imu/data` they expect.
+
+---
+
+## SLAM integration (slam_toolbox, RTABMAP)
+
+FusionCore and your SLAM system divide the TF tree cleanly:
+
+```
+map → odom        ← your SLAM system (slam_toolbox, RTABMAP)
+odom → base_link  ← FusionCore
+```
+
+They don't conflict. Just launch both:
+
+```bash
+# Terminal 1: FusionCore
+ros2 launch fusioncore_ros fusioncore.launch.py \
+  fusioncore_config:=icp_indoor.yaml \
+  --ros-args -r /odom/wheels:=/kiss/odometry
+
+# Terminal 2: slam_toolbox
+ros2 launch slam_toolbox online_async_launch.py
+
+# or RTABMAP
+ros2 launch rtabmap_slam rtabmap.launch.py
+```
+
+Nav2 reads from `/fusion/odom` as usual.
+
+---
+
+## IMU topic remaps
+
+Most drivers publish at `/imu/data` already and need no remap. Exceptions:
+
+| Driver | Topic | Remap needed |
+|---|---|---|
+| OAK-D (depthai-ros) | `/imu` | `-r /imu/data:=/imu` |
+| Realsense D435i | `/camera/imu` | `-r /imu/data:=/camera/imu` |
+| Most others | `/imu/data` | none |
+
+Also set `imu.frame_id` in your config if your driver doesn't fill in `header.frame_id`:
+
+```yaml
+imu.frame_id: "oak_imu_frame"      # OAK-D
+imu.frame_id: "camera_imu_optical_frame"  # Realsense
+```
+
+---
+
+## One thing to get right: startup bias init
+
+Without GPS corrections, IMU bias matters more indoors. Add this to your config:
+
+```yaml
+init.stationary_window: 2.0
+```
+
+This collects 2 seconds of stationary IMU data at startup to estimate bias before the filter starts. Reduces startup drift from ~10 cm to under 1 cm. Robot must be stationary for the first 2 seconds after launch: it falls back automatically if it detects movement.
+
+The `icp_indoor.yaml` config has this enabled by default.

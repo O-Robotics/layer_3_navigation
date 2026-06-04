@@ -36,7 +36,7 @@ def generate_launch_description():
                 description="Log level for launched nodes",
             ),
             DeclareLaunchArgument(
-                "params_file",
+                "visual_odometry_params_file",
                 default_value=params_file,
                 description="Parameter file for the visual odometry node",
             ),
@@ -48,7 +48,7 @@ def generate_launch_description():
                 output="screen",
                 arguments=["--ros-args", "--log-level", log_level],
                 parameters=[
-                    LaunchConfiguration("params_file"),
+                    LaunchConfiguration("visual_odometry_params_file"),
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
             ),

@@ -27,7 +27,8 @@ This package provides the real-robot localization stack for the AMR Sweeper.
 
 ## Notes
 - Uses wheel odometry from the layer 1 wheel-control path.
-- Consumes `/amr_sweeper/imu/data_acc_gyro` for gyro/acceleration and `/amr_sweeper/imu/data_heading` for yaw-only heading so FusionCore does not fuse IMU roll/pitch orientation directly.
+- Consumes `/amr_sweeper/imu/data_raw` directly for orientation, gyro, and acceleration. The physical IMU includes a magnetometer, so FusionCore now fuses yaw from the main IMU stream instead of a separate yaw-only heading topic.
 - Uses IMU data from `amr_sweeper_imu` and GNSS data from `amr_sweeper_gnss`.
 - FusionCore consumes GNSS directly from `/amr_sweeper/gnss/navsat`.
+- FusionCore is configured to publish `odom -> base_footprint` as yaw-only. Chassis roll/pitch is owned by the layer 2 attitude controller through the `base_footprint -> base_link` chain.
 - Publishes a static `map -> odom` identity transform for visualization/debugging compatibility.

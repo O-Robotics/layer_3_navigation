@@ -67,14 +67,17 @@ private:
     std::string image_topic;
     std::string camera_info_topic;
     std::string frame_override;
+    double fusion_weight{1.0};
     CameraCalibration calibration;
+    cv::Mat latest_gray_image;
+    rclcpp::Time latest_image_stamp{0, 0, RCL_ROS_TIME};
+    std::string latest_frame_id;
     cv::Mat previous_gray_image;
     std::vector<cv::Point2f> previous_points;
     rclcpp::Time previous_image_stamp{0, 0, RCL_ROS_TIME};
     bool have_previous_motion_reference{false};
     tf2::Vector3 previous_motion_reference_position{0.0, 0.0, 0.0};
     double previous_motion_reference_yaw_rad{0.0};
-    bool extrinsics_resolved{false};
     tf2::Transform base_to_camera{tf2::Transform::getIdentity()};
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription;
@@ -83,18 +86,43 @@ private:
   struct MotionReferenceSample
   {
     rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
-    tf2::Vector3 planar_position{0.0, 0.0, 0.0};
-    double yaw_rad{0.0};
+    std::optional<tf2::Vector3> planar_position;
+    std::optional<double> yaw_rad;
+  };
+
+  struct StereoFrame
+  {
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+    cv::Mat left_gray_image;
+    cv::Mat right_gray_image;
+    std::vector<cv::Point2f> left_points;
+    MotionReferenceSample motion_reference;
+    tf2::Transform base_to_left{tf2::Transform::getIdentity()};
+    tf2::Transform base_to_right{tf2::Transform::getIdentity()};
+  };
+
+  struct StereoPairState
+  {
+    std::string name;
+    std::string left_camera_name;
+    std::string right_camera_name;
+    double fusion_weight{1.0};
+    double sync_tolerance_seconds{0.02};
+    std::shared_ptr<CameraState> left_camera;
+    std::shared_ptr<CameraState> right_camera;
+    std::optional<StereoFrame> previous_frame;
   };
 
   struct PendingEstimate
   {
     std::string camera_name;
     rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+    double fusion_weight{1.0};
     TrackingResult result;
   };
 
   void configureCameras();
+  void configureStereoPairs();
   void cameraInfoCallback(
     const std::shared_ptr<CameraState> & camera,
     const sensor_msgs::msg::CameraInfo::SharedPtr message);
@@ -109,10 +137,24 @@ private:
     const cv::Mat & gray_image,
     const MotionReferenceSample & motion_reference,
     const rclcpp::Time & stamp);
+  void initializeStereoFrame(
+    StereoPairState & stereo_pair,
+    const cv::Mat & left_gray_image,
+    const cv::Mat & right_gray_image,
+    const MotionReferenceSample & motion_reference,
+    const rclcpp::Time & stamp);
   [[nodiscard]] TrackingResult estimateMotion(
     const std::shared_ptr<CameraState> & camera,
     const cv::Mat & current_gray_image,
     const MotionReferenceSample & current_motion_reference,
+    const rclcpp::Time & stamp);
+  [[nodiscard]] TrackingResult estimateStereoMotion(
+    StereoPairState & stereo_pair,
+    const cv::Mat & current_left_gray_image,
+    const cv::Mat & current_right_gray_image,
+    const MotionReferenceSample & current_motion_reference,
+    const tf2::Transform & base_to_left,
+    const tf2::Transform & base_to_right,
     const rclcpp::Time & stamp);
   [[nodiscard]] std::vector<cv::Point2f> detectFeatures(const cv::Mat & gray_image) const;
   [[nodiscard]] std::vector<cv::Point2f> undistortPoints(
@@ -122,11 +164,31 @@ private:
     const rclcpp::Time & stamp) const;
   bool resolveCameraExtrinsics(
     const std::shared_ptr<CameraState> & camera,
-    const std::string & camera_frame);
+    const std::string & camera_frame,
+    const rclcpp::Time & stamp);
+  StereoPairState * findStereoPairByCameraName(const std::string & camera_name);
+  const StereoPairState * findStereoPairByCameraName(const std::string & camera_name) const;
+  [[nodiscard]] bool triangulateStereoCorrespondences(
+    const CameraCalibration & left_calibration,
+    const CameraCalibration & right_calibration,
+    const tf2::Transform & left_to_right,
+    const std::vector<cv::Point2f> & left_points,
+    const std::vector<cv::Point2f> & right_points,
+    std::vector<Eigen::Vector3d> & points_3d,
+    std::vector<unsigned char> * valid_mask = nullptr) const;
+  [[nodiscard]] bool estimateRigidTransform(
+    const std::vector<Eigen::Vector3d> & previous_points,
+    const std::vector<Eigen::Vector3d> & current_points,
+    tf2::Transform & delta_transform,
+    int & inlier_count) const;
+  [[nodiscard]] static cv::Mat makeProjectionMatrix(
+    const tf2::Matrix3x3 & rotation,
+    const tf2::Vector3 & translation);
   void queueEstimate(
     const std::string & camera_name,
     const TrackingResult & result,
-    const rclcpp::Time & stamp);
+    const rclcpp::Time & stamp,
+    double fusion_weight);
   void flushPendingEstimates(const rclcpp::Time & reference_stamp, bool force_flush);
   [[nodiscard]] TrackingResult fuseTrackingResults(
     const std::vector<PendingEstimate> & estimates) const;
@@ -147,9 +209,10 @@ private:
   static tf2::Transform poseToTransform(const geometry_msgs::msg::Pose & pose);
   static geometry_msgs::msg::Pose transformToPose(const tf2::Transform & transform);
   [[nodiscard]] std::array<double, 36> makePoseCovariance(const TrackingResult & result) const;
-  [[nodiscard]] std::array<double, 36> makeTwistCovariance(const TrackingResult & result) const;
+  [[nodiscard]] std::array<double, 36> makeTwistCovariance(
+    const TrackingResult & result,
+    double dt_seconds) const;
 
-  std::string motion_reference_mode_;
   std::string wheel_odom_topic_;
   std::string imu_topic_;
   std::string odom_topic_;
@@ -177,12 +240,17 @@ private:
   double motion_reference_history_seconds_{5.0};
   double min_scale_translation_meters_{0.005};
   double camera_fusion_tolerance_seconds_{0.03};
+  double tf_warning_tolerance_ms_{5.0};
+  double stereo_match_max_error_{20.0};
+  double stereo_min_disparity_px_{1.0};
+  double stereo_max_reprojection_error_m_{0.20};
   double pose_sigma_floor_m_{0.03};
   double pose_sigma_ceiling_m_{0.50};
   double yaw_sigma_floor_rad_{0.02};
   double yaw_sigma_ceiling_rad_{0.35};
   int min_cameras_per_estimate_{1};
-  bool use_motion_reference_yaw_{true};
+  bool use_imu_yaw_{true};
+  bool use_wheel_scale_{true};
   double imu_max_dt_seconds_{0.1};
   double imu_planar_accel_deadband_mps2_{0.15};
   double imu_velocity_damping_per_second_{1.5};
@@ -197,7 +265,9 @@ private:
   tf2::Vector3 imu_planar_position_{0.0, 0.0, 0.0};
 
   std::vector<std::shared_ptr<CameraState>> cameras_;
-  std::deque<MotionReferenceSample> motion_reference_history_;
+  std::vector<StereoPairState> stereo_pairs_;
+  std::deque<MotionReferenceSample> wheel_motion_reference_history_;
+  std::deque<MotionReferenceSample> imu_motion_reference_history_;
   std::deque<PendingEstimate> pending_estimates_;
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr wheel_odom_subscription_;

@@ -3,11 +3,12 @@
     base_frame: base_footprint       # Robot body frame used by FusionCore for state output and TF.
     odom_frame: odom                 # Local odometry frame FusionCore publishes against.
     publish_rate: 50.0               # Filter output publish rate in Hz.
-    publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch.
+    publish.force_2d: true           # Ground robot mode: zero Z translation/velocity while keeping roll and pitch in the internal filter state.
     publish.tf: true                 # Broadcast the odom -> base_footprint transform.
+    publish.yaw_only: true           # Publish odom -> base_footprint with yaw only; layer 2 already drives roll/pitch via base_footprint -> base_link.
 
     # -- IMU -------------------------------------------------------------------
-    imu.has_magnetometer: false      # The primary IMU stream carries accel/gyro only; yaw is fused separately through gnss.heading_topic.
+    imu.has_magnetometer: true       # The physical IMU includes a magnetometer, and FusionCore now consumes the full imu/data_raw stream directly.
     imu.gyro_noise: 0.005            # Gyro measurement noise in rad/s.
     imu.accel_noise: 0.1             # Accelerometer measurement noise in m/s^2.
     imu.remove_gravitational_acceleration: false  # Driver publishes raw specific force, so gravity stays in the message.
@@ -28,7 +29,7 @@
     gnss.min_satellites: 4           # Minimum satellite count required before fusing GNSS.
     gnss.min_fix_type: 1             # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic: ""              # Optional second GNSS receiver topic; leave empty to disable.
-    gnss.heading_topic: "imu/data_heading" # IMU-derived yaw-only heading stream for FusionCore.
+    gnss.heading_topic: ""           # Disabled because yaw is fused directly from imu/data_raw.
     gnss.azimuth_topic: ""           # Optional REP-145 compass_msgs/Azimuth heading topic.
     gnss.lever_arm_x: 0.0            # Antenna offset from base frame in meters: X forward.
     gnss.lever_arm_y: 0.0            # Antenna offset from base frame in meters: Y left.
@@ -37,7 +38,7 @@
     # -- Outlier rejection -----------------------------------------------------
     outlier_rejection: true
     outlier_threshold_gnss: 16.27    # Chi-square gate for GNSS position innovations.
-    outlier_threshold_imu: 1000000.00 # Chi-square gate for IMU innovations. Set to 1000000.00 to effectively disable this filter during startup.
+    outlier_threshold_imu: 15.09     # Chi-square gate for IMU innovations after startup orientation is seeded from the IMU.
     outlier_threshold_enc: 11.34     # Chi-square gate for encoder twist innovations.
     outlier_threshold_hdg: 10.83     # Chi-square gate for heading innovations.
 

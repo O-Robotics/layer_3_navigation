@@ -15,6 +15,7 @@ from lifecycle_msgs.msg import Transition
 def _launch_fusioncore(context, *args, **kwargs):
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
+    use_visual_odometry = LaunchConfiguration("use_visual_odometry").perform(context).lower() == "true"
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "config", "fusioncore.yaml")
 
@@ -30,10 +31,11 @@ def _launch_fusioncore(context, *args, **kwargs):
                 "use_sim_time": use_sim_time,
                 "base_frame": "base_footprint",
                 "odom_frame": "odom",
+                "encoder2.topic": "visual_odometry/odom" if use_visual_odometry else "",
             },
         ],
         remappings=[
-            ("/imu/data", "imu/data_acc_gyro"),
+            ("/imu/data", "imu/data_raw"),
             ("/odom/wheels", "diff_cont/odom"),
             ("/gnss/fix", "gnss/navsat"),
             ("/fusion/odom", "odometry/fused"),
@@ -103,6 +105,11 @@ def generate_launch_description():
                 "use_sim_time",
                 default_value="false",
                 description="Use ROS time if true",
+            ),
+            DeclareLaunchArgument(
+                "use_visual_odometry",
+                default_value="true",
+                description="Enable the visual-odometry secondary encoder input",
             ),
             OpaqueFunction(function=_launch_fusioncore),
         ]

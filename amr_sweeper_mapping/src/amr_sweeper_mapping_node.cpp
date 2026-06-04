@@ -13,6 +13,7 @@
 
 #include <action_msgs/msg/goal_status.hpp>
 #include <geometry_msgs/msg/point.hpp>
+#include <lifecycle_msgs/msg/state.hpp>
 #include <nlohmann/json.hpp>
 #include <pluginlib/class_list_macros.hpp>
 
@@ -24,7 +25,7 @@ namespace
 
 constexpr char kEnabledParam[] = "enabled";
 constexpr char kCostmapYamlPathParam[] = "costmap_yaml_path";
-constexpr char kDefaultCostmapYamlPath[] = "src/missions_log/global_costmap.yaml";
+constexpr char kDefaultCostmapYamlPath[] = "";
 constexpr char kDefaultMissionRoutePath[] = "src/missions_log/active_mission_path.geojson";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
@@ -118,6 +119,29 @@ MissionRuntimeProfile loadMissionRuntimeProfile(const std::string & mission_file
   return profile;
 }
 
+nlohmann::json buildLocalPathGeoJson(
+  const nlohmann::json & coordinates,
+  const std::string & geographic_companion_file)
+{
+  nlohmann::json properties{
+    {"name", "actual_path"},
+    {"coordinate_frame", "odom"}};
+  if (!geographic_companion_file.empty()) {
+    properties["geographic_companion_file"] = geographic_companion_file;
+  }
+
+  return {
+    {"type", "FeatureCollection"},
+    {"features", nlohmann::json::array({
+      {
+        {"type", "Feature"},
+        {"properties", properties},
+        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
+      }
+    })}
+  };
+}
+
 }  // namespace
 
 Vda5050CostmapLayer::Vda5050CostmapLayer() = default;
@@ -203,7 +227,32 @@ void Vda5050CostmapLayer::loadArtifact()
 
   std::string yaml_path;
   node->get_parameter(getFullName(kCostmapYamlPathParam), yaml_path);
-  artifact_ = parseCostmapArtifact(resolveArtifactPath(yaml_path));
+  if (yaml_path.empty()) {
+    artifact_ = LoadedCostmapArtifact{};
+    artifact_loaded_ = false;
+    RCLCPP_WARN(
+      node->get_logger(),
+      "No mission costmap yaml was provided for %s. The geojson layer will stay inactive until a "
+      "mission-specific costmap artifact is configured.",
+      getName().c_str());
+    return;
+  }
+
+  const std::string resolved_path = resolveArtifactPath(yaml_path);
+  std::error_code filesystem_error;
+  if (!std::filesystem::is_regular_file(resolved_path, filesystem_error)) {
+    artifact_ = LoadedCostmapArtifact{};
+    artifact_loaded_ = false;
+    RCLCPP_WARN(
+      node->get_logger(),
+      "Mission costmap yaml for %s was configured as '%s' but no file was found there. "
+      "The geojson layer will stay inactive.",
+      getName().c_str(),
+      resolved_path.c_str());
+    return;
+  }
+
+  artifact_ = parseCostmapArtifact(resolved_path);
   artifact_loaded_ = true;
 }
 
@@ -329,8 +378,10 @@ MappingNode::MappingNode()
   declare_parameter("mission_file", std::string(""));
   declare_parameter("mission_route_file", std::string(kDefaultMissionRoutePath));
   declare_parameter("mission_id", std::string(""));
-  declare_parameter("mission_output_directory", std::string("src/missions_log"));
+  declare_parameter("mission_output_directory", std::string(""));
   declare_parameter("actual_path_output_file", std::string(""));
+  declare_parameter("actual_path_navsat_output_file", std::string(""));
+  declare_parameter("mission_costmap_yaml", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
   declare_parameter("mission_window_end", std::string(""));
   declare_parameter("slam_backend", std::string("slam_toolbox"));
@@ -343,6 +394,7 @@ MappingNode::MappingNode()
   declare_parameter("status_period_seconds", 2.0);
   declare_parameter("mission_tick_period_seconds", 1.0);
   declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
+  declare_parameter("waypoint_follower_state_service", std::string("waypoint_follower/get_state"));
   declare_parameter("end_mission_service", std::string("end_mission"));
 
   mission_file_ = get_parameter("mission_file").as_string();
@@ -354,6 +406,8 @@ MappingNode::MappingNode()
   mission_id_ = get_parameter("mission_id").as_string();
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
   actual_path_output_file_ = get_parameter("actual_path_output_file").as_string();
+  actual_path_navsat_output_file_ = get_parameter("actual_path_navsat_output_file").as_string();
+  mission_costmap_yaml_ = get_parameter("mission_costmap_yaml").as_string();
   mission_window_start_ = get_parameter("mission_window_start").as_string();
   mission_window_end_ = get_parameter("mission_window_end").as_string();
   slam_backend_ = get_parameter("slam_backend").as_string();
@@ -361,6 +415,8 @@ MappingNode::MappingNode()
   frame_id_ = get_parameter("frame_id").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
+  waypoint_follower_state_service_name_ =
+    get_parameter("waypoint_follower_state_service").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
@@ -384,27 +440,45 @@ MappingNode::MappingNode()
     "mapping/route_marker",
     rclcpp::QoS(1).reliable().transient_local());
 
-  fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(fromll_service_name_);
+  mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  status_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+
+  fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(
+    fromll_service_name_,
+    rclcpp::ServicesQoS(),
+    mission_callback_group_);
   end_mission_client_ =
-    create_client<amr_sweeper_mission_executor::srv::EndMission>(end_mission_service_name_);
+    create_client<amr_sweeper_mission_executor::srv::EndMission>(
+    end_mission_service_name_,
+    rclcpp::ServicesQoS(),
+    mission_callback_group_);
+  waypoint_follower_state_client_ =
+    create_client<lifecycle_msgs::srv::GetState>(
+    waypoint_follower_state_service_name_,
+    rclcpp::ServicesQoS(),
+    mission_callback_group_);
   follow_waypoints_client_ = rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(
     this,
-    get_parameter("follow_waypoints_action").as_string());
+    get_parameter("follow_waypoints_action").as_string(),
+    mission_callback_group_);
 
   status_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("status_period_seconds").as_double()),
-    std::bind(&MappingNode::publishCoordinatorStatus, this));
+    std::bind(&MappingNode::publishCoordinatorStatus, this),
+    status_callback_group_);
   mission_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("mission_tick_period_seconds").as_double()),
-    std::bind(&MappingNode::tickMissionExecution, this));
+    std::bind(&MappingNode::tickMissionExecution, this),
+    mission_callback_group_);
 
   writeMissionSessionMetadata();
 
   RCLCPP_INFO(
     get_logger(),
-    "Mapping coordinator ready; mission=%s route=%s output_dir=%s slam_backend=%s gaussian_mode=%s execution_mode=%s",
+    "Mapping coordinator ready; mission=%s route=%s costmap=%s output_dir=%s slam_backend=%s gaussian_mode=%s execution_mode=%s",
     mission_file_.c_str(),
     mission_route_file_.c_str(),
+    mission_costmap_yaml_.c_str(),
     mission_output_directory_.c_str(),
     slam_backend_.c_str(),
     gaussian_mode_.c_str(),
@@ -447,6 +521,7 @@ void MappingNode::publishCoordinatorStatus()
     "; route=" + mission_route_file_ +
     "; mission_id=" + mission_id_ +
     "; mission_output_directory=" + mission_output_directory_ +
+    "; mission_costmap_yaml=" + mission_costmap_yaml_ +
     "; mission_window_start=" + mission_window_start_ +
     "; mission_window_end=" + mission_window_end_ +
     "; slam_backend=" + slam_backend_ +
@@ -475,13 +550,15 @@ void MappingNode::writeMissionSessionMetadata() const
     {"mission_type", mission_type_},
     {"execution_mode", execution_mode_},
     {"mission_route_file", mission_route_file_},
+    {"mission_costmap_yaml", mission_costmap_yaml_},
     {"mission_window_start", mission_window_start_},
     {"mission_window_end", mission_window_end_},
     {"slam_backend", slam_backend_},
     {"gaussian_mode", gaussian_mode_},
     {"frame_id", frame_id_},
     {"manual_drive_required", manual_mapping_mode_},
-    {"actual_path_output_file", actual_path_output_file_}};
+    {"actual_path_output_file", actual_path_output_file_},
+    {"actual_path_navsat_output_file", actual_path_navsat_output_file_}};
 
   std::ofstream output_stream(std::filesystem::path(mission_output_directory_) / "mapping_session.json");
   if (!output_stream.is_open()) {
@@ -506,16 +583,10 @@ void MappingNode::writeActualPathArtifact() const
     coordinates.push_back({point.x, point.y});
   }
 
-  nlohmann::json document{
-    {"type", "FeatureCollection"},
-    {"features", nlohmann::json::array({
-      {
-        {"type", "Feature"},
-        {"properties", {{"name", "actual_path"}, {"coordinate_frame", "odom"}}},
-        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
-      }
-    })}
-  };
+  const std::string navsat_companion_file = actual_path_navsat_output_file_.empty() ?
+    std::string{} :
+    std::filesystem::path(actual_path_navsat_output_file_).filename().string();
+  nlohmann::json document = buildLocalPathGeoJson(coordinates, navsat_companion_file);
 
   std::ofstream output_stream(actual_path_output_file_, std::ios::trunc);
   if (!output_stream.is_open()) {
@@ -565,6 +636,26 @@ void MappingNode::tickMissionExecution()
 void MappingNode::ensureMissionLoaded()
 {
   const std::string path = routeGeoJsonPath();
+  if (path.empty()) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for mission route artifact path to be configured.");
+    return;
+  }
+
+  std::error_code filesystem_error;
+  if (!std::filesystem::is_regular_file(path, filesystem_error)) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for mission route artifact file at %s",
+      path.c_str());
+    return;
+  }
+
   if (!std::filesystem::exists(path)) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
@@ -621,8 +712,7 @@ void MappingNode::convertMissionRoute()
     request->ll_point.latitude = coordinate.y;
     request->ll_point.altitude = 0.0;
     auto future = fromll_client_->async_send_request(request);
-    if (rclcpp::spin_until_future_complete(get_node_base_interface(), future, std::chrono::seconds(5)) !=
-      rclcpp::FutureReturnCode::SUCCESS)
+    if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
     {
       RCLCPP_WARN(get_logger(), "Timed out converting mission waypoint through %s", fromll_service_name_.c_str());
       return;
@@ -667,6 +757,10 @@ void MappingNode::startNextMissionChunk()
     return;
   }
 
+  if (!isWaypointFollowerActive()) {
+    return;
+  }
+
   nav2_msgs::action::FollowWaypoints::Goal goal;
   const auto stamp = now();
   for (auto pose : mission_chunks_.at(active_chunk_index_)) {
@@ -691,12 +785,69 @@ void MappingNode::startNextMissionChunk()
     goal.poses.size());
 }
 
+bool MappingNode::isWaypointFollowerActive()
+{
+  if (!waypoint_follower_state_client_->wait_for_service(std::chrono::milliseconds(0))) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for waypoint follower lifecycle service %s.",
+      waypoint_follower_state_service_name_.c_str());
+    return false;
+  }
+
+  auto request = std::make_shared<lifecycle_msgs::srv::GetState::Request>();
+  auto future = waypoint_follower_state_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(250)) != std::future_status::ready) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for waypoint follower lifecycle state from %s.",
+      waypoint_follower_state_service_name_.c_str());
+    return false;
+  }
+
+  const auto response = future.get();
+  if (!response) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waypoint follower lifecycle state request returned no response.");
+    return false;
+  }
+
+  if (response->current_state.id != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for waypoint follower to become active. Current state: %s (%u).",
+      response->current_state.label.c_str(),
+      static_cast<unsigned int>(response->current_state.id));
+    return false;
+  }
+
+  return true;
+}
+
 void MappingNode::handleGoalResponse(
   rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::SharedPtr goal_handle)
 {
   if (!goal_handle) {
     waiting_for_goal_result_ = false;
     mission_active_ = false;
+    if (!isWaypointFollowerActive()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Mission chunk was rejected before waypoint follower became active. Retrying.");
+      return;
+    }
+
     mission_completed_ = true;
     RCLCPP_ERROR(get_logger(), "Mission chunk was rejected by Nav2.");
     markMissionTerminal("aborted", "Nav2 rejected the mission chunk");
@@ -809,6 +960,9 @@ std::string MappingNode::routeGeoJsonPath() const
 std::string MappingNode::resolveRuntimePath(const std::string & configured_path) const
 {
   namespace fs = std::filesystem;
+  if (configured_path.empty()) {
+    return "";
+  }
   const fs::path configured(configured_path);
   if (configured.is_absolute()) {
     return configured.string();
@@ -915,7 +1069,10 @@ void MappingNode::markMissionTerminal(const std::string & outcome, const std::st
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<amr_sweeper_mapping::MappingNode>());
+  rclcpp::executors::MultiThreadedExecutor executor;
+  auto node = std::make_shared<amr_sweeper_mapping::MappingNode>();
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }

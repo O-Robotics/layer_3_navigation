@@ -9,6 +9,7 @@ find_package(ament_cmake REQUIRED)
 find_package(amr_sweeper_mission_executor REQUIRED)
 find_package(fusioncore_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(lifecycle_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(nav2_msgs REQUIRED)
@@ -38,6 +39,7 @@ ament_target_dependencies(${PROJECT_NAME}
   amr_sweeper_mission_executor
   fusioncore_ros
   geometry_msgs
+  lifecycle_msgs
   nav_msgs
   nav2_costmap_2d
   nav2_msgs
@@ -96,6 +98,7 @@ ament_target_dependencies(
   amr_sweeper_mission_executor
   fusioncore_ros
   geometry_msgs
+  lifecycle_msgs
   nav_msgs
   nav2_costmap_2d
   nav2_msgs
@@ -137,6 +140,7 @@ ament_export_dependencies(
   amr_sweeper_mission_executor
   nav2_costmap_2d
   geometry_msgs
+  lifecycle_msgs
   nav_msgs
   nav2_msgs
   pluginlib

@@ -70,7 +70,7 @@ GaussianNode::GaussianNode()
   tf_buffer_(get_clock()),
   tf_listener_(tf_buffer_)
 {
-  declare_parameter("output_directory", std::string("src/missions_log"));
+  declare_parameter("output_directory", std::string(""));
   declare_parameter("source_mode", std::string("realsense_pointcloud"));
   declare_parameter("representation_name", std::string(kDefaultRepresentationName));
   declare_parameter("world_frame", std::string(kDefaultWorldFrame));
@@ -309,7 +309,7 @@ void GaussianNode::publishDebugPointCloud()
 
 void GaussianNode::saveArtifacts()
 {
-  if (!artifact_dirty_ || voxels_.empty()) {
+  if (!artifact_dirty_ || voxels_.empty() || output_directory_.empty()) {
     return;
   }
 
