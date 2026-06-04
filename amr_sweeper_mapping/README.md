@@ -29,11 +29,11 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
-- The preferred runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
-- The mission route and mission costmap are expected to come from that execution folder's `execution_context.json`, not from shared top-level alias files.
+- The required runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
+- The mission route and mission costmap must come from that execution folder's `execution_context.json`, not from shared top-level alias files.
+- `auto_start_mission` defaults to `false`; FSM `RUNNING` profiles are expected to enable it explicitly when mission execution is intended.
 - Standalone launch is still supported. When no mission-specific costmap yaml is provided, the package logs a warning and keeps the GeoJSON costmap layer inactive instead of failing startup.
-- Runtime artifacts such as `mapping_session.json`, `actual_path.geojson`, and gaussian outputs are only written when a mission execution folder is resolved from `mission_execution_directory` or `active_execution.json`.
-- A scheduler-written execution pointer at `src/missions_log/active_execution.json` remains available as a fallback for manual launches.
+- Runtime artifacts such as `mapping_session.json`, `actual_path.geojson`, and gaussian outputs are only written when a mission execution folder is resolved from `mission_execution_directory`.
 - The scheduler-prepared execution context is expected at `src/missions_log/<mission_id>/<execution_timestamp>/execution_context.json`.
 - Gaussian outputs are expected under the execution folder's `gaussian/` subdirectory.
 - VDA5050 mission parsing and artifact generation now live in layer 0 inside `amr_sweeper_vda5050_parser`.

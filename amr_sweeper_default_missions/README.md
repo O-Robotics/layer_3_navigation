@@ -5,5 +5,4 @@ Ships the built-in manual mission templates that the mission executor can expose
 
 The runtime `/missions` directory is reserved for:
 - schedule files
-- active aliases
 - per-mission execution history under `/missions/<mission_id>/<execution_timestamp>/...`

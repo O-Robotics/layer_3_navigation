@@ -58,7 +58,7 @@
   ros__parameters:
     # -- Mission inputs and outputs -------------------------------------------
     mission_file:                  ""                               # Resolved launch-time mission file path. Leave empty until a mission is selected.
-    mission_route_file:            src/missions_log/active_mission_path.geojson  # Fallback runtime route for standalone launches; execution_context.json should override this during real runs.
+    mission_route_file:            ""                               # Must come from the exact mission execution context; leave empty outside an active mission handoff.
     mission_id:                    ""
     mission_output_directory:      ""                               # Leave empty until a mission execution folder is injected; mapping_session.json should only land inside per-run folders.
     actual_path_output_file:       ""                               # Leave empty until execution_context.json provides the per-run actual-path destination.
@@ -74,7 +74,7 @@
     follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
 
     # -- Mission execution policy ---------------------------------------------
-    auto_start_mission:            true
+    auto_start_mission:            false
     repeat_mission:                false
     max_segments_per_goal:         4
     status_period_seconds:         2.0
