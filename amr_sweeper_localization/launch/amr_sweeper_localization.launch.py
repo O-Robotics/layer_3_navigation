@@ -17,17 +17,16 @@ def _topic_if_enabled(enabled: bool, topic: str) -> str:
     return topic if enabled else ""
 
 
-def _disable_only_override(enabled: bool) -> str | None:
-    return None if enabled else ""
-
-
-def _load_launch_defaults() -> dict[str, str]:
+def _load_localization_parameters() -> dict:
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
     with open(config_path, "r", encoding="utf-8") as stream:
         config = yaml.safe_load(stream) or {}
+    return config.get("/**", {}).get("ros__parameters", {})
 
-    parameters = config.get("/**", {}).get("ros__parameters", {})
+
+def _load_launch_defaults() -> dict[str, str]:
+    parameters = _load_localization_parameters()
     return {
         "use_imu": str(parameters.get("use_imu", True)).lower(),
         "use_imu2": str(parameters.get("use_imu2", False)).lower(),
@@ -47,6 +46,21 @@ def _launch_fusioncore(context, *args, **kwargs):
     use_gnss = LaunchConfiguration("use_gnss").perform(context).lower() == "true"
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
+    parameters = _load_localization_parameters()
+
+    fusion_overrides = {
+        "use_sim_time": use_sim_time,
+        "base_frame": "base_footprint",
+        "odom_frame": "odom",
+        "imu.topic": _topic_if_enabled(use_imu, parameters.get("imu.topic", "imu/data_raw")),
+        "imu2.topic": _topic_if_enabled(use_imu2, parameters.get("imu2.topic", "")),
+        "encoder.topic": _topic_if_enabled(use_encoder, parameters.get("encoder.topic", "diff_cont/odom")),
+        "encoder2.topic": _topic_if_enabled(
+            use_visual_odometry, parameters.get("encoder2.topic", "visual_odometry/odom")),
+        "gnss.fix2_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.fix2_topic", "")),
+        "gnss.heading_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.heading_topic", "")),
+        "gnss.azimuth_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.azimuth_topic", "")),
+    }
 
     node = LifecycleNode(
         package="fusioncore_ros",
@@ -56,18 +70,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         output="screen",
         parameters=[
             config_path,
-            {
-                "use_sim_time": use_sim_time,
-                "base_frame": "base_footprint",
-                "odom_frame": "odom",
-                "imu.topic": _topic_if_enabled(use_imu, "imu/data_raw"),
-                "imu2.topic": _disable_only_override(use_imu2),
-                "encoder.topic": _topic_if_enabled(use_encoder, "diff_cont/odom"),
-                "encoder2.topic": _topic_if_enabled(use_visual_odometry, "visual_odometry/odom"),
-                "gnss.fix2_topic": _disable_only_override(use_gnss),
-                "gnss.heading_topic": _disable_only_override(use_gnss),
-                "gnss.azimuth_topic": _disable_only_override(use_gnss),
-            },
+            fusion_overrides,
         ],
         remappings=[
             ("/gnss/fix", "gnss/navsat" if use_gnss else "__gnss_disabled"),
