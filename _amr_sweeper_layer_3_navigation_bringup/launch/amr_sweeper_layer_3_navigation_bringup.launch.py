@@ -267,16 +267,13 @@ def generate_launch_description():
         DeclareLaunchArgument('use_gnss', default_value=localization_defaults['use_gnss']),
         DeclareLaunchArgument('use_amr_sweeper_waypoint_follower', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_mapping', default_value='true'),
-<<<<<<< Updated upstream
         DeclareLaunchArgument('missions_directory', default_value='src/missions_log'),
         DeclareLaunchArgument('execution_pointer_file', default_value='active_execution.json'),
-=======
         DeclareLaunchArgument(
             'waypoint_follower_startup_delay_sec',
             default_value='3.0',
             description='Seconds to wait after mapping launch starts before bringing up the waypoint follower.',
         ),
->>>>>>> Stashed changes
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('use_test', default_value='false'),
