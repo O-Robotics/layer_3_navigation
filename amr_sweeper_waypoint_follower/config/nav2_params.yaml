@@ -155,15 +155,9 @@ global_costmap:
 
       # -- Mission geometry layer ---------------------------------------------
       geojson_layer:
-<<<<<<< Updated upstream
-        plugin: "amr_sweeper_mapping::Vda5050CostmapLayer" # Mission-backed layer implementation for VDA5050 working zones and no-go areas.
-        enabled: true # Enable the mission geometry layer.
-        costmap_yaml_path: "src/missions_log/global_costmap.yaml" # Runtime layer consumes the generated costmap artifact from the mission builder.
-=======
         plugin:                      "amr_sweeper_mapping::Vda5050CostmapLayer"  # Mission-backed layer implementation for VDA5050 working zones and no-go areas.
         enabled:                     true                                # Enable the mission geometry layer.
         costmap_yaml_path:           ""                                  # Must be injected from the explicit mission execution context before mission navigation can start.
->>>>>>> Stashed changes
 
       # -- Obstacle layer ------------------------------------------------------
       obstacle_layer:
