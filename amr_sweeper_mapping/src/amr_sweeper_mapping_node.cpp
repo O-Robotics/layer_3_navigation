@@ -230,7 +230,7 @@ void Vda5050CostmapLayer::loadArtifact()
   if (yaml_path.empty()) {
     artifact_ = LoadedCostmapArtifact{};
     artifact_loaded_ = false;
-    RCLCPP_WARN(
+    RCLCPP_INFO(
       node->get_logger(),
       "No mission costmap yaml was provided for %s. The geojson layer will stay inactive until a "
       "mission-specific costmap artifact is configured.",
