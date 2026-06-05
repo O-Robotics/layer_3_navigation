@@ -24,7 +24,7 @@ This package hosts the real-robot Nav2 and waypoint-following setup for the AMR 
 - `map`: default `<package_share>/maps/map.yaml`
 - `use_sim_time`: default `false`
 - `params_file`: default `<package_share>/config/nav2_params.yaml`
-- `mission_costmap_yaml`: default `src/missions_log/global_costmap.yaml`, but layer 3 bringup now overrides it with the exact mission run costmap from `execution_context.json`
+- `mission_costmap_yaml`: default empty; layer 3 bringup must inject the exact mission run costmap from `execution_context.json`
 - `autostart`: default `true`
 - `use_respawn`: default `false`
 - `log_level`: default `info`

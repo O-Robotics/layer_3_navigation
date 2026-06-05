@@ -5,6 +5,7 @@
 import json
 import os
 from pathlib import Path
+import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -18,9 +19,6 @@ from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
 from lifecycle_msgs.msg import Transition
 
-DEFAULT_MISSION_COSTMAP_YAML = "src/missions_log/global_costmap.yaml"
-
-
 def _launch_file(package_name: str, launch_file_name: str):
     return PathJoinSubstitution(
         [
@@ -31,6 +29,29 @@ def _launch_file(package_name: str, launch_file_name: str):
     )
 
 
+def _topic_if_enabled(enabled: bool, topic: str) -> str:
+    return topic if enabled else ""
+
+
+def _load_localization_parameters() -> dict:
+    package_dir = get_package_share_directory("amr_sweeper_localization")
+    config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
+    with open(config_path, "r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream) or {}
+    return config.get("/**", {}).get("ros__parameters", {})
+
+
+def _load_localization_defaults() -> dict[str, str]:
+    parameters = _load_localization_parameters()
+    return {
+        "use_imu": str(parameters.get("use_imu", True)).lower(),
+        "use_imu2": str(parameters.get("use_imu2", False)).lower(),
+        "use_encoder": str(parameters.get("use_encoder", True)).lower(),
+        "use_visual_odometry": str(parameters.get("use_visual_odometry", False)).lower(),
+        "use_gnss": str(parameters.get("use_gnss", True)).lower(),
+    }
+
+
 def _load_json_file(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -38,21 +59,10 @@ def _load_json_file(path: Path) -> dict:
         return json.load(stream)
 
 
-def _resolve_execution_context(missions_directory: str, execution_pointer_file: str, mission_execution_directory: str) -> dict:
-    if mission_execution_directory:
-        return _load_json_file(Path(mission_execution_directory) / "execution_context.json")
-
-    pointer_path = Path(execution_pointer_file)
-    if not pointer_path.is_absolute():
-        pointer_path = Path(missions_directory) / pointer_path
-
-    pointer = _load_json_file(pointer_path)
-    context_path = pointer.get("execution_context_file", "")
-    if not context_path:
-        mission_run_directory = pointer.get("mission_run_directory", "")
-        if mission_run_directory:
-            context_path = str(Path(mission_run_directory) / "execution_context.json")
-    return _load_json_file(Path(context_path)) if context_path else {}
+def _resolve_execution_context(mission_execution_directory: str) -> dict:
+    if not mission_execution_directory:
+        return {}
+    return _load_json_file(Path(mission_execution_directory) / "execution_context.json")
 
 
 def _build_launches(context):
@@ -66,19 +76,18 @@ def _build_launches(context):
     use_amr_sweeper_visual_odometry_bool = (
         use_amr_sweeper_visual_odometry.perform(context).lower() == 'true'
     )
+    use_imu = LaunchConfiguration('use_imu').perform(context).lower() == 'true'
+    use_imu2 = LaunchConfiguration('use_imu2').perform(context).lower() == 'true'
+    use_encoder = LaunchConfiguration('use_encoder').perform(context).lower() == 'true'
+    use_gnss = LaunchConfiguration('use_gnss').perform(context).lower() == 'true'
     use_amr_sweeper_waypoint_follower = LaunchConfiguration('use_amr_sweeper_waypoint_follower').perform(context).lower() == 'true'
     use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping').perform(context).lower() == 'true'
-    missions_directory = LaunchConfiguration('missions_directory').perform(context)
-    execution_pointer_file = LaunchConfiguration('execution_pointer_file').perform(context)
     mission_execution_directory = LaunchConfiguration('mission_execution_directory').perform(context)
+    auto_start_mission = LaunchConfiguration('auto_start_mission').perform(context)
     use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
     test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
-    mission_context = _resolve_execution_context(
-        missions_directory,
-        execution_pointer_file,
-        mission_execution_directory,
-    )
-    mission_costmap_yaml = mission_context.get("mission_costmap_yaml") or DEFAULT_MISSION_COSTMAP_YAML
+    mission_context = _resolve_execution_context(mission_execution_directory)
+    mission_costmap_yaml = mission_context.get("mission_costmap_yaml", "")
 
     actions = [
         IncludeLaunchDescription(
@@ -110,9 +119,8 @@ def _build_launches(context):
         launch_arguments={
             'namespace': namespace,
             'use_sim_time': use_sim_time,
-            'missions_directory': missions_directory,
-            'execution_pointer_file': execution_pointer_file,
             'mission_execution_directory': mission_execution_directory,
+            'auto_start_mission': auto_start_mission,
             'use_test': 'true' if use_test else 'false',
             'test_output_directory': test_output_directory,
         }.items(),
@@ -125,8 +133,28 @@ def _build_launches(context):
 
     if use_amr_sweeper_localization:
         localization_package_dir = get_package_share_directory("amr_sweeper_localization")
-        localization_config_path = os.path.join(localization_package_dir, "config", "fusioncore.yaml")
+        localization_config_path = os.path.join(
+            localization_package_dir, "config", "amr_sweeper_localization.yaml")
         use_sim_time_bool = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
+        localization_parameters = _load_localization_parameters()
+
+        fusion_overrides = {
+            "use_sim_time": use_sim_time_bool,
+            "base_frame": "base_footprint",
+            "odom_frame": "odom",
+            "imu.topic": _topic_if_enabled(use_imu, localization_parameters.get("imu.topic", "imu/data_raw")),
+            "imu2.topic": _topic_if_enabled(use_imu2, localization_parameters.get("imu2.topic", "")),
+            "encoder.topic": _topic_if_enabled(
+                use_encoder, localization_parameters.get("encoder.topic", "diff_cont/odom")),
+            "encoder2.topic": _topic_if_enabled(
+                use_amr_sweeper_visual_odometry_bool,
+                localization_parameters.get("encoder2.topic", "visual_odometry/odom")),
+            "gnss.fix2_topic": _topic_if_enabled(use_gnss, localization_parameters.get("gnss.fix2_topic", "")),
+            "gnss.heading_topic": _topic_if_enabled(
+                use_gnss, localization_parameters.get("gnss.heading_topic", "")),
+            "gnss.azimuth_topic": _topic_if_enabled(
+                use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
+        }
 
         fusioncore_node = LifecycleNode(
             package="fusioncore_ros",
@@ -136,17 +164,10 @@ def _build_launches(context):
             output="screen",
             parameters=[
                 localization_config_path,
-                {
-                    "use_sim_time": use_sim_time_bool,
-                    "base_frame": "base_footprint",
-                    "odom_frame": "odom",
-                    "encoder2.topic": "visual_odometry/odom" if use_amr_sweeper_visual_odometry_bool else "",
-                },
+                fusion_overrides,
             ],
             remappings=[
-                ("/imu/data", "imu/data_raw"),
-                ("/odom/wheels", "diff_cont/odom"),
-                ("/gnss/fix", "gnss/navsat"),
+                ("/gnss/fix", "gnss/navsat" if use_gnss else "__gnss_disabled"),
                 ("/fusion/odom", "odometry/fused"),
                 ("/fusion/pose", "pose"),
             ],
@@ -232,11 +253,18 @@ def _build_launches(context):
 
 
 def generate_launch_description():
+    localization_defaults = _load_localization_defaults()
     return LaunchDescription([
         DeclareLaunchArgument('namespace', default_value='amr_sweeper'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('use_amr_sweeper_localization', default_value='true'),
-        DeclareLaunchArgument('use_amr_sweeper_visual_odometry', default_value='true'),
+        DeclareLaunchArgument(
+            'use_amr_sweeper_visual_odometry',
+            default_value='false'),
+        DeclareLaunchArgument('use_imu', default_value=localization_defaults['use_imu']),
+        DeclareLaunchArgument('use_imu2', default_value=localization_defaults['use_imu2']),
+        DeclareLaunchArgument('use_encoder', default_value=localization_defaults['use_encoder']),
+        DeclareLaunchArgument('use_gnss', default_value=localization_defaults['use_gnss']),
         DeclareLaunchArgument('use_amr_sweeper_waypoint_follower', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_mapping', default_value='true'),
 <<<<<<< Updated upstream
@@ -250,6 +278,7 @@ def generate_launch_description():
         ),
 >>>>>>> Stashed changes
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
+        DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('use_test', default_value='false'),
         DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
         OpaqueFunction(function=_build_launches),
