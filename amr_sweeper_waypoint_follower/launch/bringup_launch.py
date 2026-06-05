@@ -25,6 +25,7 @@ from launch.substitutions import LaunchConfiguration
 def generate_launch_description():
     bringup_dir = get_package_share_directory('amr_sweeper_waypoint_follower')
     launch_dir = os.path.join(bringup_dir, 'launch')
+    console_output_format = "[{severity}] [{time}] [{name}] : {message}"
 
     namespace = LaunchConfiguration('namespace')
     map_yaml_file = LaunchConfiguration('map')
@@ -37,6 +38,8 @@ def generate_launch_description():
 
     stdout_linebuf_envvar = SetEnvironmentVariable(
         'RCUTILS_LOGGING_BUFFERED_STREAM', '1')
+    console_output_format_envvar = SetEnvironmentVariable(
+        'RCUTILS_CONSOLE_OUTPUT_FORMAT', console_output_format)
 
     declare_namespace_cmd = DeclareLaunchArgument(
         'namespace',
@@ -95,6 +98,7 @@ def generate_launch_description():
 
     ld = LaunchDescription()
     ld.add_action(stdout_linebuf_envvar)
+    ld.add_action(console_output_format_envvar)
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_use_sim_time_cmd)

@@ -218,11 +218,14 @@ def _build_nav2_group(context):
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory('amr_sweeper_waypoint_follower')
+    console_output_format = "[{severity}] [{time}] [{name}] : {message}"
 
     stdout_linebuf_envvar = SetEnvironmentVariable(
         'RCUTILS_LOGGING_BUFFERED_STREAM', '1')
     colorized_logs_envvar = SetEnvironmentVariable(
         'RCUTILS_COLORIZED_OUTPUT', '1')
+    console_output_format_envvar = SetEnvironmentVariable(
+        'RCUTILS_CONSOLE_OUTPUT_FORMAT', console_output_format)
 
     declare_namespace_cmd = DeclareLaunchArgument(
         'namespace',
@@ -263,6 +266,7 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(stdout_linebuf_envvar)
     ld.add_action(colorized_logs_envvar)
+    ld.add_action(console_output_format_envvar)
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_map_yaml_cmd)
