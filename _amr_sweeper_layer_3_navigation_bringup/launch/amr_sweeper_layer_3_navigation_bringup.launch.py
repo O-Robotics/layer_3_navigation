@@ -58,6 +58,9 @@ def _resolve_execution_context(missions_directory: str, execution_pointer_file: 
 def _build_launches(context):
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
+    waypoint_follower_startup_delay_sec = float(
+        LaunchConfiguration('waypoint_follower_startup_delay_sec').perform(context)
+    )
     use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization').perform(context).lower() == 'true'
     use_amr_sweeper_visual_odometry = LaunchConfiguration('use_amr_sweeper_visual_odometry')
     use_amr_sweeper_visual_odometry_bool = (
@@ -113,6 +116,11 @@ def _build_launches(context):
             'use_test': 'true' if use_test else 'false',
             'test_output_directory': test_output_directory,
         }.items(),
+    )
+
+    delayed_waypoint_follower_launch = TimerAction(
+        period=waypoint_follower_startup_delay_sec,
+        actions=[waypoint_follower_launch],
     )
 
     if use_amr_sweeper_localization:
@@ -194,10 +202,12 @@ def _build_launches(context):
         actions.extend([fusioncore_node, configure_fusioncore, activate_fusioncore, map_to_odom])
 
         gated_entities = []
-        if use_amr_sweeper_waypoint_follower:
-            gated_entities.append(waypoint_follower_launch)
         if use_amr_sweeper_mapping:
             gated_entities.append(mapping_launch)
+            if use_amr_sweeper_waypoint_follower:
+                gated_entities.append(delayed_waypoint_follower_launch)
+        elif use_amr_sweeper_waypoint_follower:
+            gated_entities.append(waypoint_follower_launch)
 
         if gated_entities:
             actions.append(
@@ -211,10 +221,12 @@ def _build_launches(context):
                 )
             )
     else:
-        if use_amr_sweeper_waypoint_follower:
-            actions.append(waypoint_follower_launch)
         if use_amr_sweeper_mapping:
             actions.append(mapping_launch)
+            if use_amr_sweeper_waypoint_follower:
+                actions.append(delayed_waypoint_follower_launch)
+        elif use_amr_sweeper_waypoint_follower:
+            actions.append(waypoint_follower_launch)
 
     return actions
 
@@ -227,8 +239,16 @@ def generate_launch_description():
         DeclareLaunchArgument('use_amr_sweeper_visual_odometry', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_waypoint_follower', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_mapping', default_value='true'),
+<<<<<<< Updated upstream
         DeclareLaunchArgument('missions_directory', default_value='src/missions_log'),
         DeclareLaunchArgument('execution_pointer_file', default_value='active_execution.json'),
+=======
+        DeclareLaunchArgument(
+            'waypoint_follower_startup_delay_sec',
+            default_value='3.0',
+            description='Seconds to wait after mapping launch starts before bringing up the waypoint follower.',
+        ),
+>>>>>>> Stashed changes
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
         DeclareLaunchArgument('use_test', default_value='false'),
         DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
