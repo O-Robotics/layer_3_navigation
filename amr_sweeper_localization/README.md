@@ -32,7 +32,7 @@ This package provides the real-robot localization stack for the AMR Sweeper.
 
 ## Notes
 - The primary IMU topic is configured by `imu.topic` in `config/amr_sweeper_localization.yaml`; by default it is `imu/data_raw`, which resolves to `/amr_sweeper/imu/data_raw` under the default namespace. An optional second IMU can be enabled with the `imu2.*` group.
-- The primary wheel-odometry topic is configured by `encoder.topic` and defaults to `diff_cont/odom`; an optional visual-odometry source can be enabled and tuned with the `encoder2.*` group.
+- The primary wheel-odometry topic is configured by `encoder.topic` and defaults to `drive_controller/odom`; an optional visual-odometry source can be enabled and tuned with the `encoder2.*` group.
 - Uses IMU data from `amr_sweeper_imu` and GNSS data from `amr_sweeper_gnss`.
 - FusionCore consumes GNSS directly from `/amr_sweeper/gnss/navsat`.
 - FusionCore is configured to publish `odom -> base_footprint` as yaw-only. Chassis roll/pitch is owned by the layer 2 attitude controller through the `base_footprint -> base_link` chain.

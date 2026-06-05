@@ -25,7 +25,7 @@
 
     # -- Wheel Odometry --------------------------------------------------------
     use_encoder:                           true            # Default launch-time toggle for wheel odometry input.
-    encoder.topic:                         diff_cont/odom  # Primary wheel-odometry topic consumed by FusionCore; resolves under the selected robot namespace.
+    encoder.topic:                         drive_controller/odom  # Primary wheel-odometry topic consumed by FusionCore; resolves under the selected robot namespace.
     encoder.vel_noise:                     0.05            # Linear velocity measurement noise in m/s for wheel odometry.
     encoder.yaw_noise:                     0.02            # Yaw-rate measurement noise in rad/s for wheel odometry.
 

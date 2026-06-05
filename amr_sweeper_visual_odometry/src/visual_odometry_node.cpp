@@ -107,7 +107,7 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions & options)
   legacy_camera_info_topic_ = declare_parameter(
     "camera_info_topic",
     std::string("usb_cameras/tools_camera/tools_camera_info"));
-  wheel_odom_topic_ = declare_parameter("wheel_odom_topic", std::string("diff_cont/odom"));
+  wheel_odom_topic_ = declare_parameter("wheel_odom_topic", std::string("drive_controller/odom"));
   imu_topic_ = declare_parameter("motion_reference.imu_topic", std::string("imu/data_raw"));
   odom_topic_ = declare_parameter("odom_topic", std::string("visual_odometry/odom"));
   base_frame_ = declare_parameter("base_frame", std::string("base_footprint"));

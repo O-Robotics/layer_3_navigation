@@ -54,7 +54,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         "odom_frame": "odom",
         "imu.topic": _topic_if_enabled(use_imu, parameters.get("imu.topic", "imu/data_raw")),
         "imu2.topic": _topic_if_enabled(use_imu2, parameters.get("imu2.topic", "")),
-        "encoder.topic": _topic_if_enabled(use_encoder, parameters.get("encoder.topic", "diff_cont/odom")),
+        "encoder.topic": _topic_if_enabled(use_encoder, parameters.get("encoder.topic", "drive_controller/odom")),
         "encoder2.topic": _topic_if_enabled(
             use_visual_odometry, parameters.get("encoder2.topic", "visual_odometry/odom")),
         "gnss.fix2_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.fix2_topic", "")),

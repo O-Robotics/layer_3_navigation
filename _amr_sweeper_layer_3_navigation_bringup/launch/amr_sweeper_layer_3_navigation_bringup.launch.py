@@ -145,7 +145,7 @@ def _build_launches(context):
             "imu.topic": _topic_if_enabled(use_imu, localization_parameters.get("imu.topic", "imu/data_raw")),
             "imu2.topic": _topic_if_enabled(use_imu2, localization_parameters.get("imu2.topic", "")),
             "encoder.topic": _topic_if_enabled(
-                use_encoder, localization_parameters.get("encoder.topic", "diff_cont/odom")),
+                use_encoder, localization_parameters.get("encoder.topic", "drive_controller/odom")),
             "encoder2.topic": _topic_if_enabled(
                 use_amr_sweeper_visual_odometry_bool,
                 localization_parameters.get("encoder2.topic", "visual_odometry/odom")),

@@ -22,7 +22,7 @@ This package provides a monocular visual odometry path for the AMR Sweeper camer
 - Main node: `visual_odometry_node`.
 - Default configured camera list: `["tool_camera"]`.
 - Default camera info input: `/amr_sweeper/usb_cameras/tools_camera/tools_camera_info`.
-- Default wheel odometry input: `/amr_sweeper/diff_cont/odom`.
+- Default wheel odometry input: `/amr_sweeper/drive_controller/odom`.
 - Default odometry output: `/amr_sweeper/visual_odometry/odom`.
 - `amr_sweeper_visual_odometry` does not launch FusionCore. The intended stack is visual odometry here, then `amr_sweeper_localization` consumes `/amr_sweeper/visual_odometry/odom` as FusionCore `encoder2.topic`.
 - Additional cameras can be added through `camera_names` plus `cameras.<name>.image_topic`, `cameras.<name>.camera_info_topic`, and `cameras.<name>.camera_frame`.

@@ -10,7 +10,7 @@
     motion_reference.imu_planar_accel_deadband_mps2:        0.15                  # Retained for IMU-history timing; not used for metric scale.
     motion_reference.imu_velocity_damping_per_second:       1.5                   # Retained for IMU-history timing; not used for metric scale.
     motion_reference.imu_stationary_angular_velocity_threshold_rad_s: 0.05       # Retained for IMU-history timing; not used for metric scale.
-    wheel_odom_topic:                                       diff_cont/odom        # Wheel odometry topic used for translation scale.
+    wheel_odom_topic:                                       drive_controller/odom # Wheel odometry topic used for translation scale.
 
     # -- VO output ------------------------------------------------------------
     odom_topic:                                             visual_odometry/odom  # Single fused VO topic published for downstream localization.

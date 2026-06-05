@@ -7,7 +7,7 @@ ros2 launch amr_sweeper_waypoint_follower bringup_launch.py
 Dependencies to other AMR Sweeper packages:
 - `amr_sweeper_localization`
 - `amr_sweeper_sweeping_controller`
-- `amr_sweeper_wheel_controller`
+- `amr_sweeper_drive_controller`
 
 ## Purpose
 This package hosts the real-robot Nav2 and waypoint-following setup for the AMR Sweeper.
