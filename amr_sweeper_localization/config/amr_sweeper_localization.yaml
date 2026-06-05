@@ -40,7 +40,7 @@
     gnss.base_noise_xy:                    1.5             # Baseline horizontal GNSS sigma in meters before HDOP/covariance scaling.
     gnss.base_noise_z:                     3.0             # Baseline vertical GNSS sigma in meters.
     gnss.heading_noise:                    0.02            # Heading measurement noise in radians for dual-antenna or azimuth inputs.
-    gnss.max_hdop:                         8.0             # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
+    gnss.max_hdop:                         4.0             # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
     gnss.min_satellites:                   4               # Minimum satellite count required before fusing GNSS.
     gnss.min_fix_type:                     1               # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic:                       ""              # Optional second GNSS receiver topic; leave empty to disable.
