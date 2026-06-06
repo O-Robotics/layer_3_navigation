@@ -136,6 +136,8 @@ struct FusionCoreStatus {
   int vslam_outliers = 0;
 
   SensorHealth vslam_health = SensorHealth::NOT_INIT;
+  bool   last_gnss_mahalanobis_valid = false;
+  double last_gnss_mahalanobis_d2    = 0.0;
 };
 
 class FusionCore {
@@ -295,6 +297,8 @@ private:
   int enc_outliers_    = 0;
   int hdg_outliers_    = 0;
   int vslam_outliers_  = 0;
+  bool   last_gnss_mahalanobis_valid_ = false;
+  double last_gnss_mahalanobis_d2_    = 0.0;
 
   // Inertial coast mode tracking
   int  gnss_consecutive_rejects_ = 0;

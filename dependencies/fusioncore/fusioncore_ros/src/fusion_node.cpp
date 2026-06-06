@@ -29,6 +29,7 @@
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include <proj.h>
 
 using namespace std::chrono_literals;
@@ -138,6 +139,7 @@ public:
     declare_parameter("gnss.base_noise_z",   2.0);
     declare_parameter("gnss.heading_noise",  0.02);
     declare_parameter("gnss.max_hdop",       4.0);
+    declare_parameter("gnss.max_vdop",       6.0);
     declare_parameter("gnss.min_satellites", 4);
     // Minimum fix type for GNSS fusion: 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
     // Note: NavSatFix status only goes up to 2 (GBAS) which maps to RTK_FIXED.
@@ -298,10 +300,14 @@ public:
     config.gnss.base_noise_z   = get_parameter("gnss.base_noise_z").as_double();
     config.gnss.heading_noise  = get_parameter("gnss.heading_noise").as_double();
     config.gnss.max_hdop       = get_parameter("gnss.max_hdop").as_double();
+    config.gnss.max_vdop       = get_parameter("gnss.max_vdop").as_double();
     config.gnss.min_satellites = get_parameter("gnss.min_satellites").as_int();
     min_fix_type_ = static_cast<fusioncore::sensors::GnssFixType>(
         get_parameter("gnss.min_fix_type").as_int());
     config.gnss.min_fix_type = min_fix_type_;
+    gnss_max_hdop_ = config.gnss.max_hdop;
+    gnss_max_vdop_ = config.gnss.max_vdop;
+    gnss_min_satellites_ = config.gnss.min_satellites;
     RCLCPP_INFO(get_logger(),
                 "GNSS min_fix_type: %d (1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED)",
                 static_cast<int>(min_fix_type_));
@@ -1810,14 +1816,64 @@ private:
       fix.satellites = 4;  // Fix 10
     }
 
+    const bool quality_valid =
+      fix.fix_type >= min_fix_type_ &&
+      fix.hdop <= gnss_max_hdop_ &&
+      fix.vdop <= gnss_max_vdop_ &&
+      fix.satellites >= gnss_min_satellites_;
+
     bool accepted = fc_->update_gnss(t, fix);
     if (!accepted) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-        "GNSS fix rejected (fix_type=%d, min=%d, hdop=%.2f, "
-        "quality check or Mahalanobis gate)",
-        static_cast<int>(fix.fix_type),
-        static_cast<int>(min_fix_type_),
-        fix.hdop);
+      if (!quality_valid) {
+        std::vector<std::string> reasons;
+        if (fix.fix_type < min_fix_type_) {
+          reasons.push_back(
+            "fix_type=" + std::to_string(static_cast<int>(fix.fix_type)) +
+            ", min_fix_type=" + std::to_string(static_cast<int>(min_fix_type_)));
+        }
+        if (fix.hdop > gnss_max_hdop_) {
+          std::ostringstream stream;
+          stream << std::fixed << std::setprecision(2)
+                 << "hdop=" << fix.hdop << ", max_hdop=" << gnss_max_hdop_;
+          reasons.push_back(stream.str());
+        }
+        if (fix.vdop > gnss_max_vdop_) {
+          std::ostringstream stream;
+          stream << std::fixed << std::setprecision(2)
+                 << "vdop=" << fix.vdop << ", max_vdop=" << gnss_max_vdop_;
+          reasons.push_back(stream.str());
+        }
+        if (fix.satellites < gnss_min_satellites_) {
+          reasons.push_back(
+            "satellites=" + std::to_string(fix.satellites) +
+            ", min_satellites=" + std::to_string(gnss_min_satellites_));
+        }
+
+        std::ostringstream stream;
+        stream << "GNSS fix rejected (";
+        for (std::size_t index = 0; index < reasons.size(); ++index) {
+          if (index > 0) {
+            stream << "; ";
+          }
+          stream << reasons[index];
+        }
+        stream << ")";
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "%s", stream.str().c_str());
+      } else {
+        const auto fc_status = fc_->get_status();
+        std::ostringstream stream;
+        stream << std::fixed << std::setprecision(2)
+               << "GNSS fix rejected (";
+        if (fc_status.last_gnss_mahalanobis_valid) {
+          stream << "mahalanobis_d2=" << fc_status.last_gnss_mahalanobis_d2
+                 << ", outlier_threshold_gnss=" << get_parameter("outlier_threshold_gnss").as_double();
+        } else {
+          stream << "mahalanobis_d2=unknown, outlier_threshold_gnss=" << get_parameter("outlier_threshold_gnss").as_double();
+        }
+        stream << ")";
+        RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 5000, "%s", stream.str().c_str());
+      }
     }
 
     // Log heading observability status
@@ -2321,6 +2377,9 @@ private:
   fusioncore::sensors::ECEFPoint gnss_ref_ecef_;
 
   fusioncore::sensors::GnssFixType  min_fix_type_   = fusioncore::sensors::GnssFixType::GPS_FIX;
+  double                            gnss_max_hdop_ = 4.0;
+  double                            gnss_max_vdop_ = 6.0;
+  int                               gnss_min_satellites_ = 4;
   fusioncore::sensors::GnssLeverArm gnss_lever_arm_;    // primary receiver
   fusioncore::sensors::GnssLeverArm gnss_lever_arm2_;   // secondary receiver (fix2_topic)
 

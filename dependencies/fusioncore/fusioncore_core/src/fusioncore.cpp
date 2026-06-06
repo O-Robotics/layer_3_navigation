@@ -665,7 +665,9 @@ bool FusionCore::apply_gnss_update(
     sensors::GnssPosMeasurement innovation_pre;
     sensors::GnssPosNoiseMatrix S;
     ukf_.predict_measurement<sensors::GNSS_POS_DIM>(z, h_gnss, R, innovation_pre, S);
-    if (is_outlier<sensors::GNSS_POS_DIM>(innovation_pre, S, config_.outlier_threshold_gnss)) {
+    last_gnss_mahalanobis_d2_ = innovation_pre.dot(S.ldlt().solve(innovation_pre));
+    last_gnss_mahalanobis_valid_ = true;
+    if (last_gnss_mahalanobis_d2_ > config_.outlier_threshold_gnss) {
       ++gnss_outliers_;
       if (config_.gnss_coast_n > 0) {
         ++gnss_consecutive_rejects_;
@@ -682,7 +684,8 @@ bool FusionCore::apply_gnss_update(
             sensors::GnssPosMeasurement innov_deg;
             sensors::GnssPosNoiseMatrix S_deg;
             ukf_.predict_measurement<sensors::GNSS_POS_DIM>(z, h_gnss, R_deg, innov_deg, S_deg);
-            if (!is_outlier<sensors::GNSS_POS_DIM>(innov_deg, S_deg, config_.outlier_threshold_gnss)) {
+            last_gnss_mahalanobis_d2_ = innov_deg.dot(S_deg.ldlt().solve(innov_deg));
+            if (last_gnss_mahalanobis_d2_ <= config_.outlier_threshold_gnss) {
               Eigen::Matrix<double, sensors::GNSS_POS_DIM, 1> innovation =
                 ukf_.update<sensors::GNSS_POS_DIM>(z, h_gnss, R_deg);
               adapt_R<sensors::GNSS_POS_DIM>(R_gnss_, R_gnss_floor_, gnss_innovations_, innovation, config_.adaptive_gnss);
@@ -805,6 +808,8 @@ FusionCoreStatus FusionCore::get_status() const {
   status.enc_outliers   = enc_outliers_;
   status.hdg_outliers   = hdg_outliers_;
   status.vslam_outliers = vslam_outliers_;
+  status.last_gnss_mahalanobis_valid = last_gnss_mahalanobis_valid_;
+  status.last_gnss_mahalanobis_d2    = last_gnss_mahalanobis_d2_;
 
   return status;
 }
