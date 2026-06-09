@@ -77,6 +77,7 @@
     fromll_service:                fromLL                           # Coordinate-conversion service used for geographic mission routes.
     datum_service:                 /get_datum                       # FusionCore service exposing the chosen GNSS datum used to anchor earth -> map.
     publish_earth_to_map:          true                             # Publish REP-105 earth -> map from the FusionCore datum and the live slam_toolbox map -> odom correction.
+    earth_to_map_planar_only:      true                             # Keep earth -> map strictly 2D for Nav2 by dropping roll/pitch tilt from the geodetic anchor.
     earth_to_map_publish_period_seconds: 0.5                        # Keep the georeference updated as SLAM refines map -> odom.
     follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
 

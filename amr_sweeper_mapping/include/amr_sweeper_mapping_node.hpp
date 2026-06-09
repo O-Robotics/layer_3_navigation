@@ -144,6 +144,7 @@ private:
   bool auto_start_mission_{true};
   bool repeat_mission_{false};
   bool publish_earth_to_map_{true};
+  bool earth_to_map_planar_only_{true};
   bool manual_mapping_mode_{false};
   bool mission_loaded_{false};
   bool mission_converted_{false};

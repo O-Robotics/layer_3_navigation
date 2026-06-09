@@ -505,6 +505,7 @@ MappingNode::MappingNode()
   declare_parameter("auto_start_mission", true);
   declare_parameter("repeat_mission", false);
   declare_parameter("publish_earth_to_map", true);
+  declare_parameter("earth_to_map_planar_only", true);
   declare_parameter("earth_to_map_publish_period_seconds", 0.5);
   declare_parameter("max_segments_per_goal", 4);
   declare_parameter("status_period_seconds", 2.0);
@@ -540,6 +541,7 @@ MappingNode::MappingNode()
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   publish_earth_to_map_ = get_parameter("publish_earth_to_map").as_bool();
+  earth_to_map_planar_only_ = get_parameter("earth_to_map_planar_only").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
   mission_loaded_ = manual_mapping_mode_;
   mission_converted_ = manual_mapping_mode_;
@@ -659,6 +661,7 @@ void MappingNode::publishCoordinatorStatus()
     "; slam_backend=" + slam_backend_ +
     "; gaussian_mode=" + gaussian_mode_ +
     "; earth_to_map=" + std::string(publish_earth_to_map_ ? "true" : "false") +
+    "; earth_to_map_planar_only=" + std::string(earth_to_map_planar_only_ ? "true" : "false") +
     "; datum_ready=" + std::string(fusion_datum_ready_ ? "true" : "false") +
     "; mission_loaded=" + std::string(mission_loaded_ ? "true" : "false") +
     "; mission_converted=" + std::string(mission_converted_ ? "true" : "false") +
@@ -801,19 +804,23 @@ void MappingNode::publishEarthToMapTransform()
     fusion_datum_.latitude,
     fusion_datum_.longitude,
     fusion_datum_.altitude);
-  const double latitude_rad = fusion_datum_.latitude * M_PI / 180.0;
-  const double longitude_rad = fusion_datum_.longitude * M_PI / 180.0;
-  const double sin_latitude = std::sin(latitude_rad);
-  const double cos_latitude = std::cos(latitude_rad);
-  const double sin_longitude = std::sin(longitude_rad);
-  const double cos_longitude = std::cos(longitude_rad);
-
-  const tf2::Matrix3x3 earth_rotation(
-    -sin_longitude, -sin_latitude * cos_longitude, cos_latitude * cos_longitude,
-    cos_longitude, -sin_latitude * sin_longitude, cos_latitude * sin_longitude,
-    0.0, cos_latitude, sin_latitude);
   tf2::Quaternion earth_to_odom_quaternion;
-  earth_rotation.getRotation(earth_to_odom_quaternion);
+  if (earth_to_map_planar_only_) {
+    earth_to_odom_quaternion.setRPY(0.0, 0.0, 0.0);
+  } else {
+    const double latitude_rad = fusion_datum_.latitude * M_PI / 180.0;
+    const double longitude_rad = fusion_datum_.longitude * M_PI / 180.0;
+    const double sin_latitude = std::sin(latitude_rad);
+    const double cos_latitude = std::cos(latitude_rad);
+    const double sin_longitude = std::sin(longitude_rad);
+    const double cos_longitude = std::cos(longitude_rad);
+
+    const tf2::Matrix3x3 earth_rotation(
+      -sin_longitude, -sin_latitude * cos_longitude, cos_latitude * cos_longitude,
+      cos_longitude, -sin_latitude * sin_longitude, cos_latitude * sin_longitude,
+      0.0, cos_latitude, sin_latitude);
+    earth_rotation.getRotation(earth_to_odom_quaternion);
+  }
   earth_to_odom_quaternion.normalize();
 
   tf2::Transform earth_to_odom(earth_to_odom_quaternion, tf2::Vector3(
