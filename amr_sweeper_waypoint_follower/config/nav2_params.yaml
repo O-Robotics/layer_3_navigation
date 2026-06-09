@@ -101,8 +101,8 @@ local_costmap:
       robot_base_frame:              base_footprint                      # Robot body frame used to place the footprint in the costmap. Common default is base_link.
       use_sim_time:                  false                               # Use simulated clock if /clock is present. Default is typically false.
       rolling_window:                true                                # Keep the local costmap centered on the robot instead of storing a fixed map. Common local costmap default is true.
-      width:                         3                                   # Width of the local rolling costmap in meters. Many examples use 3 m.
-      height:                        3                                   # Height of the local rolling costmap in meters. Many examples use 3 m.
+      width:                         10                                  # Width of the local rolling costmap in meters. Many examples use 3 m.
+      height:                        10                                  # Height of the local rolling costmap in meters. Many examples use 3 m.
       resolution:                    0.05                                # Costmap cell size in meters. Common local costmap example value is 0.05 m.
       footprint:                     "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]"  # Robot footprint polygon in meters in base_footprint. Replaces robot_radius=0.22 to include the front tool width.
       plugins:                       ["obstacle_layer", "inflation_layer"]  # Local costmap layers to load. This setup uses obstacle marking plus inflation.

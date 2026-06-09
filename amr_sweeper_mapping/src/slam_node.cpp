@@ -165,11 +165,13 @@ void SlamNode::publishStatus()
       tf2::durationFromSec(0.05));
   }
 
-  have_map_to_odom_tf = tf_buffer_.canTransform(
-    map_frame_,
-    odom_frame_,
-    tf2::TimePointZero,
-    tf2::durationFromSec(0.05));
+  if (tf_buffer_._frameExists(map_frame_) && tf_buffer_._frameExists(odom_frame_)) {
+    have_map_to_odom_tf = tf_buffer_.canTransform(
+      map_frame_,
+      odom_frame_,
+      tf2::TimePointZero,
+      tf2::durationFromSec(0.05));
+  }
 
   std::ostringstream stream;
   stream
