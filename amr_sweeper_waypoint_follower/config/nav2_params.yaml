@@ -151,7 +151,7 @@ global_costmap:
       # -- Live SLAM occupancy layer -----------------------------------------
       static_layer:
         plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the continuously updated occupancy grid published by slam_toolbox.
-        map_topic:                   map                                  # slam_toolbox publishes the global occupancy map on this topic inside the robot namespace.
+        map_topic:                   mapping/map                          # slam_toolbox is remapped by amr_sweeper_mapping launch to publish the occupancy grid under the mapping sub-namespace.
         map_subscribe_transient_local: true                               # Receive the latest latched map immediately on startup.
         subscribe_to_updates:        true                                 # Keep the global costmap synchronized with ongoing SLAM updates.
 

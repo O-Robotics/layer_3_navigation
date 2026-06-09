@@ -114,6 +114,8 @@ def _build_nodes(context):
                 },
             ],
             remappings=[
+                ("/map", "mapping/map"),
+                ("/map_metadata", "mapping/map_metadata"),
                 ("scan", "depth_camera/scan"),
                 ("pose", "slam/pose"),
             ],
