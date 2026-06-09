@@ -18,15 +18,15 @@
     # -- ROS Runtime -----------------------------------------------------------
     use_map_saver:                         true                         # Match upstream online-async behavior and expose the map saver service.
     debug_logging:                         false                        # Keep normal log volume unless we explicitly need backend debug traces.
-    throttle_scans:                        2                            # Upstream async default; process every scan without extra throttling.
-    scan_queue_size:                       2                            # Upstream docs recommend 1 for async mode so old scans are not queued.
+    throttle_scans:                        1                            # Process every scan; throttling to every other scan makes live mapping feel unresponsive on the robot.
+    scan_queue_size:                       1                            # Async mode works best with a single latest scan instead of queueing stale depth-camera data.
     transform_publish_period:              0.05                         # Publish map->odom at 20 Hz once SLAM is active.
     map_update_interval:                   2.0                          # Preserve the workspace's faster live-map refresh cadence.
     resolution:                            0.05                         # Match Nav2 global costmap resolution.
     restamp_tf:                            false                        # Preserve original scan timing instead of rewriting TF timestamps.
     min_laser_range:                       0.0                          # Accept all valid depth-to-laserscan returns from zero outward.
     max_laser_range:                       5.0                          # Keep the workspace's practical laser range cap for the depth camera.
-    minimum_time_interval:                 1.0                          # Upstream async default minimum time between processed scans.
+    minimum_time_interval:                 0.1                          # Allow up to 10 Hz scan integration so teleop mapping produces a visibly updating occupancy grid.
     transform_timeout:                     0.2                          # Upstream async default TF lookup timeout.
     tf_buffer_duration:                    30.0                         # Retain enough TF history for scan matching on the live robot.
     stack_size_to_use:                     40000000                     # Upstream default stack size needed for large pose-graph operations.
