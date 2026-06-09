@@ -22,7 +22,7 @@
     scan_topic:                   depth_camera/scan  # Depth-camera laserscan topic relative to the robot namespace.
 
     # -- Startup seeding ------------------------------------------------------
-    seed_slam_from_fusion_pose:   true             # Seed the SLAM backend from the fused pose estimate during startup.
+    seed_slam_from_fusion_pose:   false            # Online async mapping starts from odom-referenced motion; do not inject FusionCore odom poses as map-frame seeds.
     seed_period_seconds:          2.0              # Retry period for startup seeding.
     status_period_seconds:        2.0              # Periodic status publication cadence.
     max_seed_publications:        5                # Stop startup seeding after this many successful seed publications.
