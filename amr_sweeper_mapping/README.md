@@ -34,7 +34,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - `auto_start_mission` defaults to `false`; FSM `RUNNING` profiles are expected to enable it explicitly when mission execution is intended.
 - Standalone launch is still supported. When no mission-specific costmap yaml is provided, the package logs a warning and keeps the GeoJSON costmap layer inactive instead of failing startup.
 - Runtime artifacts such as `mapping_session.json`, `actual_path.geojson`, and gaussian outputs are only written when a mission execution folder is resolved from `mission_execution_directory`.
-- The scheduler-prepared execution context is expected at `src/missions_log/<mission_id>/<execution_timestamp>/execution_context.json`.
+- The scheduler-prepared execution context is expected at `missions/logs/<mission_id>/<execution_timestamp>/execution_context.json`.
 - Gaussian outputs are expected under the execution folder's `gaussian/` subdirectory.
 - VDA5050 mission parsing and artifact generation now live in layer 0 inside `amr_sweeper_vda5050_parser`.
 - The SLAM node and gaussian node are orchestration shells in this pass so backend selection stays flexible while we wire the package structure.

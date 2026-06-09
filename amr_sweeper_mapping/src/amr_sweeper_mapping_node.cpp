@@ -1,6 +1,7 @@
 #include "amr_sweeper_mapping_node.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <nlohmann/json.hpp>
 #include <pluginlib/class_list_macros.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 namespace amr_sweeper_mapping
 {
@@ -25,7 +27,9 @@ namespace
 
 constexpr char kEnabledParam[] = "enabled";
 constexpr char kCostmapYamlPathParam[] = "costmap_yaml_path";
+constexpr char kArtifactFrameIdParam[] = "artifact_frame_id";
 constexpr char kDefaultCostmapYamlPath[] = "";
+constexpr char kDefaultArtifactFrameId[] = "odom";
 constexpr char kDefaultMissionRoutePath[] = "";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
@@ -150,6 +154,7 @@ void Vda5050CostmapLayer::onInitialize()
 {
   declareParameter(kEnabledParam, rclcpp::ParameterValue(true));
   declareParameter(kCostmapYamlPathParam, rclcpp::ParameterValue(std::string(kDefaultCostmapYamlPath)));
+  declareParameter(kArtifactFrameIdParam, rclcpp::ParameterValue(std::string(kDefaultArtifactFrameId)));
 
   auto node = node_.lock();
   if (!node) {
@@ -157,6 +162,10 @@ void Vda5050CostmapLayer::onInitialize()
   }
 
   node->get_parameter(getFullName(kEnabledParam), enabled_);
+  node->get_parameter(getFullName(kArtifactFrameIdParam), artifact_frame_id_);
+  global_frame_id_ = layered_costmap_->getGlobalFrameID();
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node, false);
   current_ = true;
   matchSize();
   loadArtifact();
@@ -175,10 +184,23 @@ void Vda5050CostmapLayer::updateBounds(
     return;
   }
 
-  *min_x = std::min(*min_x, artifact_.origin_x);
-  *min_y = std::min(*min_y, artifact_.origin_y);
-  *max_x = std::max(*max_x, artifact_.origin_x + artifact_.resolution * artifact_.width_cells);
-  *max_y = std::max(*max_y, artifact_.origin_y + artifact_.resolution * artifact_.height_cells);
+  const std::array<std::pair<double, double>, 4> corners{{
+    {artifact_.origin_x, artifact_.origin_y},
+    {artifact_.origin_x + artifact_.resolution * artifact_.width_cells, artifact_.origin_y},
+    {artifact_.origin_x, artifact_.origin_y + artifact_.resolution * artifact_.height_cells},
+    {
+      artifact_.origin_x + artifact_.resolution * artifact_.width_cells,
+      artifact_.origin_y + artifact_.resolution * artifact_.height_cells,
+    },
+  }};
+
+  for (const auto & [corner_x, corner_y] : corners) {
+    const auto transformed = transformPoint(corner_x, corner_y, artifact_frame_id_, global_frame_id_);
+    *min_x = std::min(*min_x, transformed.point.x);
+    *min_y = std::min(*min_y, transformed.point.y);
+    *max_x = std::max(*max_x, transformed.point.x);
+    *max_y = std::max(*max_y, transformed.point.y);
+  }
 }
 
 void Vda5050CostmapLayer::updateCosts(
@@ -354,10 +376,45 @@ std::string Vda5050CostmapLayer::resolveArtifactPath(const std::string & configu
   return configured.string();
 }
 
+geometry_msgs::msg::PointStamped Vda5050CostmapLayer::transformPoint(
+  const double x,
+  const double y,
+  const std::string & source_frame,
+  const std::string & target_frame) const
+{
+  geometry_msgs::msg::PointStamped point;
+  point.header.frame_id = source_frame;
+  point.point.x = x;
+  point.point.y = y;
+  point.point.z = 0.0;
+
+  auto node = node_.lock();
+  if (!node || source_frame.empty() || target_frame.empty() || source_frame == target_frame) {
+    point.header.frame_id = target_frame.empty() ? source_frame : target_frame;
+    return point;
+  }
+
+  try {
+    return tf_buffer_->transform(point, target_frame, tf2::durationFromSec(0.05));
+  } catch (const tf2::TransformException & exception) {
+    RCLCPP_WARN_THROTTLE(
+      node->get_logger(),
+      *node->get_clock(),
+      5000,
+      "Failed to transform mission artifact point from %s to %s: %s",
+      source_frame.c_str(),
+      target_frame.c_str(),
+      exception.what());
+    point.header.frame_id = target_frame;
+    return point;
+  }
+}
+
 unsigned char Vda5050CostmapLayer::sampleCostAtWorld(const double world_x, const double world_y) const
 {
-  const double grid_x = (world_x - artifact_.origin_x) / artifact_.resolution;
-  const double grid_y = (world_y - artifact_.origin_y) / artifact_.resolution;
+  const auto artifact_point = transformPoint(world_x, world_y, global_frame_id_, artifact_frame_id_);
+  const double grid_x = (artifact_point.point.x - artifact_.origin_x) / artifact_.resolution;
+  const double grid_y = (artifact_point.point.y - artifact_.origin_y) / artifact_.resolution;
   const int ix = static_cast<int>(std::floor(grid_x));
   const int iy = static_cast<int>(std::floor(grid_y));
   if (ix < 0 || iy < 0 ||

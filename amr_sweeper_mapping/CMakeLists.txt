@@ -47,6 +47,9 @@ ament_target_dependencies(${PROJECT_NAME}
   rclcpp
   rclcpp_action
   std_msgs
+  tf2
+  tf2_geometry_msgs
+  tf2_ros
   visualization_msgs
 )
 
@@ -106,6 +109,9 @@ ament_target_dependencies(
   rclcpp
   rclcpp_action
   std_msgs
+  tf2
+  tf2_geometry_msgs
+  tf2_ros
   visualization_msgs
 )
 

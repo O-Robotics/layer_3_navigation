@@ -6,6 +6,7 @@
         enabled: true
         plugin: amr_sweeper_mapping::Vda5050CostmapLayer
         costmap_yaml_path: ""  # Resolved from mission_execution_directory/execution_context.json when available; leave empty for standalone launch and the layer will warn then stay inactive.
+        artifact_frame_id: odom
 
 /**/amr_sweeper_slam_node:
   ros__parameters:
@@ -17,7 +18,7 @@
 
     # -- Input topics ---------------------------------------------------------
     fusion_pose_topic:            pose             # Fused localization pose topic inside the selected robot namespace.
-    slam_pose_topic:              pose             # SLAM output pose topic relative to the node namespace.
+    slam_pose_topic:              slam/pose        # Remapped slam_toolbox pose topic relative to the node namespace.
     scan_topic:                   depth_camera/scan  # Depth-camera laserscan topic relative to the robot namespace.
 
     # -- Startup seeding ------------------------------------------------------
@@ -69,7 +70,7 @@
     # -- Mapping runtime ------------------------------------------------------
     slam_backend:                  slam_toolbox
     gaussian_mode:                 voxel_gaussians
-    frame_id:                      map
+    frame_id:                      odom
     fromll_service:                fromLL                           # Coordinate-conversion service relative to the robot namespace.
     follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
 

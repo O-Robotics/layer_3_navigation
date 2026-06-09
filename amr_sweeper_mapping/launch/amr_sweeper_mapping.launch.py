@@ -31,6 +31,7 @@ def _build_nodes(context):
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
     params_file = LaunchConfiguration("mapping_params_file").perform(context)
+    slam_params_file = LaunchConfiguration("slam_params_file").perform(context)
     mission_execution_directory = LaunchConfiguration("mission_execution_directory").perform(context)
     use_test = LaunchConfiguration("use_test").perform(context).lower() == "true"
     test_output_directory = LaunchConfiguration("test_output_directory").perform(context)
@@ -113,6 +114,27 @@ def _build_nodes(context):
 
     actions.extend([
         Node(
+            package="slam_toolbox",
+            executable="async_slam_toolbox_node",
+            name="slam_toolbox",
+            namespace=namespace,
+            output="screen",
+            parameters=[
+                slam_params_file,
+                {
+                    "use_sim_time": use_sim_time,
+                    "odom_frame": "odom",
+                    "map_frame": "map",
+                    "base_frame": "base_footprint",
+                    "scan_topic": "depth_camera/scan",
+                },
+            ],
+            remappings=[
+                ("scan", "depth_camera/scan"),
+                ("pose", "slam/pose"),
+            ],
+        ),
+        Node(
             package="amr_sweeper_mapping",
             executable="slam_node",
             name="amr_sweeper_slam_node",
@@ -167,6 +189,13 @@ def generate_launch_description():
                     [FindPackageShare("amr_sweeper_mapping"), "config", "mapping_params.yaml"]
                 ),
                 description="Shared parameter file for mapping package nodes.",
+            ),
+            DeclareLaunchArgument(
+                "slam_params_file",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("amr_sweeper_mapping"), "config", "slam_toolbox.yaml"]
+                ),
+                description="slam_toolbox parameter file used for live mapping and map->odom TF publication.",
             ),
             DeclareLaunchArgument(
                 "mission_execution_directory",

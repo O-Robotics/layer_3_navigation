@@ -107,26 +107,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         )
     )
 
-    map_to_odom = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="map_to_odom_static_tf",
-        namespace=namespace,
-        output="screen",
-        arguments=[
-            "--x", "0",
-            "--y", "0",
-            "--z", "0",
-            "--roll", "0",
-            "--pitch", "0",
-            "--yaw", "0",
-            "--frame-id", "map",
-            "--child-frame-id", "odom",
-        ],
-        parameters=[{"use_sim_time": use_sim_time}],
-    )
-
-    return [node, configure, activate, map_to_odom]
+    return [node, configure, activate]
 
 
 def generate_launch_description():

@@ -201,26 +201,7 @@ def _build_launches(context):
             )
         )
 
-        map_to_odom = Node(
-            package="tf2_ros",
-            executable="static_transform_publisher",
-            name="map_to_odom_static_tf",
-            namespace=LaunchConfiguration("namespace").perform(context),
-            output="screen",
-            arguments=[
-                "--x", "0",
-                "--y", "0",
-                "--z", "0",
-                "--roll", "0",
-                "--pitch", "0",
-                "--yaw", "0",
-                "--frame-id", "map",
-                "--child-frame-id", "odom",
-            ],
-            parameters=[{"use_sim_time": use_sim_time_bool}],
-        )
-
-        actions.extend([fusioncore_node, configure_fusioncore, activate_fusioncore, map_to_odom])
+        actions.extend([fusioncore_node, configure_fusioncore, activate_fusioncore])
 
         gated_entities = []
         if use_amr_sweeper_mapping:
@@ -270,7 +251,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_gnss', default_value=localization_defaults['use_gnss']),
         DeclareLaunchArgument('use_amr_sweeper_waypoint_follower', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_mapping', default_value='true'),
-        DeclareLaunchArgument('missions_directory', default_value='src/missions_log'),
+        DeclareLaunchArgument('missions_directory', default_value='missions/logs'),
         DeclareLaunchArgument('execution_pointer_file', default_value='active_execution.json'),
         DeclareLaunchArgument(
             'waypoint_follower_startup_delay_sec',

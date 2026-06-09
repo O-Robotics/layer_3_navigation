@@ -7,6 +7,7 @@
 
 #include <amr_sweeper_mission_executor/srv/end_mission.hpp>
 #include <fusioncore_ros/srv/from_ll.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <lifecycle_msgs/srv/get_state.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -15,6 +16,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/msg/marker.hpp>
 
 namespace amr_sweeper_mapping
@@ -66,9 +69,18 @@ private:
   [[nodiscard]] LoadedCostmapArtifact parseCostmapArtifact(const std::string & yaml_path) const;
   [[nodiscard]] std::string resolveArtifactPath(const std::string & configured_path) const;
   [[nodiscard]] unsigned char sampleCostAtWorld(double world_x, double world_y) const;
+  [[nodiscard]] geometry_msgs::msg::PointStamped transformPoint(
+    double x,
+    double y,
+    const std::string & source_frame,
+    const std::string & target_frame) const;
 
   LoadedCostmapArtifact artifact_;
   bool artifact_loaded_{false};
+  std::string artifact_frame_id_{"odom"};
+  std::string global_frame_id_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 };
 
 class MappingNode : public rclcpp::Node

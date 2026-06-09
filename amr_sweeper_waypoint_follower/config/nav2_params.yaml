@@ -2,7 +2,7 @@ bt_navigator:
   ros__parameters:
     # -- Frames and timing -----------------------------------------------------
     use_sim_time:                    false                               # Use simulated clock if /clock is being published. Nav2 default is typically false on real robots.
-    global_frame:                    odom                                # Top-level navigation frame used by the behavior tree. Often map by default, but odom fits this rolling-window setup.
+    global_frame:                    map                                 # Top-level navigation frame used by the behavior tree. A live SLAM map now anchors global planning.
     robot_base_frame:                base_footprint                      # Robot body frame Nav2 plans and controls against. Common default is base_link.
     odom_topic:                      odometry/fused                      # Odometry topic consumed by the navigator for robot motion estimates. Under the default namespace this resolves to /amr_sweeper/odometry/fused.
     bt_loop_duration:                200                                 # Behavior tree tick period in milliseconds. Common Nav2 default is 10 ms; this config runs a slower 5 Hz tree tick.
@@ -144,19 +144,23 @@ global_costmap:
       robot_base_frame:              base_footprint                      # Robot body frame used to place the footprint in the costmap. Common default is base_link.
       use_sim_time:                  false                               # Use simulated clock if /clock is present. Default is typically false.
       footprint:                     "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]"  # Same swept footprint as local_costmap. Replaces robot_radius=0.22 for better global planning around the tool.
-      resolution:                    0.1                                 # Costmap cell size in meters. Was 0.5 m; common mapped examples often use 0.05 m.
-      width:                         50                                  # Width of the rolling global costmap in meters. No single Nav2 default; this is intentionally large for short route chunking.
-      height:                        50                                  # Height of the rolling global costmap in meters. No single Nav2 default; this matches the chosen rolling planning horizon.
-      origin_x:                      -25.0                               # Fixed map origin X in meters for the current 50 m global planning window.
-      origin_y:                      -25.0                               # Fixed map origin Y in meters for the current 50 m global planning window.
-      track_unknown_space:           false                               # Whether unknown cells remain unknown instead of being treated as free. Common mapped global examples often use true.
-      plugins:                       ["geojson_layer", "obstacle_layer", "inflation_layer"]  # Global costmap layers to load. Mission geometry is applied before live obstacles and inflation.
+      resolution:                    0.05                                # Match the live SLAM occupancy map resolution so global planning layers stay aligned.
+      track_unknown_space:           true                                # Preserve unknown space from SLAM so the planner can reason over explored versus unexplored areas.
+      plugins:                       ["static_layer", "geojson_layer", "obstacle_layer", "inflation_layer"]  # Combine the live SLAM occupancy map with static mission artifacts and current obstacles.
+
+      # -- Live SLAM occupancy layer -----------------------------------------
+      static_layer:
+        plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the continuously updated occupancy grid published by slam_toolbox.
+        map_topic:                   map                                  # slam_toolbox publishes the global occupancy map on this topic inside the robot namespace.
+        map_subscribe_transient_local: true                               # Receive the latest latched map immediately on startup.
+        subscribe_to_updates:        true                                 # Keep the global costmap synchronized with ongoing SLAM updates.
 
       # -- Mission geometry layer ---------------------------------------------
       geojson_layer:
         plugin:                      "amr_sweeper_mapping::Vda5050CostmapLayer"  # Mission-backed layer implementation for VDA5050 working zones and no-go areas.
         enabled:                     true                                # Enable the mission geometry layer.
         costmap_yaml_path:           ""                                  # Must be injected from the explicit mission execution context before mission navigation can start.
+        artifact_frame_id:           odom                                # Mission artifacts are generated in the mission runtime folder using FusionCore's local odom frame.
 
       # -- Obstacle layer ------------------------------------------------------
       obstacle_layer:
@@ -250,7 +254,7 @@ behavior_server:
       plugin:                        "nav2_behaviors::AssistedTeleop"    # Behavior that allows guarded teleoperation. Standard Nav2 behavior plugin.
 
     # -- Frames and motion limits ---------------------------------------------
-    global_frame:                    odom                                # Frame used by recovery behaviors. Typical mapped setups use map, but odom fits this rolling-window stack.
+    global_frame:                    map                                 # Recovery behaviors should use the same SLAM-backed global frame as the planner and navigator.
     robot_base_frame:                base_footprint                      # Robot body frame used by recovery behaviors. Common default is base_link.
     transform_tolerance:             0.1                                 # TF lookup tolerance in seconds for behavior execution. Common examples use 0.1 s.
     use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
