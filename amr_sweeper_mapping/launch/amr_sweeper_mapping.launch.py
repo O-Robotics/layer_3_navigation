@@ -5,11 +5,14 @@ import os
 from pathlib import Path
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+from lifecycle_msgs.msg import Transition
 
 
 def _load_json_file(path):
@@ -94,8 +97,7 @@ def _build_nodes(context):
     if mission_window_end:
         common_runtime_parameters["mission_window_end"] = mission_window_end
 
-    actions = [
-        Node(
+    slam_toolbox_node = LifecycleNode(
             package="slam_toolbox",
             executable="async_slam_toolbox_node",
             name="slam_toolbox",
@@ -115,7 +117,40 @@ def _build_nodes(context):
                 ("scan", "depth_camera/scan"),
                 ("pose", "slam/pose"),
             ],
-        ),
+        )
+
+    configure_slam_toolbox = TimerAction(
+        period=2.0,
+        actions=[
+            EmitEvent(
+                event=ChangeState(
+                    lifecycle_node_matcher=lambda action: action is slam_toolbox_node,
+                    transition_id=Transition.TRANSITION_CONFIGURE,
+                )
+            )
+        ],
+    )
+
+    activate_slam_toolbox = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=slam_toolbox_node,
+            start_state="configuring",
+            goal_state="inactive",
+            entities=[
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda action: action is slam_toolbox_node,
+                        transition_id=Transition.TRANSITION_ACTIVATE,
+                    )
+                )
+            ],
+        )
+    )
+
+    actions = [
+        slam_toolbox_node,
+        configure_slam_toolbox,
+        activate_slam_toolbox,
         Node(
             package="amr_sweeper_mapping",
             executable="slam_node",
