@@ -1,0 +1,5 @@
+---
+bool available
+geographic_msgs/GeoPoint datum
+string local_frame_id
+bool local_frame_is_enu

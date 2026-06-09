@@ -7,8 +7,10 @@
 
 #include <amr_sweeper_mission_executor/srv/end_mission.hpp>
 #include <fusioncore_ros/srv/from_ll.hpp>
+#include <fusioncore_ros/srv/get_datum.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geographic_msgs/msg/geo_point.hpp>
 #include <lifecycle_msgs/srv/get_state.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav2_costmap_2d/costmap_layer.hpp>
@@ -17,6 +19,7 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -95,10 +98,12 @@ private:
   void publishCoordinatorStatus();
   void tickMissionExecution();
   void tryRequestMissionEnd();
+  void publishEarthToMapTransform();
   void ensureMissionLoaded();
   void convertMissionRoute();
   void startNextMissionChunk();
   [[nodiscard]] bool isWaypointFollowerActive();
+  [[nodiscard]] bool refreshFusionDatum();
   void handleGoalResponse(
     rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::SharedPtr goal_handle);
   void handleGoalResult(
@@ -129,11 +134,16 @@ private:
   std::string mission_window_start_;
   std::string mission_window_end_;
   std::string frame_id_;
+  std::string earth_frame_id_;
+  std::string map_frame_id_;
+  std::string odom_frame_id_;
   std::string fromll_service_name_;
+  std::string datum_service_name_;
   std::string end_mission_service_name_;
   std::string waypoint_follower_state_service_name_;
   bool auto_start_mission_{true};
   bool repeat_mission_{false};
+  bool publish_earth_to_map_{true};
   bool manual_mapping_mode_{false};
   bool mission_loaded_{false};
   bool mission_converted_{false};
@@ -151,6 +161,8 @@ private:
   std::vector<std::vector<geometry_msgs::msg::PoseStamped>> mission_chunks_;
   std::string last_slam_status_{"unavailable"};
   std::string last_gaussian_status_{"unavailable"};
+  geographic_msgs::msg::GeoPoint fusion_datum_;
+  bool fusion_datum_ready_{false};
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
@@ -160,10 +172,15 @@ private:
   rclcpp::CallbackGroup::SharedPtr status_callback_group_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr mission_timer_;
+  rclcpp::TimerBase::SharedPtr earth_to_map_timer_;
   rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;
+  rclcpp::Client<fusioncore_ros::srv::GetDatum>::SharedPtr datum_client_;
   rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedPtr end_mission_client_;
   rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr waypoint_follower_state_client_;
   rclcpp_action::Client<nav2_msgs::action::FollowWaypoints>::SharedPtr follow_waypoints_client_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };
 
 }  // namespace amr_sweeper_mapping

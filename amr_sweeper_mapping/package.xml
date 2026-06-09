@@ -13,6 +13,7 @@
   <exec_depend>launch_ros</exec_depend>
   <depend>amr_sweeper_mission_executor</depend>
   <depend>fusioncore_ros</depend>
+  <depend>geographic_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>lifecycle_msgs</depend>
   <depend>nav2_costmap_2d</depend>

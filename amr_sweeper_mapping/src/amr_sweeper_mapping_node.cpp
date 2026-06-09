@@ -17,6 +17,10 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <nlohmann/json.hpp>
 #include <pluginlib/class_list_macros.hpp>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Transform.h>
+#include <tf2/LinearMath/Vector3.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 namespace amr_sweeper_mapping
@@ -33,6 +37,13 @@ constexpr char kDefaultArtifactFrameId[] = "odom";
 constexpr char kDefaultMissionRoutePath[] = "";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
+
+struct EcefPoint
+{
+  double x;
+  double y;
+  double z;
+};
 
 std::string trim(const std::string & value)
 {
@@ -69,6 +80,48 @@ geometry_msgs::msg::Quaternion quaternionFromYaw(const double yaw)
   quaternion.z = std::sin(yaw * 0.5);
   quaternion.w = std::cos(yaw * 0.5);
   return quaternion;
+}
+
+EcefPoint wgs84ToEcef(const double latitude_deg, const double longitude_deg, const double altitude_m)
+{
+  constexpr double kSemiMajorAxis = 6378137.0;
+  constexpr double kFlattening = 1.0 / 298.257223563;
+  constexpr double kFirstEccentricitySquared = kFlattening * (2.0 - kFlattening);
+
+  const double latitude_rad = latitude_deg * M_PI / 180.0;
+  const double longitude_rad = longitude_deg * M_PI / 180.0;
+  const double sin_latitude = std::sin(latitude_rad);
+  const double cos_latitude = std::cos(latitude_rad);
+  const double sin_longitude = std::sin(longitude_rad);
+  const double cos_longitude = std::cos(longitude_rad);
+  const double radius_of_curvature =
+    kSemiMajorAxis / std::sqrt(1.0 - kFirstEccentricitySquared * sin_latitude * sin_latitude);
+
+  return {
+    (radius_of_curvature + altitude_m) * cos_latitude * cos_longitude,
+    (radius_of_curvature + altitude_m) * cos_latitude * sin_longitude,
+    ((1.0 - kFirstEccentricitySquared) * radius_of_curvature + altitude_m) * sin_latitude};
+}
+
+tf2::Transform transformFromStamped(const geometry_msgs::msg::TransformStamped & message)
+{
+  tf2::Transform transform;
+  tf2::fromMsg(message.transform, transform);
+  return transform;
+}
+
+geometry_msgs::msg::TransformStamped stampedFromTransform(
+  const tf2::Transform & transform,
+  const rclcpp::Time & stamp,
+  const std::string & parent_frame,
+  const std::string & child_frame)
+{
+  geometry_msgs::msg::TransformStamped message;
+  message.header.stamp = stamp;
+  message.header.frame_id = parent_frame;
+  message.child_frame_id = child_frame;
+  message.transform = tf2::toMsg(transform);
+  return message;
 }
 
 struct MissionRuntimeProfile
@@ -444,9 +497,15 @@ MappingNode::MappingNode()
   declare_parameter("slam_backend", std::string("slam_toolbox"));
   declare_parameter("gaussian_mode", std::string("voxel_gaussians"));
   declare_parameter("frame_id", std::string("map"));
+  declare_parameter("earth_frame", std::string("earth"));
+  declare_parameter("map_frame", std::string("map"));
+  declare_parameter("odom_frame", std::string("odom"));
   declare_parameter("fromll_service", std::string("/fromLL"));
+  declare_parameter("datum_service", std::string("/get_datum"));
   declare_parameter("auto_start_mission", true);
   declare_parameter("repeat_mission", false);
+  declare_parameter("publish_earth_to_map", true);
+  declare_parameter("earth_to_map_publish_period_seconds", 0.5);
   declare_parameter("max_segments_per_goal", 4);
   declare_parameter("status_period_seconds", 2.0);
   declare_parameter("mission_tick_period_seconds", 1.0);
@@ -470,12 +529,17 @@ MappingNode::MappingNode()
   slam_backend_ = get_parameter("slam_backend").as_string();
   gaussian_mode_ = get_parameter("gaussian_mode").as_string();
   frame_id_ = get_parameter("frame_id").as_string();
+  earth_frame_id_ = get_parameter("earth_frame").as_string();
+  map_frame_id_ = get_parameter("map_frame").as_string();
+  odom_frame_id_ = get_parameter("odom_frame").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
+  datum_service_name_ = get_parameter("datum_service").as_string();
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
   waypoint_follower_state_service_name_ =
     get_parameter("waypoint_follower_state_service").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
+  publish_earth_to_map_ = get_parameter("publish_earth_to_map").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
   mission_loaded_ = manual_mapping_mode_;
   mission_converted_ = manual_mapping_mode_;
@@ -499,11 +563,18 @@ MappingNode::MappingNode()
 
   mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   status_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
+  tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(
     fromll_service_name_,
     rclcpp::ServicesQoS(),
     mission_callback_group_);
+  datum_client_ = create_client<fusioncore_ros::srv::GetDatum>(
+    datum_service_name_,
+    rclcpp::ServicesQoS(),
+    status_callback_group_);
   end_mission_client_ =
     create_client<amr_sweeper_mission_executor::srv::EndMission>(
     end_mission_service_name_,
@@ -527,6 +598,10 @@ MappingNode::MappingNode()
     std::chrono::duration<double>(get_parameter("mission_tick_period_seconds").as_double()),
     std::bind(&MappingNode::tickMissionExecution, this),
     mission_callback_group_);
+  earth_to_map_timer_ = create_wall_timer(
+    std::chrono::duration<double>(get_parameter("earth_to_map_publish_period_seconds").as_double()),
+    std::bind(&MappingNode::publishEarthToMapTransform, this),
+    status_callback_group_);
 
   writeMissionSessionMetadata();
 
@@ -583,6 +658,8 @@ void MappingNode::publishCoordinatorStatus()
     "; mission_window_end=" + mission_window_end_ +
     "; slam_backend=" + slam_backend_ +
     "; gaussian_mode=" + gaussian_mode_ +
+    "; earth_to_map=" + std::string(publish_earth_to_map_ ? "true" : "false") +
+    "; datum_ready=" + std::string(fusion_datum_ready_ ? "true" : "false") +
     "; mission_loaded=" + std::string(mission_loaded_ ? "true" : "false") +
     "; mission_converted=" + std::string(mission_converted_ ? "true" : "false") +
     "; mission_active=" + std::string(mission_active_ ? "true" : "false") +
@@ -626,6 +703,128 @@ void MappingNode::writeMissionSessionMetadata() const
     return;
   }
   output_stream << document.dump(2) << "\n";
+}
+
+bool MappingNode::refreshFusionDatum()
+{
+  if (fusion_datum_ready_) {
+    return true;
+  }
+
+  if (!datum_client_->wait_for_service(std::chrono::milliseconds(0))) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for FusionCore datum service %s",
+      datum_service_name_.c_str());
+    return false;
+  }
+
+  auto request = std::make_shared<fusioncore_ros::srv::GetDatum::Request>();
+  auto future = datum_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(250)) != std::future_status::ready) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for FusionCore datum response from %s",
+      datum_service_name_.c_str());
+    return false;
+  }
+
+  const auto response = future.get();
+  if (!response) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "FusionCore datum request returned no response.");
+    return false;
+  }
+
+  if (!response->available) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "FusionCore has not established a GNSS datum yet.");
+    return false;
+  }
+
+  if (!response->local_frame_is_enu) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "FusionCore datum is available but the local frame is not ENU; earth->map publishing stays disabled.");
+    return false;
+  }
+
+  fusion_datum_ = response->datum;
+  fusion_datum_ready_ = true;
+  RCLCPP_INFO(
+    get_logger(),
+    "Using FusionCore datum lat=%.8f lon=%.8f alt=%.3f for REP-105 earth->map publishing.",
+    fusion_datum_.latitude,
+    fusion_datum_.longitude,
+    fusion_datum_.altitude);
+  return true;
+}
+
+void MappingNode::publishEarthToMapTransform()
+{
+  if (!publish_earth_to_map_) {
+    return;
+  }
+
+  if (!refreshFusionDatum()) {
+    return;
+  }
+
+  geometry_msgs::msg::TransformStamped map_to_odom;
+  try {
+    map_to_odom = tf_buffer_->lookupTransform(odom_frame_id_, map_frame_id_, tf2::TimePointZero);
+  } catch (const tf2::TransformException & exception) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for %s -> %s before publishing earth->map: %s",
+      map_frame_id_.c_str(),
+      odom_frame_id_.c_str(),
+      exception.what());
+    return;
+  }
+
+  const EcefPoint datum_ecef = wgs84ToEcef(
+    fusion_datum_.latitude,
+    fusion_datum_.longitude,
+    fusion_datum_.altitude);
+  const double latitude_rad = fusion_datum_.latitude * M_PI / 180.0;
+  const double longitude_rad = fusion_datum_.longitude * M_PI / 180.0;
+  const double sin_latitude = std::sin(latitude_rad);
+  const double cos_latitude = std::cos(latitude_rad);
+  const double sin_longitude = std::sin(longitude_rad);
+  const double cos_longitude = std::cos(longitude_rad);
+
+  const tf2::Matrix3x3 earth_rotation(
+    -sin_longitude, -sin_latitude * cos_longitude, cos_latitude * cos_longitude,
+    cos_longitude, -sin_latitude * sin_longitude, cos_latitude * sin_longitude,
+    0.0, cos_latitude, sin_latitude);
+  tf2::Quaternion earth_to_odom_quaternion;
+  earth_rotation.getRotation(earth_to_odom_quaternion);
+  earth_to_odom_quaternion.normalize();
+
+  tf2::Transform earth_to_odom(earth_to_odom_quaternion, tf2::Vector3(
+      datum_ecef.x,
+      datum_ecef.y,
+      datum_ecef.z));
+  const tf2::Transform odom_to_map = transformFromStamped(map_to_odom);
+  const tf2::Transform earth_to_map = earth_to_odom * odom_to_map;
+
+  tf_broadcaster_->sendTransform(
+    stampedFromTransform(earth_to_map, now(), earth_frame_id_, map_frame_id_));
 }
 
 void MappingNode::writeActualPathArtifact() const

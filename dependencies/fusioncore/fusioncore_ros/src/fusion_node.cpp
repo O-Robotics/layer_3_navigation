@@ -24,6 +24,7 @@
 #include <diagnostic_msgs/msg/key_value.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include "fusioncore_ros/srv/from_ll.hpp"
+#include "fusioncore_ros/srv/get_datum.hpp"
 #include <mutex>
 #include <optional>
 #include <set>
@@ -650,6 +651,28 @@ public:
         response->map_point.x = enu[0];
         response->map_point.y = enu[1];
         response->map_point.z = enu[2];
+      });
+
+    datum_srv_ = create_service<fusioncore_ros::srv::GetDatum>(
+      "/get_datum",
+      [this](
+        const fusioncore_ros::srv::GetDatum::Request::SharedPtr,
+        fusioncore_ros::srv::GetDatum::Response::SharedPtr response)
+      {
+        std::lock_guard<std::mutex> lock(fc_mutex_);
+        response->available = gnss_ref_set_;
+        response->local_frame_id = odom_frame_;
+        response->local_frame_is_enu = convert_to_enu_at_reference_;
+        if (!gnss_ref_set_) {
+          response->datum.latitude = 0.0;
+          response->datum.longitude = 0.0;
+          response->datum.altitude = 0.0;
+          return;
+        }
+
+        response->datum.latitude = gnss_ref_lla_.lat_rad * 180.0 / M_PI;
+        response->datum.longitude = gnss_ref_lla_.lon_rad * 180.0 / M_PI;
+        response->datum.altitude = gnss_ref_lla_.alt_m;
       });
 
     // Checkpoint services: save/load full filter state for deterministic replay.
@@ -2321,6 +2344,7 @@ private:
   rclcpp::TimerBase::SharedPtr                                                diag_timer_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr                          reset_srv_;
   rclcpp::Service<fusioncore_ros::srv::FromLL>::SharedPtr                     from_ll_srv_;
+  rclcpp::Service<fusioncore_ros::srv::GetDatum>::SharedPtr                   datum_srv_;
 
   std::string base_frame_;
   std::string odom_frame_;

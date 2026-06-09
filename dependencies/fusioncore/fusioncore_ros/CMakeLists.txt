@@ -35,6 +35,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/FromLL.srv"
+  "srv/GetDatum.srv"
   DEPENDENCIES geographic_msgs geometry_msgs
 )
 
