@@ -1,13 +1,72 @@
 /**:
   ros__parameters:
-    mode: mapping
-    use_scan_matching: true
-    use_scan_barycenter: true
-    minimum_travel_distance: 0.10
-    minimum_travel_heading: 0.10
-    map_update_interval: 2.0
-    resolution: 0.05
-    max_laser_range: 8.0
-    transform_publish_period: 0.05
-    tf_buffer_duration: 30.0
-    debug_logging: false
+    # -- Solver ----------------------------------------------------------------
+    solver_plugin:                         solver_plugins::CeresSolver  # Upstream default solver plugin for online async SLAM.
+    ceres_linear_solver:                   SPARSE_NORMAL_CHOLESKY       # Upstream async config default for sparse pose-graph optimization.
+    ceres_preconditioner:                  SCHUR_JACOBI                 # Upstream async config default preconditioner.
+    ceres_trust_strategy:                  LEVENBERG_MARQUARDT          # Upstream async config default trust-region strategy.
+    ceres_dogleg_type:                     TRADITIONAL_DOGLEG           # Upstream async config default dogleg variant.
+    ceres_loss_function:                   None                         # Upstream async config default loss function.
+
+    # -- Core Frames And Topics ------------------------------------------------
+    mode:                                  mapping                      # Keep slam_toolbox in online mapping mode for layer 3 runtime SLAM.
+    odom_frame:                            odom                         # Local odometry frame supplied by FusionCore.
+    map_frame:                             map                          # Global SLAM frame Nav2 expects for the global costmap.
+    base_frame:                            base_footprint               # Robot body frame used for scan processing and map->odom TF.
+    scan_topic:                            depth_camera/scan            # Launch keeps this topic remapped under the selected robot namespace.
+
+    # -- ROS Runtime -----------------------------------------------------------
+    use_map_saver:                         true                         # Match upstream online-async behavior and expose the map saver service.
+    debug_logging:                         false                        # Keep normal log volume unless we explicitly need backend debug traces.
+    throttle_scans:                        1                            # Upstream async default; process every scan without extra throttling.
+    scan_queue_size:                       1                            # Upstream docs recommend 1 for async mode so old scans are not queued.
+    transform_publish_period:              0.05                         # Publish map->odom at 20 Hz once SLAM is active.
+    map_update_interval:                   2.0                          # Preserve the workspace's faster live-map refresh cadence.
+    resolution:                            0.05                         # Match Nav2 global costmap resolution.
+    restamp_tf:                            false                        # Preserve original scan timing instead of rewriting TF timestamps.
+    min_laser_range:                       0.0                          # Accept all valid depth-to-laserscan returns from zero outward.
+    max_laser_range:                       8.0                          # Keep the workspace's practical laser range cap for the depth camera.
+    minimum_time_interval:                 0.5                          # Upstream async default minimum time between processed scans.
+    transform_timeout:                     0.2                          # Upstream async default TF lookup timeout.
+    tf_buffer_duration:                    30.0                         # Retain enough TF history for scan matching on the live robot.
+    stack_size_to_use:                     40000000                     # Upstream default stack size needed for large pose-graph operations.
+    enable_interactive_mode:               true                         # Keep upstream interactive tooling support available for RViz debugging.
+
+    # -- Scan Processing -------------------------------------------------------
+    use_scan_matching:                     true                         # Enable online scan matching for pose refinement.
+    use_scan_barycenter:                   true                         # Preserve the current workspace behavior for scan centering.
+    minimum_travel_distance:               0.10                         # Keep the robot's tighter local-motion threshold before processing a scan.
+    minimum_travel_heading:                0.10                         # Keep the robot's tighter heading-change threshold before processing a scan.
+    check_min_dist_and_heading_precisely:  false                        # Upstream default logic is sufficient for this odometry setup.
+    scan_buffer_size:                      10                           # Upstream async default rolling scan buffer size.
+    scan_buffer_maximum_scan_distance:     10.0                         # Upstream async default scan-buffer distance bound.
+
+    # -- Loop Closure ----------------------------------------------------------
+    link_match_minimum_response_fine:      0.1                          # Upstream async default fine match response threshold.
+    link_scan_maximum_distance:            1.5                          # Upstream async default maximum scan-linking distance.
+    loop_search_maximum_distance:          3.0                          # Upstream async default maximum loop-search distance.
+    do_loop_closing:                       true                         # Keep loop closure enabled for continuous runtime mapping.
+    loop_match_minimum_chain_size:         10                           # Upstream async default minimum chain size for loop matching.
+    loop_match_maximum_variance_coarse:    3.0                          # Upstream async default coarse loop variance threshold.
+    loop_match_minimum_response_coarse:    0.35                         # Upstream async default coarse loop response threshold.
+    loop_match_minimum_response_fine:      0.45                         # Upstream async default fine loop response threshold.
+
+    # -- Correlation Search ----------------------------------------------------
+    correlation_search_space_dimension:    0.5                          # Upstream async default local correlation search width in meters.
+    correlation_search_space_resolution:   0.01                         # Upstream async default local correlation search resolution.
+    correlation_search_space_smear_deviation: 0.1                       # Upstream async default local correlation smear deviation.
+    loop_search_space_dimension:           8.0                          # Upstream async default loop-closure search width in meters.
+    loop_search_space_resolution:          0.05                         # Upstream async default loop-closure search resolution.
+    loop_search_space_smear_deviation:     0.03                         # Upstream async default loop-closure smear deviation.
+
+    # -- Scan Matcher ----------------------------------------------------------
+    distance_variance_penalty:             0.5                          # Upstream async default translational penalty term.
+    angle_variance_penalty:                1.0                          # Upstream async default rotational penalty term.
+    fine_search_angle_offset:              0.00349                      # Upstream async default fine angular search window.
+    coarse_search_angle_offset:            0.349                        # Upstream async default coarse angular search window.
+    coarse_angle_resolution:               0.0349                       # Upstream async default coarse angular resolution.
+    minimum_angle_penalty:                 0.9                          # Upstream async default angular penalty floor.
+    minimum_distance_penalty:              0.5                          # Upstream async default distance penalty floor.
+    use_response_expansion:                true                         # Upstream async default response-expansion behavior.
+    min_pass_through:                      2                            # Upstream async default pass-through threshold.
+    occupancy_threshold:                   0.1                          # Upstream async default occupancy threshold for map rasterization.
