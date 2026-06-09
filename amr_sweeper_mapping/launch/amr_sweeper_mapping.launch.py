@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -94,25 +94,7 @@ def _build_nodes(context):
     if mission_window_end:
         common_runtime_parameters["mission_window_end"] = mission_window_end
 
-    actions = []
-    if mission_costmap_yaml:
-        actions.append(
-            LogInfo(
-                msg=f"amr_sweeper_mapping using mission costmap from execution context: {mission_costmap_yaml}"
-            )
-        )
-    else:
-        actions.append(
-            LogInfo(
-                msg=(
-                    "amr_sweeper_mapping did not receive a mission-specific costmap yaml. "
-                    "Standalone launch will continue, and the geojson costmap layer will stay inactive "
-                    "until a mission_costmap_yaml is provided."
-                )
-            )
-        )
-
-    actions.extend([
+    actions = [
         Node(
             package="slam_toolbox",
             executable="async_slam_toolbox_node",
@@ -165,7 +147,7 @@ def _build_nodes(context):
             output="screen",
             parameters=[params_file, common_runtime_parameters],
         ),
-    ])
+    ]
 
     return actions
 

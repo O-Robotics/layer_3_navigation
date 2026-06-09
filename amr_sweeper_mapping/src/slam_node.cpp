@@ -173,21 +173,14 @@ void SlamNode::publishStatus()
 
   std::ostringstream stream;
   stream
-    << "amr_sweeper_slam_node backend=" << backend_
-    << "; ready=" << (ready ? "true" : "false")
+    << "ready=" << (ready ? "true" : "false")
     << "; tracking=" << (tracking ? "true" : "false")
-    << "; map_frame=" << map_frame_
-    << "; odom_frame=" << odom_frame_
-    << "; base_frame=" << base_frame_
-    << "; seed_count=" << seed_publications_
-    << "; scan_topic=" << scan_topic_
+    << "; scan_tf=" << (have_scan_to_base_tf ? "true" : "false")
+    << "; map_tf=" << (have_map_to_odom_tf ? "true" : "false")
     << "; scan_frame=" << (last_scan_frame_id_.empty() ? "<none>" : last_scan_frame_id_)
-    << "; fusion_pose_topic=" << fusion_pose_topic_
-    << "; fusion_pose_frame=" <<
+    << "; pose_frame=" <<
     (latest_fusion_pose_frame_id_.empty() ? "<none>" : latest_fusion_pose_frame_id_)
-    << "; slam_pose_topic=" << slam_pose_topic_
-    << "; scan_to_base_tf=" << (have_scan_to_base_tf ? "true" : "false")
-    << "; map_to_odom_tf=" << (have_map_to_odom_tf ? "true" : "false");
+    << "; seeds=" << seed_publications_;
   message.data = stream.str();
   status_publisher_->publish(message);
 }
