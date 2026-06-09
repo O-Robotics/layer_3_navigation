@@ -72,7 +72,7 @@ def _launch_fusioncore(context, *args, **kwargs):
             fusion_overrides,
         ],
         remappings=[
-            ("/gnss/fix", "gnss/navsat" if use_gnss else "__gnss_disabled"),
+            ("/gnss/fix", "gnss/navsat" if use_gnss else "_gnss_disabled"),
             ("/fusion/odom", "odometry/fused"),
             ("/fusion/pose", "pose"),
         ],
