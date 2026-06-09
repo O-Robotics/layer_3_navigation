@@ -2,7 +2,11 @@
 
 #include <chrono>
 #include <memory>
+#include <sstream>
 #include <utility>
+
+#include <tf2/exceptions.h>
+#include <tf2/time.h>
 
 namespace amr_sweeper_mapping
 {
@@ -17,7 +21,9 @@ constexpr char kDefaultScanTopic[] = "/amr_sweeper/depth_camera/scan";
 }  // namespace
 
 SlamNode::SlamNode()
-: Node("amr_sweeper_slam_node")
+: Node("amr_sweeper_slam_node"),
+  tf_buffer_(get_clock()),
+  tf_listener_(tf_buffer_)
 {
   declare_parameter("slam_backend", std::string("slam_toolbox"));
   declare_parameter("map_frame", std::string("map"));
@@ -75,11 +81,13 @@ SlamNode::SlamNode()
 void SlamNode::handleFusionPose(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message)
 {
   latest_fusion_pose_ = *message;
+  latest_fusion_pose_frame_id_ = message->header.frame_id;
   have_fusion_pose_ = true;
 }
 
 void SlamNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message)
 {
+  last_scan_frame_id_ = message->header.frame_id;
   last_scan_time_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
     now() :
     rclcpp::Time(message->header.stamp);
@@ -104,8 +112,32 @@ void SlamNode::maybeSeedInitialPose()
     return;
   }
 
+  if (latest_fusion_pose_frame_id_.empty()) {
+    if (!warned_about_seed_frame_mismatch_) {
+      warned_about_seed_frame_mismatch_ = true;
+      RCLCPP_WARN(
+        get_logger(),
+        "Skipping SLAM seed pose because FusionCore pose arrived without a frame_id. "
+        "Expected a pose in '%s' if startup seeding is enabled.",
+        map_frame_.c_str());
+    }
+    return;
+  }
+
+  if (latest_fusion_pose_frame_id_ != map_frame_) {
+    if (!warned_about_seed_frame_mismatch_) {
+      warned_about_seed_frame_mismatch_ = true;
+      RCLCPP_WARN(
+        get_logger(),
+        "Skipping SLAM seed pose because FusionCore pose is in frame '%s', not '%s'. "
+        "This wrapper will not relabel an odom-frame pose as map-frame data.",
+        latest_fusion_pose_frame_id_.c_str(),
+        map_frame_.c_str());
+    }
+    return;
+  }
+
   geometry_msgs::msg::PoseWithCovarianceStamped initial_pose = latest_fusion_pose_;
-  initial_pose.header.frame_id = map_frame_;
   initial_pose.header.stamp = now();
   initial_pose_publisher_->publish(initial_pose);
   ++seed_publications_;
@@ -122,17 +154,41 @@ void SlamNode::publishStatus()
   std_msgs::msg::String message;
   const bool ready = have_scan_ && have_fusion_pose_;
   const bool tracking = have_slam_pose_;
-  message.data =
-    "amr_sweeper_slam_node backend=" + backend_ +
-    "; ready=" + std::string(ready ? "true" : "false") +
-    "; tracking=" + std::string(tracking ? "true" : "false") +
-    "; map_frame=" + map_frame_ +
-    "; odom_frame=" + odom_frame_ +
-    "; base_frame=" + base_frame_ +
-    "; seed_count=" + std::to_string(seed_publications_) +
-    "; scan_topic=" + scan_topic_ +
-    "; fusion_pose_topic=" + fusion_pose_topic_ +
-    "; slam_pose_topic=" + slam_pose_topic_;
+  bool have_scan_to_base_tf = false;
+  bool have_map_to_odom_tf = false;
+
+  if (have_scan_ && !last_scan_frame_id_.empty()) {
+    have_scan_to_base_tf = tf_buffer_.canTransform(
+      base_frame_,
+      last_scan_frame_id_,
+      tf2::TimePointZero,
+      tf2::durationFromSec(0.05));
+  }
+
+  have_map_to_odom_tf = tf_buffer_.canTransform(
+    map_frame_,
+    odom_frame_,
+    tf2::TimePointZero,
+    tf2::durationFromSec(0.05));
+
+  std::ostringstream stream;
+  stream
+    << "amr_sweeper_slam_node backend=" << backend_
+    << "; ready=" << (ready ? "true" : "false")
+    << "; tracking=" << (tracking ? "true" : "false")
+    << "; map_frame=" << map_frame_
+    << "; odom_frame=" << odom_frame_
+    << "; base_frame=" << base_frame_
+    << "; seed_count=" << seed_publications_
+    << "; scan_topic=" << scan_topic_
+    << "; scan_frame=" << (last_scan_frame_id_.empty() ? "<none>" : last_scan_frame_id_)
+    << "; fusion_pose_topic=" << fusion_pose_topic_
+    << "; fusion_pose_frame=" <<
+    (latest_fusion_pose_frame_id_.empty() ? "<none>" : latest_fusion_pose_frame_id_)
+    << "; slam_pose_topic=" << slam_pose_topic_
+    << "; scan_to_base_tf=" << (have_scan_to_base_tf ? "true" : "false")
+    << "; map_to_odom_tf=" << (have_map_to_odom_tf ? "true" : "false");
+  message.data = stream.str();
   status_publisher_->publish(message);
 }
 

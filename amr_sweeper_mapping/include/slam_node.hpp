@@ -8,6 +8,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 namespace amr_sweeper_mapping
 {
@@ -37,7 +39,10 @@ private:
   bool have_fusion_pose_{false};
   bool have_scan_{false};
   bool have_slam_pose_{false};
+  bool warned_about_seed_frame_mismatch_{false};
   geometry_msgs::msg::PoseWithCovarianceStamped latest_fusion_pose_;
+  std::string latest_fusion_pose_frame_id_;
+  std::string last_scan_frame_id_;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_slam_pose_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr fusion_pose_subscription_;
@@ -47,6 +52,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::TimerBase::SharedPtr seed_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
+  tf2_ros::Buffer tf_buffer_;
+  tf2_ros::TransformListener tf_listener_;
 };
 
 }  // namespace amr_sweeper_mapping

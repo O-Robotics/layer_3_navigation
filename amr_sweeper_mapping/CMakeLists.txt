@@ -67,6 +67,8 @@ ament_target_dependencies(
   rclcpp
   sensor_msgs
   std_msgs
+  tf2
+  tf2_ros
 )
 
 add_executable(amr_sweeper_gaussian_node src/gaussian_node.cpp)
