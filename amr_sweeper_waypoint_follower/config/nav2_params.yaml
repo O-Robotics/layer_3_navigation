@@ -175,8 +175,8 @@ global_costmap:
           marking:                   true                                # Use this sensor source to mark obstacles. Common default/example is true.
           data_type:                 "LaserScan"                         # ROS message type expected from the source. Common options are LaserScan or PointCloud2.
           raytrace_max_range:        5.0                                 # Match the configured depth-camera laserscan max range so free-space clearing is not prematurely truncated.
-          raytrace_min_range:        0.0                                 # Minimum range in meters used to clear free space. Common examples use 0.0 m.
-          obstacle_max_range:        5.0                                 # Let the costmap mark obstacles across the full converted scan range during teleop mapping.
+          raytrace_min_range:        0.2                                 # Minimum range in meters used to clear free space. Common examples use 0.0 m.
+          obstacle_max_range:        10.0                                 # Let the costmap mark obstacles across the full converted scan range during teleop mapping.
           obstacle_min_range:        0.0                                 # Minimum range in meters used to insert obstacle cells. Common examples use 0.0 m.
           inf_is_valid:              true                                # Treat infinite LaserScan ranges as valid free-space readings for clearing. Default behavior varies by layer configuration.
 

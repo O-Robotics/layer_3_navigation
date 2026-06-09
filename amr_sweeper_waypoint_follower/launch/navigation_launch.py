@@ -30,7 +30,16 @@ def _normalize_namespace(namespace: str) -> str:
     return namespace.strip().strip('/')
 
 
+def _qualify_topic(namespace: str, relative_topic: str) -> str:
+    cleaned_namespace = _normalize_namespace(namespace)
+    cleaned_topic = relative_topic.strip().strip('/')
+    if not cleaned_namespace:
+        return f'/{cleaned_topic}'
+    return f'/{cleaned_namespace}/{cleaned_topic}'
+
+
 def _rewrite_nav2_params(context) -> dict:
+    namespace_value = LaunchConfiguration('namespace').perform(context)
     map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
@@ -42,6 +51,7 @@ def _rewrite_nav2_params(context) -> dict:
         'autostart': autostart,
         'yaml_filename': map_yaml_file,
         'costmap_yaml_path': mission_costmap_yaml,
+        'map_topic': _qualify_topic(namespace_value, 'mapping/map'),
     }
 
     rewritten_params_path = RewrittenYaml(
@@ -58,6 +68,7 @@ def _rewrite_nav2_params(context) -> dict:
 
 def _build_configured_params(context):
     namespace = LaunchConfiguration('namespace')
+    namespace_value = namespace.perform(context)
     map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
@@ -69,6 +80,7 @@ def _build_configured_params(context):
         'autostart': autostart,
         'yaml_filename': map_yaml_file,
         'costmap_yaml_path': mission_costmap_yaml,
+        'map_topic': _qualify_topic(namespace_value, 'mapping/map'),
     }
 
     return ParameterFile(
