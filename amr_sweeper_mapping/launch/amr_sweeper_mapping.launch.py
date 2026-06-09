@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-
+	
 import json
 import os
 from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
+	
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -31,6 +33,12 @@ def _resolve_execution_context(mission_execution_directory):
 
 
 def _build_nodes(context):
+    default_record_map_mission_file = str(
+        Path(get_package_share_directory("amr_sweeper_default_missions"))
+        / "missions"
+        / "RecordMap"
+        / "RecordMap.json"
+    )
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
     params_file = LaunchConfiguration("mapping_params_file").perform(context)
@@ -60,6 +68,9 @@ def _build_nodes(context):
     gaussian_output_directory = mission_context.get("gaussian_output_directory", "")
     if not gaussian_output_directory and mission_run_directory:
         gaussian_output_directory = str(Path(mission_run_directory) / "gaussian")
+    if not mission_file and not mission_execution_directory and not use_test:
+        mission_file = default_record_map_mission_file
+        mission_id = "RecordMap"
     if use_test and not mission_run_directory and test_output_directory:
         mission_run_directory = test_output_directory
         if not actual_path_output_file:

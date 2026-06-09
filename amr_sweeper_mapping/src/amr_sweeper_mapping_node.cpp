@@ -518,7 +518,6 @@ MappingNode::MappingNode()
   const MissionRuntimeProfile mission_profile = loadMissionRuntimeProfile(resolveRuntimePath(mission_file_));
   mission_type_ = mission_profile.mission_type;
   execution_mode_ = mission_profile.execution_mode;
-  manual_mapping_mode_ = execution_mode_ == kManualMappingExecutionMode;
   mission_route_file_ = get_parameter("mission_route_file").as_string();
   mission_id_ = get_parameter("mission_id").as_string();
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
@@ -543,6 +542,25 @@ MappingNode::MappingNode()
   publish_earth_to_map_ = get_parameter("publish_earth_to_map").as_bool();
   earth_to_map_planar_only_ = get_parameter("earth_to_map_planar_only").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
+  manual_mapping_mode_ = execution_mode_ == kManualMappingExecutionMode;
+  if (
+    !manual_mapping_mode_ &&
+    auto_start_mission_ &&
+    mission_file_.empty() &&
+    mission_route_file_.empty() &&
+    mission_costmap_yaml_.empty())
+  {
+    manual_mapping_mode_ = true;
+    mission_type_ = "builtin_manual_mapping";
+    execution_mode_ = kManualMappingExecutionMode;
+    if (mission_id_.empty()) {
+      mission_id_ = "RecordMap";
+    }
+    RCLCPP_INFO(
+      get_logger(),
+      "No mission execution context was provided; falling back to manual mapping mode for mission_id=%s.",
+      mission_id_.c_str());
+  }
   mission_loaded_ = manual_mapping_mode_;
   mission_converted_ = manual_mapping_mode_;
 
