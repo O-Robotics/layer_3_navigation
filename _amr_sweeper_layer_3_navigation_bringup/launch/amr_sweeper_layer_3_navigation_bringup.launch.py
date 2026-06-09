@@ -14,7 +14,6 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import LifecycleNode, Node
-from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
 from lifecycle_msgs.msg import Transition
@@ -185,20 +184,16 @@ def _build_launches(context):
             ],
         )
 
-        activate_fusioncore = RegisterEventHandler(
-            OnStateTransition(
-                target_lifecycle_node=fusioncore_node,
-                start_state="configuring",
-                goal_state="inactive",
-                entities=[
-                    EmitEvent(
-                        event=ChangeState(
-                            lifecycle_node_matcher=lambda action: action is fusioncore_node,
-                            transition_id=Transition.TRANSITION_ACTIVATE,
-                        )
+        activate_fusioncore = TimerAction(
+            period=4.0,
+            actions=[
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda action: action is fusioncore_node,
+                        transition_id=Transition.TRANSITION_ACTIVATE,
                     )
-                ],
-            )
+                )
+            ],
         )
 
         actions.extend([fusioncore_node, configure_fusioncore, activate_fusioncore])
