@@ -3,10 +3,10 @@
     ros__parameters:
       # -- Mission geometry layer ---------------------------------------------
       geojson_layer:
-        enabled: true
-        plugin: amr_sweeper_mapping::Vda5050CostmapLayer
-        costmap_yaml_path: ""  # Resolved from mission_execution_directory/execution_context.json when available; leave empty for standalone launch and the layer will warn then stay inactive.
-        artifact_frame_id: odom
+        enabled:                  true
+        plugin:                   amr_sweeper_mapping::Vda5050CostmapLayer
+        costmap_yaml_path:        ""               # Resolved from mission_execution_directory/execution_context.json when available; leave empty for standalone launch and the layer will warn then stay inactive.
+        artifact_frame_id:        odom
 
 /**/amr_sweeper_slam_node:
   ros__parameters:
