@@ -151,9 +151,9 @@ global_costmap:
       # -- Live SLAM occupancy layer -----------------------------------------
       static_layer:
         plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the continuously updated occupancy grid published by slam_toolbox.
-        map_topic:                   mapping/map                          # slam_toolbox is remapped by amr_sweeper_mapping launch to publish the occupancy grid under the mapping sub-namespace.
+        map_topic:                   mapping/map_padded                   # The mapping coordinator republishes the live slam_toolbox occupancy grid with a minimum planning footprint before Nav2 consumes it.
         map_subscribe_transient_local: false                              # Subscribe with normal durability so the static layer stays compatible with the live slam_toolbox map publisher.
-        subscribe_to_updates:        true                                 # Keep the global costmap synchronized with ongoing SLAM updates.
+        subscribe_to_updates:        false                                # The padded live map is republished as full OccupancyGrid messages, so a separate update stream is unnecessary.
 
       # -- Mission geometry layer ---------------------------------------------
       geojson_layer:

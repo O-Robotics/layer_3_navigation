@@ -13,6 +13,7 @@
 #include <geographic_msgs/msg/geo_point.hpp>
 #include <lifecycle_msgs/srv/get_state.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav2_costmap_2d/costmap_layer.hpp>
 #include <nav2_msgs/action/follow_waypoints.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -93,6 +94,7 @@ private:
   void handleSlamStatus(const std_msgs::msg::String::SharedPtr message);
   void handleGaussianStatus(const std_msgs::msg::String::SharedPtr message);
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
+  void handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishCoordinatorStatus();
   void tickMissionExecution();
   void tryRequestMissionEnd();
@@ -114,6 +116,8 @@ private:
   [[nodiscard]] std::vector<MissionCoordinate> loadRouteCoordinates(const std::string & path) const;
   [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> buildPoseSequence(
     const std::vector<MissionCoordinate> & coordinates) const;
+  [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(
+    const nav_msgs::msg::OccupancyGrid & message) const;
   [[nodiscard]] std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunkRoute(
     const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   void markMissionTerminal(const std::string & outcome, const std::string & reason);
@@ -163,11 +167,15 @@ private:
   std::string last_gaussian_status_{"unavailable"};
   geographic_msgs::msg::GeoPoint fusion_datum_;
   bool fusion_datum_ready_{false};
+  bool pad_live_map_to_minimum_size_{true};
+  double min_global_map_size_m_{10.0};
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr live_map_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr route_marker_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr padded_live_map_publisher_;
   rclcpp::CallbackGroup::SharedPtr mission_callback_group_;
   rclcpp::CallbackGroup::SharedPtr status_callback_group_;
   rclcpp::TimerBase::SharedPtr status_timer_;

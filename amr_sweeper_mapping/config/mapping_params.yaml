@@ -80,6 +80,8 @@
     earth_to_map_planar_only:      true                             # Keep earth -> map strictly 2D for Nav2 by dropping roll/pitch tilt from the geodetic anchor.
     earth_to_map_publish_period_seconds: 0.5                        # Keep the georeference updated as SLAM refines map -> odom.
     follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
+    pad_live_map_to_minimum_size:  true                             # Republish the live slam_toolbox occupancy grid with a minimum square footprint so short default missions are plan-able immediately.
+    min_global_map_size_m:         10.0                             # Minimum width/height of the republished live map in meters before Nav2 sees it.
 
     # -- Mission execution policy ---------------------------------------------
     auto_start_mission:            false

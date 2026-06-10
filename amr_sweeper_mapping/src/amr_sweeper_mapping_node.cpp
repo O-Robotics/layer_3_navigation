@@ -8,6 +8,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -541,6 +542,8 @@ MappingNode::MappingNode()
   declare_parameter("earth_to_map_publish_period_seconds", 0.5);
   declare_parameter("max_segments_per_goal", 4);
   declare_parameter("max_waypoint_spacing_m", 0.5);
+  declare_parameter("pad_live_map_to_minimum_size", true);
+  declare_parameter("min_global_map_size_m", 10.0);
   declare_parameter("status_period_seconds", 2.0);
   declare_parameter("mission_tick_period_seconds", 1.0);
   declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
@@ -576,6 +579,8 @@ MappingNode::MappingNode()
   earth_to_map_planar_only_ = get_parameter("earth_to_map_planar_only").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
   max_waypoint_spacing_m_ = get_parameter("max_waypoint_spacing_m").as_double();
+  pad_live_map_to_minimum_size_ = get_parameter("pad_live_map_to_minimum_size").as_bool();
+  min_global_map_size_m_ = get_parameter("min_global_map_size_m").as_double();
   manual_mapping_mode_ = execution_mode_ == kManualMappingExecutionMode;
   if (
     !manual_mapping_mode_ &&
@@ -610,9 +615,16 @@ MappingNode::MappingNode()
     "odometry/fused",
     50,
     std::bind(&MappingNode::handleOdometry, this, std::placeholders::_1));
+  live_map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    "mapping/map",
+    rclcpp::QoS(1).reliable().transient_local(),
+    std::bind(&MappingNode::handleLiveMap, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
   route_marker_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
     "mapping/route_marker",
+    rclcpp::QoS(1).reliable().transient_local());
+  padded_live_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+    "mapping/map_padded",
     rclcpp::QoS(1).reliable().transient_local());
 
   mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
@@ -758,6 +770,14 @@ void MappingNode::writeMissionSessionMetadata() const
     return;
   }
   output_stream << document.dump(2) << "\n";
+}
+
+void MappingNode::handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
+{
+  if (!message) {
+    return;
+  }
+  padded_live_map_publisher_->publish(padLiveMap(*message));
 }
 
 bool MappingNode::refreshFusionDatum()
@@ -1084,6 +1104,29 @@ void MappingNode::startNextMissionChunk()
     goal.poses.push_back(pose);
   }
 
+  for (std::size_t index = 0U; index < goal.poses.size(); ++index) {
+    const auto & pose = goal.poses.at(index);
+    const tf2::Quaternion orientation(
+      pose.pose.orientation.x,
+      pose.pose.orientation.y,
+      pose.pose.orientation.z,
+      pose.pose.orientation.w);
+    double roll = 0.0;
+    double pitch = 0.0;
+    double yaw = 0.0;
+    tf2::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
+    RCLCPP_INFO(
+      get_logger(),
+      "Chunk %zu waypoint %zu/%zu: x=%.3f y=%.3f yaw=%.3f rad (%.1f deg)",
+      active_chunk_index_ + 1U,
+      index + 1U,
+      goal.poses.size(),
+      pose.pose.position.x,
+      pose.pose.position.y,
+      yaw,
+      yaw * 180.0 / M_PI);
+  }
+
   rclcpp_action::Client<nav2_msgs::action::FollowWaypoints>::SendGoalOptions options;
   options.goal_response_callback =
     [this](const auto & goal_handle) {handleGoalResponse(goal_handle);};
@@ -1346,6 +1389,47 @@ std::vector<geometry_msgs::msg::PoseStamped> MappingNode::buildPoseSequence(
   }
   (void)coordinates;
   return poses;
+}
+
+nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
+  const nav_msgs::msg::OccupancyGrid & message) const
+{
+  if (!pad_live_map_to_minimum_size_ || min_global_map_size_m_ <= 0.0) {
+    return message;
+  }
+
+  const double resolution = static_cast<double>(message.info.resolution);
+  if (resolution <= 0.0) {
+    return message;
+  }
+
+  const uint32_t min_cells = static_cast<uint32_t>(std::ceil(min_global_map_size_m_ / resolution));
+  const uint32_t padded_width = std::max(message.info.width, min_cells);
+  const uint32_t padded_height = std::max(message.info.height, min_cells);
+  if (padded_width == message.info.width && padded_height == message.info.height) {
+    return message;
+  }
+
+  const uint32_t left_pad = (padded_width - message.info.width) / 2U;
+  const uint32_t bottom_pad = (padded_height - message.info.height) / 2U;
+
+  nav_msgs::msg::OccupancyGrid padded = message;
+  padded.info.width = padded_width;
+  padded.info.height = padded_height;
+  padded.info.origin.position.x -= static_cast<double>(left_pad) * resolution;
+  padded.info.origin.position.y -= static_cast<double>(bottom_pad) * resolution;
+  padded.data.assign(static_cast<std::size_t>(padded_width) * padded_height, -1);
+
+  for (uint32_t row = 0U; row < message.info.height; ++row) {
+    for (uint32_t col = 0U; col < message.info.width; ++col) {
+      const std::size_t source_index = static_cast<std::size_t>(row) * message.info.width + col;
+      const std::size_t destination_index =
+        static_cast<std::size_t>(row + bottom_pad) * padded_width + (col + left_pad);
+      padded.data.at(destination_index) = message.data.at(source_index);
+    }
+  }
+
+  return padded;
 }
 
 std::vector<std::vector<geometry_msgs::msg::PoseStamped>> MappingNode::chunkRoute(
