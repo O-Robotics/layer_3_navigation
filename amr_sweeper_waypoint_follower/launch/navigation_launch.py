@@ -51,7 +51,7 @@ def _rewrite_nav2_params(context) -> dict:
         'autostart': autostart,
         'yaml_filename': map_yaml_file,
         'costmap_yaml_path': mission_costmap_yaml,
-        'map_topic': _qualify_topic(namespace_value, 'mapping/map'),
+        'map_topic': _qualify_topic(namespace_value, 'mapping/map_padded'),
     }
 
     rewritten_params_path = RewrittenYaml(
@@ -80,7 +80,7 @@ def _build_configured_params(context):
         'autostart': autostart,
         'yaml_filename': map_yaml_file,
         'costmap_yaml_path': mission_costmap_yaml,
-        'map_topic': _qualify_topic(namespace_value, 'mapping/map'),
+        'map_topic': _qualify_topic(namespace_value, 'mapping/map_padded'),
     }
 
     return ParameterFile(
