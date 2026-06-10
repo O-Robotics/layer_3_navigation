@@ -82,6 +82,40 @@ geometry_msgs::msg::Quaternion quaternionFromYaw(const double yaw)
   return quaternion;
 }
 
+std::vector<geometry_msgs::msg::PoseStamped> densifyRoute(
+  const std::vector<geometry_msgs::msg::PoseStamped> & route,
+  const double max_spacing_m)
+{
+  if (route.size() < 2U || max_spacing_m <= 0.0) {
+    return route;
+  }
+
+  std::vector<geometry_msgs::msg::PoseStamped> densified;
+  densified.reserve(route.size());
+  densified.push_back(route.front());
+
+  for (std::size_t index = 1U; index < route.size(); ++index) {
+    const auto & previous = route.at(index - 1U);
+    const auto & current = route.at(index);
+    const double dx = current.pose.position.x - previous.pose.position.x;
+    const double dy = current.pose.position.y - previous.pose.position.y;
+    const double segment_length = std::hypot(dx, dy);
+    const int subdivisions = std::max(
+      1,
+      static_cast<int>(std::ceil(segment_length / max_spacing_m)));
+
+    for (int step = 1; step <= subdivisions; ++step) {
+      const double ratio = static_cast<double>(step) / static_cast<double>(subdivisions);
+      auto interpolated = current;
+      interpolated.pose.position.x = previous.pose.position.x + dx * ratio;
+      interpolated.pose.position.y = previous.pose.position.y + dy * ratio;
+      densified.push_back(interpolated);
+    }
+  }
+
+  return densified;
+}
+
 EcefPoint wgs84ToEcef(const double latitude_deg, const double longitude_deg, const double altitude_m)
 {
   constexpr double kSemiMajorAxis = 6378137.0;
@@ -506,6 +540,7 @@ MappingNode::MappingNode()
   declare_parameter("earth_to_map_planar_only", true);
   declare_parameter("earth_to_map_publish_period_seconds", 0.5);
   declare_parameter("max_segments_per_goal", 4);
+  declare_parameter("max_waypoint_spacing_m", 0.5);
   declare_parameter("status_period_seconds", 2.0);
   declare_parameter("mission_tick_period_seconds", 1.0);
   declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
@@ -540,6 +575,7 @@ MappingNode::MappingNode()
   publish_earth_to_map_ = get_parameter("publish_earth_to_map").as_bool();
   earth_to_map_planar_only_ = get_parameter("earth_to_map_planar_only").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
+  max_waypoint_spacing_m_ = get_parameter("max_waypoint_spacing_m").as_double();
   manual_mapping_mode_ = execution_mode_ == kManualMappingExecutionMode;
   if (
     !manual_mapping_mode_ &&
@@ -1004,6 +1040,7 @@ void MappingNode::convertMissionRoute()
   }
 
   mission_route_ = buildPoseSequence(coordinates);
+  mission_route_ = densifyRoute(mission_route_, max_waypoint_spacing_m_);
   mission_chunks_ = chunkRoute(mission_route_);
   mission_converted_ = !mission_chunks_.empty();
   publishRouteMarker();

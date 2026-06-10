@@ -85,5 +85,6 @@
     auto_start_mission:            false
     repeat_mission:                false
     max_segments_per_goal:         4
+    max_waypoint_spacing_m:        0.5                             # Densify long route segments so Nav2 plans to nearer intermediate targets while SLAM is still expanding the live map.
     status_period_seconds:         2.0
     mission_tick_period_seconds:   1.0

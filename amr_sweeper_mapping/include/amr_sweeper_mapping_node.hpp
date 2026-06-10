@@ -153,6 +153,7 @@ private:
   bool mission_end_pending_{false};
   std::size_t active_chunk_index_{0U};
   int max_segments_per_goal_{4};
+  double max_waypoint_spacing_m_{0.5};
   std::string pending_end_outcome_{"completed"};
   std::string pending_end_reason_;
   std::vector<geometry_msgs::msg::PoseStamped> mission_route_;
