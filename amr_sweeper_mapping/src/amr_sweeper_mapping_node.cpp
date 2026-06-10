@@ -759,6 +759,9 @@ void MappingNode::handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr me
     return;
   }
   latest_padded_live_map_ = padLiveMap(*message);
+  if (latest_padded_live_map_.info.width == 0U || latest_padded_live_map_.info.height == 0U) {
+    return;
+  }
   latest_padded_live_map_ready_ = true;
   padded_live_map_publisher_->publish(latest_padded_live_map_);
   live_map_ready_ = true;
@@ -1555,13 +1558,14 @@ std::vector<geometry_msgs::msg::PoseStamped> MappingNode::buildPoseSequence(
 nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
   const nav_msgs::msg::OccupancyGrid & message)
 {
+  nav_msgs::msg::OccupancyGrid padded = message;
   if (!pad_live_map_to_minimum_size_ || min_global_map_size_m_ <= 0.0) {
-    return message;
+    return padded;
   }
 
   const double resolution = static_cast<double>(message.info.resolution);
   if (resolution <= 0.0) {
-    return message;
+    return padded;
   }
 
   double anchor_x = 0.0;
@@ -1601,37 +1605,29 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
     source_min_y + static_cast<double>(message.info.height) * resolution;
 
   if (!padded_live_map_bounds_ready_) {
-    if (anchor_available) {
-      padded_live_map_min_x_ = anchor_x - min_global_map_size_m_ * 0.5;
-      padded_live_map_max_x_ = anchor_x + min_global_map_size_m_ * 0.5;
-      padded_live_map_min_y_ = anchor_y - min_global_map_size_m_ * 0.5;
-      padded_live_map_max_y_ = anchor_y + min_global_map_size_m_ * 0.5;
-      padded_live_map_bounds_ready_ = true;
-      RCLCPP_INFO(
+    if (!mission_anchor_pose_ready_ || !anchor_available) {
+      RCLCPP_INFO_THROTTLE(
         get_logger(),
-        "Initialized persistent padded live-map bounds around the mission start pose in %s: [%.3f, %.3f] x [%.3f, %.3f].",
-        message.header.frame_id.c_str(),
-        padded_live_map_min_x_,
-        padded_live_map_max_x_,
-        padded_live_map_min_y_,
-        padded_live_map_max_y_);
-    } else {
-      const double center_x = source_min_x + (source_max_x - source_min_x) * 0.5;
-      const double center_y = source_min_y + (source_max_y - source_min_y) * 0.5;
-      padded_live_map_min_x_ = center_x - min_global_map_size_m_ * 0.5;
-      padded_live_map_max_x_ = center_x + min_global_map_size_m_ * 0.5;
-      padded_live_map_min_y_ = center_y - min_global_map_size_m_ * 0.5;
-      padded_live_map_max_y_ = center_y + min_global_map_size_m_ * 0.5;
-      padded_live_map_bounds_ready_ = true;
-      RCLCPP_INFO(
-        get_logger(),
-        "Initialized persistent padded live-map bounds from the first live map in %s: [%.3f, %.3f] x [%.3f, %.3f].",
-        message.header.frame_id.c_str(),
-        padded_live_map_min_x_,
-        padded_live_map_max_x_,
-        padded_live_map_min_y_,
-        padded_live_map_max_y_);
+        *get_clock(),
+        2000,
+        "Waiting to initialize the mission startup map until the seeded robot pose can be centered in %s.",
+        message.header.frame_id.c_str());
+      return nav_msgs::msg::OccupancyGrid{};
     }
+
+    padded_live_map_min_x_ = anchor_x - min_global_map_size_m_ * 0.5;
+    padded_live_map_max_x_ = anchor_x + min_global_map_size_m_ * 0.5;
+    padded_live_map_min_y_ = anchor_y - min_global_map_size_m_ * 0.5;
+    padded_live_map_max_y_ = anchor_y + min_global_map_size_m_ * 0.5;
+    padded_live_map_bounds_ready_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Initialized persistent padded live-map bounds around the mission start pose in %s: [%.3f, %.3f] x [%.3f, %.3f].",
+      message.header.frame_id.c_str(),
+      padded_live_map_min_x_,
+      padded_live_map_max_x_,
+      padded_live_map_min_y_,
+      padded_live_map_max_y_);
   }
 
   bool expanded_bounds = false;
@@ -1689,7 +1685,6 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
     return message;
   }
 
-  nav_msgs::msg::OccupancyGrid padded = message;
   padded.info.width = padded_width;
   padded.info.height = padded_height;
   padded.info.origin.position.x = padded_min_x;
