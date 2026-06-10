@@ -1091,8 +1091,13 @@ void MappingNode::convertMissionRoute()
   geometry_msgs::msg::Point mission_anchor_position;
   geometry_msgs::msg::Quaternion mission_anchor_orientation;
   if (uses_base_footprint_anchor) {
-    mission_anchor_position = latest_odometry_position_;
-    mission_anchor_orientation = latest_odometry_orientation_;
+    if (!mission_anchor_pose_ready_) {
+      mission_anchor_position_ = latest_odometry_position_;
+      mission_anchor_orientation_ = latest_odometry_orientation_;
+      mission_anchor_pose_ready_ = true;
+    }
+    mission_anchor_position = mission_anchor_position_;
+    mission_anchor_orientation = mission_anchor_orientation_;
   }
 
   for (const MissionCoordinate & coordinate : coordinates) {
@@ -1504,21 +1509,82 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
     return message;
   }
 
-  const uint32_t min_cells = static_cast<uint32_t>(std::ceil(min_global_map_size_m_ / resolution));
-  const uint32_t padded_width = std::max(message.info.width, min_cells);
-  const uint32_t padded_height = std::max(message.info.height, min_cells);
-  if (padded_width == message.info.width && padded_height == message.info.height) {
-    return message;
+  double anchor_x = 0.0;
+  double anchor_y = 0.0;
+  bool anchor_available = false;
+  if (latest_odometry_pose_ready_) {
+    geometry_msgs::msg::Point odom_anchor =
+      mission_anchor_pose_ready_ ? mission_anchor_position_ : latest_odometry_position_;
+    try {
+      const auto map_to_odom = tf_buffer_->lookupTransform(
+        message.header.frame_id,
+        odom_frame_id_,
+        tf2::TimePointZero);
+      geometry_msgs::msg::PointStamped odom_point;
+      odom_point.header.frame_id = odom_frame_id_;
+      odom_point.point = odom_anchor;
+      const auto map_point = tf2::doTransform(odom_point, map_to_odom);
+      anchor_x = map_point.point.x;
+      anchor_y = map_point.point.y;
+      anchor_available = true;
+    } catch (const tf2::TransformException & exception) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Unable to center padded live map around robot pose yet: %s",
+        exception.what());
+    }
   }
 
-  const uint32_t left_pad = (padded_width - message.info.width) / 2U;
-  const uint32_t bottom_pad = (padded_height - message.info.height) / 2U;
+  const double minimum_extent = min_global_map_size_m_;
+  const double source_min_x = message.info.origin.position.x;
+  const double source_min_y = message.info.origin.position.y;
+  const double source_max_x =
+    source_min_x + static_cast<double>(message.info.width) * resolution;
+  const double source_max_y =
+    source_min_y + static_cast<double>(message.info.height) * resolution;
+
+  double padded_min_x = source_min_x;
+  double padded_min_y = source_min_y;
+  double padded_max_x = source_max_x;
+  double padded_max_y = source_max_y;
+  if (anchor_available) {
+    padded_min_x = std::min(padded_min_x, anchor_x - minimum_extent * 0.5);
+    padded_max_x = std::max(padded_max_x, anchor_x + minimum_extent * 0.5);
+    padded_min_y = std::min(padded_min_y, anchor_y - minimum_extent * 0.5);
+    padded_max_y = std::max(padded_max_y, anchor_y + minimum_extent * 0.5);
+  } else {
+    const double center_x = source_min_x + (source_max_x - source_min_x) * 0.5;
+    const double center_y = source_min_y + (source_max_y - source_min_y) * 0.5;
+    padded_min_x = std::min(padded_min_x, center_x - minimum_extent * 0.5);
+    padded_max_x = std::max(padded_max_x, center_x + minimum_extent * 0.5);
+    padded_min_y = std::min(padded_min_y, center_y - minimum_extent * 0.5);
+    padded_max_y = std::max(padded_max_y, center_y + minimum_extent * 0.5);
+  }
+
+  const uint32_t padded_width = static_cast<uint32_t>(
+    std::max(1.0, std::ceil((padded_max_x - padded_min_x) / resolution)));
+  const uint32_t padded_height = static_cast<uint32_t>(
+    std::max(1.0, std::ceil((padded_max_y - padded_min_y) / resolution)));
+  const uint32_t left_pad = static_cast<uint32_t>(
+    std::round((source_min_x - padded_min_x) / resolution));
+  const uint32_t bottom_pad = static_cast<uint32_t>(
+    std::round((source_min_y - padded_min_y) / resolution));
+
+  if (padded_width == message.info.width &&
+    padded_height == message.info.height &&
+    left_pad == 0U &&
+    bottom_pad == 0U)
+  {
+    return message;
+  }
 
   nav_msgs::msg::OccupancyGrid padded = message;
   padded.info.width = padded_width;
   padded.info.height = padded_height;
-  padded.info.origin.position.x -= static_cast<double>(left_pad) * resolution;
-  padded.info.origin.position.y -= static_cast<double>(bottom_pad) * resolution;
+  padded.info.origin.position.x = padded_min_x;
+  padded.info.origin.position.y = padded_min_y;
   padded.data.assign(static_cast<std::size_t>(padded_width) * padded_height, -1);
 
   for (uint32_t row = 0U; row < message.info.height; ++row) {
