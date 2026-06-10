@@ -65,6 +65,29 @@ def _resolve_execution_context(mission_execution_directory: str) -> dict:
     return _load_json_file(Path(mission_execution_directory) / "execution_context.json")
 
 
+def _resolve_navigation_launch_filename(mission_context: dict) -> str:
+    mission_type = str(mission_context.get("mission_type", "")).lower()
+    execution_mode = str(mission_context.get("execution_mode", "")).lower()
+
+    if mission_type == "builtin_local_pattern":
+        return "default_missions_navigation.launch.py"
+    if (
+        mission_type in {"builtin_manual_mapping", "builtin_teleop"} or
+        execution_mode in {"manual_mapping", "teleoperation"}
+    ):
+        return "manual_missions_navigation.launch.py"
+    return "programmed_missions_navigation.launch.py"
+
+
+def _mission_requires_mapping(mission_context: dict, mapping_requested: bool) -> bool:
+    if not mapping_requested:
+        return False
+    mission_type = str(mission_context.get("mission_type", "")).lower()
+    if mission_type == "builtin_local_pattern":
+        return False
+    return True
+
+
 def _build_launches(context):
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -80,7 +103,7 @@ def _build_launches(context):
     use_imu2 = LaunchConfiguration('use_imu2').perform(context).lower() == 'true'
     use_encoder = LaunchConfiguration('use_encoder').perform(context).lower() == 'true'
     use_gnss = LaunchConfiguration('use_gnss').perform(context).lower() == 'true'
-    use_amr_sweeper_waypoint_follower = LaunchConfiguration('use_amr_sweeper_waypoint_follower').perform(context).lower() == 'true'
+    use_amr_sweeper_navigation = LaunchConfiguration('use_amr_sweeper_navigation').perform(context).lower() == 'true'
     use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping').perform(context).lower() == 'true'
     mission_execution_directory = LaunchConfiguration('mission_execution_directory').perform(context)
     auto_start_mission = LaunchConfiguration('auto_start_mission').perform(context)
@@ -88,6 +111,11 @@ def _build_launches(context):
     test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
     mission_context = _resolve_execution_context(mission_execution_directory)
     mission_costmap_yaml = mission_context.get("mission_costmap_yaml", "")
+    navigation_launch_filename = _resolve_navigation_launch_filename(mission_context)
+    effective_use_amr_sweeper_mapping = _mission_requires_mapping(
+        mission_context,
+        use_amr_sweeper_mapping,
+    )
 
     actions = [
         IncludeLaunchDescription(
@@ -102,9 +130,9 @@ def _build_launches(context):
         ),
     ]
 
-    waypoint_follower_launch = IncludeLaunchDescription(
+    navigation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            _launch_file('amr_sweeper_waypoint_follower', 'bringup_launch.py')
+            _launch_file('amr_sweeper_navigation', navigation_launch_filename)
         ),
         launch_arguments={
             'namespace': namespace,
@@ -126,9 +154,9 @@ def _build_launches(context):
         }.items(),
     )
 
-    delayed_waypoint_follower_launch = TimerAction(
+    delayed_navigation_launch = TimerAction(
         period=waypoint_follower_startup_delay_sec,
-        actions=[waypoint_follower_launch],
+        actions=[navigation_launch],
     )
 
     if use_amr_sweeper_localization:
@@ -200,12 +228,12 @@ def _build_launches(context):
         actions.extend([fusioncore_node, configure_fusioncore, activate_fusioncore])
 
         gated_entities = []
-        if use_amr_sweeper_mapping:
+        if effective_use_amr_sweeper_mapping:
             gated_entities.append(mapping_launch)
-            if use_amr_sweeper_waypoint_follower:
-                gated_entities.append(delayed_waypoint_follower_launch)
-        elif use_amr_sweeper_waypoint_follower:
-            gated_entities.append(waypoint_follower_launch)
+            if use_amr_sweeper_navigation:
+                gated_entities.append(delayed_navigation_launch)
+        elif use_amr_sweeper_navigation:
+            gated_entities.append(navigation_launch)
 
         if gated_entities:
             actions.append(
@@ -219,12 +247,12 @@ def _build_launches(context):
                 )
             )
     else:
-        if use_amr_sweeper_mapping:
+        if effective_use_amr_sweeper_mapping:
             actions.append(mapping_launch)
-            if use_amr_sweeper_waypoint_follower:
-                actions.append(delayed_waypoint_follower_launch)
-        elif use_amr_sweeper_waypoint_follower:
-            actions.append(waypoint_follower_launch)
+            if use_amr_sweeper_navigation:
+                actions.append(delayed_navigation_launch)
+        elif use_amr_sweeper_navigation:
+            actions.append(navigation_launch)
 
     return actions
 
@@ -245,14 +273,14 @@ def generate_launch_description():
         DeclareLaunchArgument('use_imu2', default_value=localization_defaults['use_imu2']),
         DeclareLaunchArgument('use_encoder', default_value=localization_defaults['use_encoder']),
         DeclareLaunchArgument('use_gnss', default_value=localization_defaults['use_gnss']),
-        DeclareLaunchArgument('use_amr_sweeper_waypoint_follower', default_value='true'),
+        DeclareLaunchArgument('use_amr_sweeper_navigation', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_mapping', default_value='true'),
         DeclareLaunchArgument('missions_directory', default_value='missions/logs'),
         DeclareLaunchArgument('execution_pointer_file', default_value='active_execution.json'),
         DeclareLaunchArgument(
             'waypoint_follower_startup_delay_sec',
             default_value='3.0',
-            description='Seconds to wait after mapping launch starts before bringing up the waypoint follower.',
+            description='Seconds to wait after mapping launch starts before bringing up the navigation stack.',
         ),
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),

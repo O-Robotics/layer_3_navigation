@@ -34,8 +34,9 @@ def _resolve_execution_context(mission_execution_directory):
 
 def _build_nodes(context):
     default_record_map_mission_file = str(
-        Path(get_package_share_directory("amr_sweeper_default_missions"))
+        Path(get_package_share_directory("amr_sweeper_navigation"))
         / "missions"
+        / "manual_missions"
         / "RecordMap"
         / "RecordMap.json"
     )

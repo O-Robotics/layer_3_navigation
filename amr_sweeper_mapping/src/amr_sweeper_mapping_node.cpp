@@ -147,7 +147,7 @@ std::vector<geometry_msgs::msg::PoseStamped> orientRoute(
 {
   for (std::size_t index = 0; index < poses.size(); ++index) {
     double yaw = 0.0;
-    if (index == 0U && index + 1U < poses.size()) {
+    if (index + 1U < poses.size()) {
       yaw = yawForSegment(poses.at(index), poses.at(index + 1U));
     } else if (index > 0U) {
       yaw = yawForSegment(poses.at(index - 1U), poses.at(index));
@@ -272,6 +272,28 @@ nlohmann::json buildLocalPathGeoJson(
       }
     })}
   };
+}
+
+void writeJsonDocumentAtomic(
+  const std::filesystem::path & path,
+  const nlohmann::json & document)
+{
+  std::filesystem::create_directories(path.parent_path());
+  const std::filesystem::path temp_path = path.string() + ".tmp";
+
+  {
+    std::ofstream output_stream(temp_path, std::ios::trunc);
+    if (!output_stream.is_open()) {
+      throw std::runtime_error("Failed to open JSON artifact for write: " + temp_path.string());
+    }
+    output_stream << document.dump(2) << "\n";
+    output_stream.flush();
+    if (!output_stream.good()) {
+      throw std::runtime_error("Failed to flush JSON artifact: " + temp_path.string());
+    }
+  }
+
+  std::filesystem::rename(temp_path, path);
 }
 
 }  // namespace
@@ -819,15 +841,17 @@ void MappingNode::writeMissionSessionMetadata() const
     {"actual_path_output_file", actual_path_output_file_},
     {"actual_path_navsat_output_file", actual_path_navsat_output_file_}};
 
-  std::ofstream output_stream(std::filesystem::path(mission_output_directory_) / "mapping_session.json");
-  if (!output_stream.is_open()) {
+  try {
+    writeJsonDocumentAtomic(
+      std::filesystem::path(mission_output_directory_) / "mapping_session.json",
+      document);
+  } catch (const std::exception &) {
     RCLCPP_WARN(
       get_logger(),
       "Failed to write mapping session metadata into %s",
       mission_output_directory_.c_str());
     return;
   }
-  output_stream << document.dump(2) << "\n";
 }
 
 bool MappingNode::refreshFusionDatum()
@@ -973,15 +997,15 @@ void MappingNode::writeActualPathArtifact() const
     std::filesystem::path(actual_path_navsat_output_file_).filename().string();
   nlohmann::json document = buildLocalPathGeoJson(coordinates, navsat_companion_file);
 
-  std::ofstream output_stream(actual_path_output_file_, std::ios::trunc);
-  if (!output_stream.is_open()) {
+  try {
+    writeJsonDocumentAtomic(actual_path_output_file_, document);
+  } catch (const std::exception &) {
     RCLCPP_WARN(
       get_logger(),
       "Failed to write actual path artifact into %s",
       actual_path_output_file_.c_str());
     return;
   }
-  output_stream << document.dump(2) << "\n";
 }
 
 void MappingNode::tickMissionExecution()

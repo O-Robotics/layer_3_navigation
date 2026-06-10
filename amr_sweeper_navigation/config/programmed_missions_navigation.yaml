@@ -191,7 +191,7 @@ global_costmap:
 map_server:
   ros__parameters:
     use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    yaml_filename:                   "map.yaml"                          # Map YAML file to load if a static map server is used. Common examples point to an actual map file path.
+    yaml_filename:                   ""                                  # Static map files are not used in the live programmed-mission stack.
 
 map_saver:
   ros__parameters:

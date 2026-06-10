@@ -40,7 +40,6 @@ def _qualify_topic(namespace: str, relative_topic: str) -> str:
 
 def _rewrite_nav2_params(context) -> dict:
     namespace_value = LaunchConfiguration('namespace').perform(context)
-    map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     params_file = LaunchConfiguration('params_file')
@@ -49,7 +48,6 @@ def _rewrite_nav2_params(context) -> dict:
     param_substitutions = {
         'use_sim_time': use_sim_time,
         'autostart': autostart,
-        'yaml_filename': map_yaml_file,
         'costmap_yaml_path': mission_costmap_yaml,
         'map_topic': _qualify_topic(namespace_value, 'mapping/map_padded'),
     }
@@ -69,7 +67,6 @@ def _rewrite_nav2_params(context) -> dict:
 def _build_configured_params(context):
     namespace = LaunchConfiguration('namespace')
     namespace_value = namespace.perform(context)
-    map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     params_file = LaunchConfiguration('params_file')
@@ -78,7 +75,6 @@ def _build_configured_params(context):
     param_substitutions = {
         'use_sim_time': use_sim_time,
         'autostart': autostart,
-        'yaml_filename': map_yaml_file,
         'costmap_yaml_path': mission_costmap_yaml,
         'map_topic': _qualify_topic(namespace_value, 'mapping/map_padded'),
     }
@@ -229,7 +225,7 @@ def _build_nav2_group(context):
 
 
 def generate_launch_description():
-    bringup_dir = get_package_share_directory('amr_sweeper_waypoint_follower')
+    bringup_dir = get_package_share_directory('amr_sweeper_navigation')
     console_output_format = "[{severity}] [{time}] [{name}] : {message}"
 
     stdout_linebuf_envvar = SetEnvironmentVariable(
@@ -249,14 +245,9 @@ def generate_launch_description():
         default_value='false',
         description='Use ROS time if true')
 
-    declare_map_yaml_cmd = DeclareLaunchArgument(
-        'map',
-        default_value=os.path.join(bringup_dir, 'maps', 'map.yaml'),
-        description='Full path to map yaml file to inject into the Nav2 config')
-
     declare_params_file_cmd = DeclareLaunchArgument(
         'params_file',
-        default_value=os.path.join(bringup_dir, 'config', 'nav2_params.yaml'),
+        default_value=os.path.join(bringup_dir, 'config', 'programmed_missions_navigation.yaml'),
         description='Full path to the ROS2 parameters file to use for all launched nodes')
 
     declare_mission_costmap_yaml_cmd = DeclareLaunchArgument(
@@ -281,7 +272,6 @@ def generate_launch_description():
     ld.add_action(console_output_format_envvar)
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_use_sim_time_cmd)
-    ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_mission_costmap_yaml_cmd)
     ld.add_action(declare_autostart_cmd)
