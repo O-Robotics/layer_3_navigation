@@ -117,6 +117,21 @@ std::vector<geometry_msgs::msg::PoseStamped> densifyRoute(
   return densified;
 }
 
+std::vector<geometry_msgs::msg::PoseStamped> orientRoute(
+  std::vector<geometry_msgs::msg::PoseStamped> poses)
+{
+  for (std::size_t index = 0; index < poses.size(); ++index) {
+    double yaw = 0.0;
+    if (index + 1U < poses.size()) {
+      yaw = yawForSegment(poses.at(index), poses.at(index + 1U));
+    } else if (index > 0U) {
+      yaw = yawForSegment(poses.at(index - 1U), poses.at(index));
+    }
+    poses.at(index).pose.orientation = quaternionFromYaw(yaw);
+  }
+  return poses;
+}
+
 EcefPoint wgs84ToEcef(const double latitude_deg, const double longitude_deg, const double altitude_m)
 {
   constexpr double kSemiMajorAxis = 6378137.0;
@@ -709,6 +724,15 @@ void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
   writeActualPathArtifact();
 }
 
+void MappingNode::handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
+{
+  if (!message) {
+    return;
+  }
+  padded_live_map_publisher_->publish(padLiveMap(*message));
+  live_map_ready_ = true;
+}
+
 void MappingNode::publishCoordinatorStatus()
 {
   std_msgs::msg::String message;
@@ -770,14 +794,6 @@ void MappingNode::writeMissionSessionMetadata() const
     return;
   }
   output_stream << document.dump(2) << "\n";
-}
-
-void MappingNode::handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
-{
-  if (!message) {
-    return;
-  }
-  padded_live_map_publisher_->publish(padLiveMap(*message));
 }
 
 bool MappingNode::refreshFusionDatum()
@@ -1061,6 +1077,7 @@ void MappingNode::convertMissionRoute()
 
   mission_route_ = buildPoseSequence(coordinates);
   mission_route_ = densifyRoute(mission_route_, max_waypoint_spacing_m_);
+  mission_route_ = orientRoute(std::move(mission_route_));
   mission_chunks_ = chunkRoute(mission_route_);
   mission_converted_ = !mission_chunks_.empty();
   publishRouteMarker();
@@ -1090,6 +1107,15 @@ void MappingNode::startNextMissionChunk()
       *get_clock(),
       5000,
       "Waiting for Nav2 follow_waypoints action server.");
+    return;
+  }
+
+  if (!live_map_ready_) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for the first live padded map before dispatching Nav2 waypoints.");
     return;
   }
 
@@ -1378,15 +1404,7 @@ std::vector<geometry_msgs::msg::PoseStamped> MappingNode::buildPoseSequence(
   const std::vector<MissionCoordinate> & coordinates) const
 {
   std::vector<geometry_msgs::msg::PoseStamped> poses = mission_route_;
-  for (std::size_t index = 0; index < poses.size(); ++index) {
-    double yaw = 0.0;
-    if (index + 1U < poses.size()) {
-      yaw = yawForSegment(poses.at(index), poses.at(index + 1U));
-    } else if (index > 0U) {
-      yaw = yawForSegment(poses.at(index - 1U), poses.at(index));
-    }
-    poses.at(index).pose.orientation = quaternionFromYaw(yaw);
-  }
+  poses = orientRoute(std::move(poses));
   (void)coordinates;
   return poses;
 }

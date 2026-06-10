@@ -169,6 +169,7 @@ private:
   bool fusion_datum_ready_{false};
   bool pad_live_map_to_minimum_size_{true};
   double min_global_map_size_m_{10.0};
+  bool live_map_ready_{false};
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
