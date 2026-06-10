@@ -758,7 +758,9 @@ void MappingNode::handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr me
   if (!message) {
     return;
   }
-  padded_live_map_publisher_->publish(padLiveMap(*message));
+  latest_padded_live_map_ = padLiveMap(*message);
+  latest_padded_live_map_ready_ = true;
+  padded_live_map_publisher_->publish(latest_padded_live_map_);
   live_map_ready_ = true;
 }
 
@@ -1205,6 +1207,55 @@ void MappingNode::startNextMissionChunk()
 
   if (!isWaypointFollowerActive()) {
     return;
+  }
+
+  if (latest_odometry_pose_ready_ && latest_padded_live_map_ready_) {
+    try {
+      const auto map_to_odom = tf_buffer_->lookupTransform(
+        latest_padded_live_map_.header.frame_id,
+        odom_frame_id_,
+        tf2::TimePointZero);
+      geometry_msgs::msg::PointStamped odom_point;
+      odom_point.header.frame_id = odom_frame_id_;
+      odom_point.point =
+        mission_anchor_pose_ready_ ? mission_anchor_position_ : latest_odometry_position_;
+      geometry_msgs::msg::PointStamped map_point;
+      tf2::doTransform(odom_point, map_point, map_to_odom);
+
+      const double resolution = static_cast<double>(latest_padded_live_map_.info.resolution);
+      const double min_x = latest_padded_live_map_.info.origin.position.x;
+      const double min_y = latest_padded_live_map_.info.origin.position.y;
+      const double max_x =
+        min_x + static_cast<double>(latest_padded_live_map_.info.width) * resolution;
+      const double max_y =
+        min_y + static_cast<double>(latest_padded_live_map_.info.height) * resolution;
+
+      if (map_point.point.x < min_x || map_point.point.x >= max_x ||
+        map_point.point.y < min_y || map_point.point.y >= max_y)
+      {
+        RCLCPP_INFO_THROTTLE(
+          get_logger(),
+          *get_clock(),
+          2000,
+          "Waiting for Nav2 startup map to contain robot start pose. Pose in %s is x=%.3f y=%.3f, map bounds are [%.3f, %.3f] x [%.3f, %.3f].",
+          latest_padded_live_map_.header.frame_id.c_str(),
+          map_point.point.x,
+          map_point.point.y,
+          min_x,
+          max_x,
+          min_y,
+          max_y);
+        return;
+      }
+    } catch (const tf2::TransformException & exception) {
+      RCLCPP_INFO_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        2000,
+        "Waiting to verify robot start pose against the padded startup map: %s",
+        exception.what());
+      return;
+    }
   }
 
   nav2_msgs::action::FollowWaypoints::Goal goal;

@@ -171,12 +171,14 @@ private:
   bool pad_live_map_to_minimum_size_{true};
   double min_global_map_size_m_{10.0};
   bool live_map_ready_{false};
+  bool latest_padded_live_map_ready_{false};
   bool latest_odometry_pose_ready_{false};
   bool mission_anchor_pose_ready_{false};
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   geometry_msgs::msg::Point mission_anchor_position_;
   geometry_msgs::msg::Quaternion mission_anchor_orientation_;
+  nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
