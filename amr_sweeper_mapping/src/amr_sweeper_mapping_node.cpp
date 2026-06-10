@@ -89,7 +89,12 @@ std::pair<double, double> transformBaseFootprintPointToOdom(
   const geometry_msgs::msg::Point & origin,
   const geometry_msgs::msg::Quaternion & orientation)
 {
-  const double yaw = tf2::getYaw(orientation);
+  tf2::Quaternion quaternion;
+  tf2::fromMsg(orientation, quaternion);
+  double roll = 0.0;
+  double pitch = 0.0;
+  double yaw = 0.0;
+  tf2::Matrix3x3(quaternion).getRPY(roll, pitch, yaw);
   const double cos_yaw = std::cos(yaw);
   const double sin_yaw = std::sin(yaw);
   return {
