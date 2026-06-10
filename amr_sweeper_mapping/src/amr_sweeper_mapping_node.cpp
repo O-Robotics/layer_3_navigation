@@ -218,7 +218,7 @@ void Vda5050CostmapLayer::onInitialize()
   node->get_parameter(getFullName(kArtifactFrameIdParam), artifact_frame_id_);
   global_frame_id_ = layered_costmap_->getGlobalFrameID();
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node, false);
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node, true);
   current_ = true;
   matchSize();
   loadArtifact();
@@ -584,7 +584,7 @@ MappingNode::MappingNode()
   mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   status_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, true);
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(
