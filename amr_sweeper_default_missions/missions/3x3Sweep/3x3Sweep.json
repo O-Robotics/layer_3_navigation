@@ -2,7 +2,7 @@
   "name": "3x3Sweep",
   "mission_type": "builtin_local_pattern",
   "description": "Three-by-three meter zig-zag sweep starting at the mission start location.",
-  "route_frame": "odom",
+  "route_frame": "base_footprint",
   "sweep_width_m": 3.0,
   "sweep_height_m": 3.0,
   "lane_spacing_m": 0.5

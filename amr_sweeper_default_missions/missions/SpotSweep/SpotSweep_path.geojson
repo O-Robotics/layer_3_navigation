@@ -6,7 +6,7 @@
       "properties": {
         "name": "coverage_path",
         "source": "builtin_default_mission",
-        "coordinate_frame": "odom"
+        "coordinate_frame": "base_footprint"
       },
       "geometry": {
         "type": "LineString",

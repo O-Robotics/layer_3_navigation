@@ -83,6 +83,20 @@ geometry_msgs::msg::Quaternion quaternionFromYaw(const double yaw)
   return quaternion;
 }
 
+std::pair<double, double> transformBaseFootprintPointToOdom(
+  const double x,
+  const double y,
+  const geometry_msgs::msg::Point & origin,
+  const geometry_msgs::msg::Quaternion & orientation)
+{
+  const double yaw = tf2::getYaw(orientation);
+  const double cos_yaw = std::cos(yaw);
+  const double sin_yaw = std::sin(yaw);
+  return {
+    origin.x + (x * cos_yaw) - (y * sin_yaw),
+    origin.y + (x * sin_yaw) + (y * cos_yaw)};
+}
+
 std::vector<geometry_msgs::msg::PoseStamped> densifyRoute(
   const std::vector<geometry_msgs::msg::PoseStamped> & route,
   const double max_spacing_m)
@@ -710,6 +724,10 @@ void MappingNode::handleGaussianStatus(const std_msgs::msg::String::SharedPtr me
 
 void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message)
 {
+  latest_odometry_position_ = message->pose.pose.position;
+  latest_odometry_orientation_ = message->pose.pose.orientation;
+  latest_odometry_pose_ready_ = true;
+
   const auto & position = message->pose.pose.position;
   if (!traveled_path_points_.empty()) {
     const auto & last = traveled_path_points_.back();
@@ -1031,8 +1049,22 @@ void MappingNode::convertMissionRoute()
     return;
   }
 
-  const bool use_local_frame = coordinates.front().use_local_frame;
-  if (!use_local_frame && !fromll_client_->wait_for_service(std::chrono::seconds(1))) {
+  const std::string coordinate_frame = coordinates.front().frame_id;
+  const bool uses_base_footprint_anchor =
+    coordinate_frame == "base_footprint" || coordinate_frame == "local";
+  const bool uses_geographic_frame = !coordinates.front().use_local_frame;
+  if (uses_base_footprint_anchor && !latest_odometry_pose_ready_) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Waiting for odometry pose before anchoring mission route from %s into %s.",
+      coordinate_frame.c_str(),
+      frame_id_.c_str());
+    return;
+  }
+
+  if (uses_geographic_frame && !fromll_client_->wait_for_service(std::chrono::seconds(1))) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
@@ -1045,11 +1077,30 @@ void MappingNode::convertMissionRoute()
   mission_route_.clear();
   mission_route_.reserve(coordinates.size());
 
+  geometry_msgs::msg::Point mission_anchor_position;
+  geometry_msgs::msg::Quaternion mission_anchor_orientation;
+  if (uses_base_footprint_anchor) {
+    mission_anchor_position = latest_odometry_position_;
+    mission_anchor_orientation = latest_odometry_orientation_;
+  }
+
   for (const MissionCoordinate & coordinate : coordinates) {
     geometry_msgs::msg::PoseStamped pose;
     pose.header.frame_id = frame_id_;
     pose.pose.position.z = 0.0;
     pose.pose.orientation.w = 1.0;
+
+    if (coordinate.frame_id == "base_footprint" || coordinate.frame_id == "local") {
+      const auto [odom_x, odom_y] = transformBaseFootprintPointToOdom(
+        coordinate.x,
+        coordinate.y,
+        mission_anchor_position,
+        mission_anchor_orientation);
+      pose.pose.position.x = odom_x;
+      pose.pose.position.y = odom_y;
+      mission_route_.push_back(pose);
+      continue;
+    }
 
     if (coordinate.use_local_frame) {
       pose.pose.position.x = coordinate.x;
@@ -1083,9 +1134,10 @@ void MappingNode::convertMissionRoute()
   publishRouteMarker();
   RCLCPP_INFO(
     get_logger(),
-    "Prepared %zu mission waypoint(s) in %s frame and %zu Nav2 chunk(s).",
+    "Prepared %zu mission waypoint(s) from %s into %s and %zu Nav2 chunk(s).",
     mission_route_.size(),
-    use_local_frame ? "local" : "geographic",
+    coordinate_frame.c_str(),
+    frame_id_.c_str(),
     mission_chunks_.size());
 }
 
@@ -1376,12 +1428,15 @@ std::vector<MissionCoordinate> MappingNode::loadRouteCoordinates(const std::stri
     }
 
     bool use_local_frame = false;
+    std::string coordinate_frame = "odom";
     if (feature.contains("properties") && feature.at("properties").is_object()) {
       const auto & properties = feature.at("properties");
       if (properties.contains("coordinate_frame") && properties.at("coordinate_frame").is_string()) {
-        const std::string coordinate_frame =
-          to_lower(properties.at("coordinate_frame").get<std::string>());
-        use_local_frame = coordinate_frame == "odom" || coordinate_frame == "local";
+        coordinate_frame = to_lower(properties.at("coordinate_frame").get<std::string>());
+        use_local_frame =
+          coordinate_frame == "odom" ||
+          coordinate_frame == "local" ||
+          coordinate_frame == "base_footprint";
       }
     }
 
@@ -1390,7 +1445,8 @@ std::vector<MissionCoordinate> MappingNode::loadRouteCoordinates(const std::stri
       coordinates.push_back(MissionCoordinate{
         coordinate.at(0).get<double>(),
         coordinate.at(1).get<double>(),
-        use_local_frame});
+        use_local_frame,
+        coordinate_frame});
     }
     if (coordinates.size() >= 2U) {
       return coordinates;

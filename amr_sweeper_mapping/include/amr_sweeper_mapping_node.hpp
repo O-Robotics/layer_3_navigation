@@ -32,6 +32,7 @@ struct MissionCoordinate
   double x;
   double y;
   bool use_local_frame{false};
+  std::string frame_id{"odom"};
 };
 
 struct LoadedCostmapArtifact
@@ -170,6 +171,9 @@ private:
   bool pad_live_map_to_minimum_size_{true};
   double min_global_map_size_m_{10.0};
   bool live_map_ready_{false};
+  bool latest_odometry_pose_ready_{false};
+  geometry_msgs::msg::Point latest_odometry_position_;
+  geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;

@@ -2,7 +2,7 @@
   "name": "SpotSweep",
   "mission_type": "builtin_local_pattern",
   "description": "Spiral spot sweep centered on the mission start location.",
-  "route_frame": "odom",
+  "route_frame": "base_footprint",
   "max_diameter_m": 3.0,
   "returns_to_start": true
 }
