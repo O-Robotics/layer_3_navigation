@@ -1145,7 +1145,10 @@ void MappingNode::convertMissionRoute()
   }
 
   mission_route_ = buildPoseSequence(coordinates);
-  mission_route_ = densifyRoute(mission_route_, max_waypoint_spacing_m_);
+  const bool is_builtin_mission = mission_type_.rfind("builtin_", 0) == 0;
+  if (!is_builtin_mission) {
+    mission_route_ = densifyRoute(mission_route_, max_waypoint_spacing_m_);
+  }
   mission_route_ = orientRoute(std::move(mission_route_));
   mission_chunks_ = chunkRoute(mission_route_);
   mission_converted_ = !mission_chunks_.empty();
@@ -1168,11 +1171,12 @@ void MappingNode::convertMissionRoute()
   }
   RCLCPP_INFO(
     get_logger(),
-    "Prepared %zu mission waypoint(s) from %s into %s and %zu Nav2 chunk(s).",
+    "Prepared %zu mission waypoint(s) from %s into %s and %zu Nav2 chunk(s)%s.",
     mission_route_.size(),
     coordinate_frame.c_str(),
     frame_id_.c_str(),
-    mission_chunks_.size());
+    mission_chunks_.size(),
+    is_builtin_mission ? " without densification for builtin mission" : "");
 }
 
 void MappingNode::startNextMissionChunk()
@@ -1549,7 +1553,7 @@ std::vector<geometry_msgs::msg::PoseStamped> MappingNode::buildPoseSequence(
 }
 
 nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
-  const nav_msgs::msg::OccupancyGrid & message) const
+  const nav_msgs::msg::OccupancyGrid & message)
 {
   if (!pad_live_map_to_minimum_size_ || min_global_map_size_m_ <= 0.0) {
     return message;
@@ -1589,7 +1593,6 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
     }
   }
 
-  const double minimum_extent = min_global_map_size_m_;
   const double source_min_x = message.info.origin.position.x;
   const double source_min_y = message.info.origin.position.y;
   const double source_max_x =
@@ -1597,23 +1600,77 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
   const double source_max_y =
     source_min_y + static_cast<double>(message.info.height) * resolution;
 
-  double padded_min_x = source_min_x;
-  double padded_min_y = source_min_y;
-  double padded_max_x = source_max_x;
-  double padded_max_y = source_max_y;
-  if (anchor_available) {
-    padded_min_x = std::min(padded_min_x, anchor_x - minimum_extent * 0.5);
-    padded_max_x = std::max(padded_max_x, anchor_x + minimum_extent * 0.5);
-    padded_min_y = std::min(padded_min_y, anchor_y - minimum_extent * 0.5);
-    padded_max_y = std::max(padded_max_y, anchor_y + minimum_extent * 0.5);
-  } else {
-    const double center_x = source_min_x + (source_max_x - source_min_x) * 0.5;
-    const double center_y = source_min_y + (source_max_y - source_min_y) * 0.5;
-    padded_min_x = std::min(padded_min_x, center_x - minimum_extent * 0.5);
-    padded_max_x = std::max(padded_max_x, center_x + minimum_extent * 0.5);
-    padded_min_y = std::min(padded_min_y, center_y - minimum_extent * 0.5);
-    padded_max_y = std::max(padded_max_y, center_y + minimum_extent * 0.5);
+  if (!padded_live_map_bounds_ready_) {
+    if (anchor_available) {
+      padded_live_map_min_x_ = anchor_x - min_global_map_size_m_ * 0.5;
+      padded_live_map_max_x_ = anchor_x + min_global_map_size_m_ * 0.5;
+      padded_live_map_min_y_ = anchor_y - min_global_map_size_m_ * 0.5;
+      padded_live_map_max_y_ = anchor_y + min_global_map_size_m_ * 0.5;
+      padded_live_map_bounds_ready_ = true;
+      RCLCPP_INFO(
+        get_logger(),
+        "Initialized persistent padded live-map bounds around the mission start pose in %s: [%.3f, %.3f] x [%.3f, %.3f].",
+        message.header.frame_id.c_str(),
+        padded_live_map_min_x_,
+        padded_live_map_max_x_,
+        padded_live_map_min_y_,
+        padded_live_map_max_y_);
+    } else {
+      const double center_x = source_min_x + (source_max_x - source_min_x) * 0.5;
+      const double center_y = source_min_y + (source_max_y - source_min_y) * 0.5;
+      padded_live_map_min_x_ = center_x - min_global_map_size_m_ * 0.5;
+      padded_live_map_max_x_ = center_x + min_global_map_size_m_ * 0.5;
+      padded_live_map_min_y_ = center_y - min_global_map_size_m_ * 0.5;
+      padded_live_map_max_y_ = center_y + min_global_map_size_m_ * 0.5;
+      padded_live_map_bounds_ready_ = true;
+      RCLCPP_INFO(
+        get_logger(),
+        "Initialized persistent padded live-map bounds from the first live map in %s: [%.3f, %.3f] x [%.3f, %.3f].",
+        message.header.frame_id.c_str(),
+        padded_live_map_min_x_,
+        padded_live_map_max_x_,
+        padded_live_map_min_y_,
+        padded_live_map_max_y_);
+    }
   }
+
+  bool expanded_bounds = false;
+  if (source_min_x < padded_live_map_min_x_) {
+    padded_live_map_min_x_ = source_min_x;
+    expanded_bounds = true;
+  }
+  if (source_min_y < padded_live_map_min_y_) {
+    padded_live_map_min_y_ = source_min_y;
+    expanded_bounds = true;
+  }
+  if (source_max_x > padded_live_map_max_x_) {
+    padded_live_map_max_x_ = source_max_x;
+    expanded_bounds = true;
+  }
+  if (source_max_y > padded_live_map_max_y_) {
+    padded_live_map_max_y_ = source_max_y;
+    expanded_bounds = true;
+  }
+
+  if (expanded_bounds) {
+    RCLCPP_INFO(
+      get_logger(),
+      "Expanded persistent padded live-map bounds in %s to [%.3f, %.3f] x [%.3f, %.3f] to contain the latest SLAM map.",
+      message.header.frame_id.c_str(),
+      padded_live_map_min_x_,
+      padded_live_map_max_x_,
+      padded_live_map_min_y_,
+      padded_live_map_max_y_);
+  }
+
+  double padded_min_x = padded_live_map_min_x_;
+  double padded_min_y = padded_live_map_min_y_;
+  double padded_max_x = padded_live_map_max_x_;
+  double padded_max_y = padded_live_map_max_y_;
+  padded_min_x = std::min(padded_min_x, source_min_x);
+  padded_min_y = std::min(padded_min_y, source_min_y);
+  padded_max_x = std::max(padded_max_x, source_max_x);
+  padded_max_y = std::max(padded_max_y, source_max_y);
 
   const uint32_t padded_width = static_cast<uint32_t>(
     std::max(1.0, std::ceil((padded_max_x - padded_min_x) / resolution)));

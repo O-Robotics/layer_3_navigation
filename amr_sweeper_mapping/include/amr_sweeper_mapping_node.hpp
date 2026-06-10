@@ -118,7 +118,7 @@ private:
   [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> buildPoseSequence(
     const std::vector<MissionCoordinate> & coordinates) const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(
-    const nav_msgs::msg::OccupancyGrid & message) const;
+    const nav_msgs::msg::OccupancyGrid & message);
   [[nodiscard]] std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunkRoute(
     const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   void markMissionTerminal(const std::string & outcome, const std::string & reason);
@@ -174,10 +174,15 @@ private:
   bool latest_padded_live_map_ready_{false};
   bool latest_odometry_pose_ready_{false};
   bool mission_anchor_pose_ready_{false};
+  bool padded_live_map_bounds_ready_{false};
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   geometry_msgs::msg::Point mission_anchor_position_;
   geometry_msgs::msg::Quaternion mission_anchor_orientation_;
+  double padded_live_map_min_x_{0.0};
+  double padded_live_map_min_y_{0.0};
+  double padded_live_map_max_x_{0.0};
+  double padded_live_map_max_y_{0.0};
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
