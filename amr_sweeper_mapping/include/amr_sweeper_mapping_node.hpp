@@ -82,8 +82,6 @@ private:
   bool artifact_loaded_{false};
   std::string artifact_frame_id_{"odom"};
   std::string global_frame_id_;
-  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 };
 
 class MappingNode : public rclcpp::Node

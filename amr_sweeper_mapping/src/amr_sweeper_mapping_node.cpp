@@ -217,8 +217,6 @@ void Vda5050CostmapLayer::onInitialize()
   node->get_parameter(getFullName(kEnabledParam), enabled_);
   node->get_parameter(getFullName(kArtifactFrameIdParam), artifact_frame_id_);
   global_frame_id_ = layered_costmap_->getGlobalFrameID();
-  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node, true);
   current_ = true;
   matchSize();
   loadArtifact();
@@ -448,7 +446,7 @@ geometry_msgs::msg::PointStamped Vda5050CostmapLayer::transformPoint(
   }
 
   try {
-    return tf_buffer_->transform(point, target_frame, tf2::durationFromSec(0.05));
+    return tf_->transform(point, target_frame, tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException & exception) {
     RCLCPP_WARN_THROTTLE(
       node->get_logger(),
