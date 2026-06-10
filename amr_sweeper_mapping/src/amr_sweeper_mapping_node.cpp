@@ -1523,7 +1523,8 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
       geometry_msgs::msg::PointStamped odom_point;
       odom_point.header.frame_id = odom_frame_id_;
       odom_point.point = odom_anchor;
-      const auto map_point = tf2::doTransform(odom_point, map_to_odom);
+      geometry_msgs::msg::PointStamped map_point;
+      tf2::doTransform(odom_point, map_point, map_to_odom);
       anchor_x = map_point.point.x;
       anchor_y = map_point.point.y;
       anchor_available = true;
