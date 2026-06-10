@@ -46,6 +46,12 @@ struct EcefPoint
   double z;
 };
 
+struct LocalPoint
+{
+  double x;
+  double y;
+};
+
 std::string trim(const std::string & value)
 {
   const auto begin = value.find_first_not_of(" \t");
@@ -83,7 +89,7 @@ geometry_msgs::msg::Quaternion quaternionFromYaw(const double yaw)
   return quaternion;
 }
 
-std::pair<double, double> transformBaseFootprintPointToOdom(
+LocalPoint transformBaseFootprintPointToOdom(
   const double x,
   const double y,
   const geometry_msgs::msg::Point & origin,
@@ -1096,13 +1102,13 @@ void MappingNode::convertMissionRoute()
     pose.pose.orientation.w = 1.0;
 
     if (coordinate.frame_id == "base_footprint" || coordinate.frame_id == "local") {
-      const auto [odom_x, odom_y] = transformBaseFootprintPointToOdom(
+      const auto odom_point = transformBaseFootprintPointToOdom(
         coordinate.x,
         coordinate.y,
         mission_anchor_position,
         mission_anchor_orientation);
-      pose.pose.position.x = odom_x;
-      pose.pose.position.y = odom_y;
+      pose.pose.position.x = odom_point.x;
+      pose.pose.position.y = odom_point.y;
       mission_route_.push_back(pose);
       continue;
     }
@@ -1137,6 +1143,22 @@ void MappingNode::convertMissionRoute()
   mission_chunks_ = chunkRoute(mission_route_);
   mission_converted_ = !mission_chunks_.empty();
   publishRouteMarker();
+  if (uses_base_footprint_anchor) {
+    tf2::Quaternion anchor_quaternion;
+    tf2::fromMsg(mission_anchor_orientation, anchor_quaternion);
+    double roll = 0.0;
+    double pitch = 0.0;
+    double yaw = 0.0;
+    tf2::Matrix3x3(anchor_quaternion).getRPY(roll, pitch, yaw);
+    RCLCPP_INFO(
+      get_logger(),
+      "Anchored mission route once from %s at odom x=%.3f y=%.3f yaw=%.3f rad (%.1f deg).",
+      coordinate_frame.c_str(),
+      mission_anchor_position.x,
+      mission_anchor_position.y,
+      yaw,
+      yaw * 180.0 / M_PI);
+  }
   RCLCPP_INFO(
     get_logger(),
     "Prepared %zu mission waypoint(s) from %s into %s and %zu Nav2 chunk(s).",
@@ -1181,9 +1203,9 @@ void MappingNode::startNextMissionChunk()
   }
 
   nav2_msgs::action::FollowWaypoints::Goal goal;
-  const auto stamp = now();
+  const rclcpp::Time latest_transform_stamp(0, 0, get_clock()->get_clock_type());
   for (auto pose : mission_chunks_.at(active_chunk_index_)) {
-    pose.header.stamp = stamp;
+    pose.header.stamp = latest_transform_stamp;
     goal.poses.push_back(pose);
   }
 
