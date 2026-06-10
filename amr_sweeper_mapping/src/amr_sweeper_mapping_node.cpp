@@ -1267,9 +1267,29 @@ void MappingNode::startNextMissionChunk()
 
   nav2_msgs::action::FollowWaypoints::Goal goal;
   const rclcpp::Time latest_transform_stamp(0, 0, get_clock()->get_clock_type());
-  for (auto pose : mission_chunks_.at(active_chunk_index_)) {
-    pose.header.stamp = latest_transform_stamp;
-    goal.poses.push_back(pose);
+  try {
+    const auto map_to_odom = tf_buffer_->lookupTransform(
+      map_frame_id_,
+      odom_frame_id_,
+      tf2::TimePointZero);
+    for (auto pose : mission_chunks_.at(active_chunk_index_)) {
+      pose.header.stamp = latest_transform_stamp;
+      geometry_msgs::msg::PoseStamped transformed_pose;
+      tf2::doTransform(pose, transformed_pose, map_to_odom);
+      transformed_pose.header.frame_id = map_frame_id_;
+      transformed_pose.header.stamp = latest_transform_stamp;
+      goal.poses.push_back(transformed_pose);
+    }
+  } catch (const tf2::TransformException & exception) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      2000,
+      "Waiting to transform mission chunk from %s into %s before dispatching Nav2 waypoints: %s",
+      odom_frame_id_.c_str(),
+      map_frame_id_.c_str(),
+      exception.what());
+    return;
   }
 
   for (std::size_t index = 0U; index < goal.poses.size(); ++index) {
