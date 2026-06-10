@@ -122,7 +122,7 @@ std::vector<geometry_msgs::msg::PoseStamped> orientRoute(
 {
   for (std::size_t index = 0; index < poses.size(); ++index) {
     double yaw = 0.0;
-    if (index + 1U < poses.size()) {
+    if (index == 0U && index + 1U < poses.size()) {
       yaw = yawForSegment(poses.at(index), poses.at(index + 1U));
     } else if (index > 0U) {
       yaw = yawForSegment(poses.at(index - 1U), poses.at(index));
