@@ -595,11 +595,13 @@ MappingNode::MappingNode()
   declare_parameter("earth_frame", std::string("earth"));
   declare_parameter("map_frame", std::string("map"));
   declare_parameter("odom_frame", std::string("odom"));
+  declare_parameter("seeded_map_frame", std::string("map"));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("datum_service", std::string("/get_datum"));
   declare_parameter("auto_start_mission", true);
   declare_parameter("repeat_mission", false);
   declare_parameter("publish_earth_to_map", true);
+  declare_parameter("publish_seeded_map_to_odom", false);
   declare_parameter("earth_to_map_planar_only", true);
   declare_parameter("earth_to_map_publish_period_seconds", 0.5);
   declare_parameter("max_segments_per_goal", 4);
@@ -630,6 +632,7 @@ MappingNode::MappingNode()
   earth_frame_id_ = get_parameter("earth_frame").as_string();
   map_frame_id_ = get_parameter("map_frame").as_string();
   odom_frame_id_ = get_parameter("odom_frame").as_string();
+  seeded_map_frame_id_ = get_parameter("seeded_map_frame").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   datum_service_name_ = get_parameter("datum_service").as_string();
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
@@ -638,6 +641,7 @@ MappingNode::MappingNode()
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   publish_earth_to_map_ = get_parameter("publish_earth_to_map").as_bool();
+  publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
   earth_to_map_planar_only_ = get_parameter("earth_to_map_planar_only").as_bool();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
   max_waypoint_spacing_m_ = get_parameter("max_waypoint_spacing_m").as_double();
@@ -805,6 +809,7 @@ void MappingNode::publishCoordinatorStatus()
     "; slam_backend=" + slam_backend_ +
     "; gaussian_mode=" + gaussian_mode_ +
     "; earth_to_map=" + std::string(publish_earth_to_map_ ? "true" : "false") +
+    "; seeded_map_to_odom=" + std::string(publish_seeded_map_to_odom_ ? "true" : "false") +
     "; earth_to_map_planar_only=" + std::string(earth_to_map_planar_only_ ? "true" : "false") +
     "; datum_ready=" + std::string(fusion_datum_ready_ ? "true" : "false") +
     "; mission_loaded=" + std::string(mission_loaded_ ? "true" : "false") +
@@ -923,6 +928,24 @@ bool MappingNode::refreshFusionDatum()
 
 void MappingNode::publishEarthToMapTransform()
 {
+  if (publish_seeded_map_to_odom_) {
+    tf2::Quaternion identity_quaternion;
+    identity_quaternion.setRPY(0.0, 0.0, 0.0);
+    identity_quaternion.normalize();
+
+    const tf2::Transform identity_map_to_odom(
+      identity_quaternion,
+      tf2::Vector3(0.0, 0.0, 0.0));
+
+    tf_broadcaster_->sendTransform(
+      stampedFromTransform(
+        identity_map_to_odom,
+        now(),
+        seeded_map_frame_id_,
+        odom_frame_id_));
+    return;
+  }
+
   if (!publish_earth_to_map_) {
     return;
   }

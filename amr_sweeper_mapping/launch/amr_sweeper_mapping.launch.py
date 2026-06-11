@@ -96,6 +96,8 @@ def _build_nodes(context):
         common_runtime_parameters["publish_earth_to_map"] = False
         common_runtime_parameters["map_frame"] = "odom"
         common_runtime_parameters["pad_live_map_to_minimum_size"] = False
+        common_runtime_parameters["publish_seeded_map_to_odom"] = True
+        common_runtime_parameters["seeded_map_frame"] = "map"
     if mission_file:
         common_runtime_parameters["mission_file"] = mission_file
     if mission_route_file:

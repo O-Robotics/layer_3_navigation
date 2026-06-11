@@ -42,7 +42,7 @@ controller_server:
     general_goal_checker:
       stateful:                      true                                # Goal checker remembers once the robot has entered tolerance. Nav2 example default is typically true.
       plugin:                        "nav2_controller::SimpleGoalChecker"  # Goal checker implementation. Common default/example plugin is SimpleGoalChecker.
-      xy_goal_tolerance:             0.15                                # Position tolerance in meters at the goal. Tighter than programmed missions because these local patterns are compact.
+      xy_goal_tolerance:             0.30                                # Position tolerance in meters at the goal. Tighter than programmed missions because these local patterns are compact.
       yaw_goal_tolerance:            0.20                                # Heading tolerance in radians at the goal. Tight enough to preserve sweep alignment between nearby waypoints.
 
     # -- Local planner ---------------------------------------------------------

@@ -140,6 +140,7 @@ private:
   std::string earth_frame_id_;
   std::string map_frame_id_;
   std::string odom_frame_id_;
+  std::string seeded_map_frame_id_;
   std::string fromll_service_name_;
   std::string datum_service_name_;
   std::string end_mission_service_name_;
@@ -147,6 +148,7 @@ private:
   bool auto_start_mission_{true};
   bool repeat_mission_{false};
   bool publish_earth_to_map_{true};
+  bool publish_seeded_map_to_odom_{false};
   bool earth_to_map_planar_only_{true};
   bool manual_mapping_mode_{false};
   bool mission_loaded_{false};
