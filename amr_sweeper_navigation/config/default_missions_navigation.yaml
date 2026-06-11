@@ -119,9 +119,9 @@ local_costmap:
           clearing:                  true                                # Use this sensor source to clear free space via raytracing. Common default/example is true.
           marking:                   true                                # Use this sensor source to mark obstacles. Common default/example is true.
           data_type:                 "LaserScan"                         # ROS message type expected from the source. Common options are LaserScan or PointCloud2.
-          raytrace_max_range:        5.0                                 # Match the configured depth-camera laserscan max range so free-space clearing is not prematurely truncated.
+          raytrace_max_range:        8.0                                 # Match the configured depth-camera laserscan max range so free-space clearing is not prematurely truncated.
           raytrace_min_range:        0.0                                 # Minimum range in meters used to clear free space. Common examples use 0.0 m.
-          obstacle_max_range:        5.0                                 # Keep obstacle marking bounded to the same nearby workspace as the local sweep patterns.
+          obstacle_max_range:        8.0                                 # Keep obstacle marking bounded to the same nearby workspace as the local sweep patterns.
           obstacle_min_range:        0.0                                 # Minimum range in meters used to insert obstacle cells. Common examples use 0.0 m.
           inf_is_valid:              true                                # Treat infinite LaserScan ranges as valid free-space readings for clearing.
 
