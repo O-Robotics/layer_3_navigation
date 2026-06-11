@@ -77,7 +77,7 @@ controller_server:
       angular_granularity:           0.025                               # Angular step in radians when discretizing trajectories. Common examples use 0.025 rad.
       transform_tolerance:           0.3                                 # TF lookup tolerance in seconds for controller transforms. Lower than the programmed stack because the frame graph is simpler.
 
-      xy_goal_tolerance:             0.15                                # Position tolerance in meters used internally by DWB near the goal. Matches the top-level goal checker for compact sweeps.
+      xy_goal_tolerance:             0.30                                # Position tolerance in meters used internally by DWB near the goal. Matches the top-level goal checker for compact sweeps.
       trans_stopped_velocity:        0.03                                # Translational speed below which the robot is considered stopped. Lower than common examples for cleaner stop detection.
       short_circuit_trajectory_evaluation: true                          # Stop scoring once a clearly best trajectory is found. Common examples usually enable this.
       stateful:                      true                                # Preserve planner state across cycles for smoother behavior. Common example configs often set true.
