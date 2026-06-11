@@ -82,9 +82,6 @@ def _resolve_navigation_launch_filename(mission_context: dict) -> str:
 def _mission_requires_mapping(mission_context: dict, mapping_requested: bool) -> bool:
     if not mapping_requested:
         return False
-    mission_type = str(mission_context.get("mission_type", "")).lower()
-    if mission_type == "builtin_local_pattern":
-        return False
     return True
 
 

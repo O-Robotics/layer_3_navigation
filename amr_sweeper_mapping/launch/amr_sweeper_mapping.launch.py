@@ -51,6 +51,8 @@ def _build_nodes(context):
     auto_start_mission = LaunchConfiguration("auto_start_mission").perform(context).lower() == "true"
 
     mission_context = _resolve_execution_context(mission_execution_directory)
+    mission_type = str(mission_context.get("mission_type", "")).lower()
+    builtin_local_pattern_mode = mission_type == "builtin_local_pattern"
     mission_id = mission_context.get("mission_id", "")
     mission_file = mission_context.get("mission_file", "")
     mission_route_file = mission_context.get("mission_route_file", "")
@@ -90,6 +92,10 @@ def _build_nodes(context):
         "end_mission_service": "end_mission",
         "auto_start_mission": auto_start_mission,
     }
+    if builtin_local_pattern_mode:
+        common_runtime_parameters["publish_earth_to_map"] = False
+        common_runtime_parameters["map_frame"] = "odom"
+        common_runtime_parameters["pad_live_map_to_minimum_size"] = False
     if mission_file:
         common_runtime_parameters["mission_file"] = mission_file
     if mission_route_file:
@@ -161,33 +167,38 @@ def _build_nodes(context):
         )
     )
 
-    actions = [
-        slam_toolbox_node,
-        configure_slam_toolbox,
-        activate_slam_toolbox,
-        Node(
-            package="amr_sweeper_mapping",
-            executable="slam_node",
-            name="amr_sweeper_slam_node",
-            namespace=namespace,
-            output="screen",
-            parameters=[params_file, {"use_sim_time": use_sim_time}],
-        ),
-        Node(
-            package="amr_sweeper_mapping",
-            executable="gaussian_node",
-            name="amr_sweeper_gaussian_node",
-            namespace=namespace,
-            output="screen",
-            parameters=[
-                params_file,
-                {
-                    "use_sim_time": use_sim_time,
-                    "output_directory": gaussian_output_directory,
-                    "representation_name": gaussian_representation_name,
-                },
-            ],
-        ),
+    actions = []
+    if not builtin_local_pattern_mode:
+        actions.extend([
+            slam_toolbox_node,
+            configure_slam_toolbox,
+            activate_slam_toolbox,
+            Node(
+                package="amr_sweeper_mapping",
+                executable="slam_node",
+                name="amr_sweeper_slam_node",
+                namespace=namespace,
+                output="screen",
+                parameters=[params_file, {"use_sim_time": use_sim_time}],
+            ),
+            Node(
+                package="amr_sweeper_mapping",
+                executable="gaussian_node",
+                name="amr_sweeper_gaussian_node",
+                namespace=namespace,
+                output="screen",
+                parameters=[
+                    params_file,
+                    {
+                        "use_sim_time": use_sim_time,
+                        "output_directory": gaussian_output_directory,
+                        "representation_name": gaussian_representation_name,
+                    },
+                ],
+            ),
+        ])
+
+    actions.append(
         Node(
             package="amr_sweeper_mapping",
             executable="mapping_node",
@@ -195,8 +206,8 @@ def _build_nodes(context):
             namespace=namespace,
             output="screen",
             parameters=[params_file, common_runtime_parameters],
-        ),
-    ]
+        )
+    )
 
     return actions
 

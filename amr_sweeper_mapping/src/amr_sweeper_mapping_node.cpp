@@ -1227,7 +1227,13 @@ void MappingNode::startNextMissionChunk()
     return;
   }
 
-  if (!live_map_ready_) {
+  if (!isWaypointFollowerActive()) {
+    return;
+  }
+
+  const bool odom_only_navigation = map_frame_id_ == odom_frame_id_;
+
+  if (!odom_only_navigation && !live_map_ready_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
@@ -1236,11 +1242,7 @@ void MappingNode::startNextMissionChunk()
     return;
   }
 
-  if (!isWaypointFollowerActive()) {
-    return;
-  }
-
-  if (latest_odometry_pose_ready_ && latest_padded_live_map_ready_) {
+  if (!odom_only_navigation && latest_odometry_pose_ready_ && latest_padded_live_map_ready_) {
     try {
       const auto map_to_odom = tf_buffer_->lookupTransform(
         latest_padded_live_map_.header.frame_id,
@@ -1292,17 +1294,25 @@ void MappingNode::startNextMissionChunk()
   nav2_msgs::action::FollowWaypoints::Goal goal;
   const rclcpp::Time latest_transform_stamp(0, 0, get_clock()->get_clock_type());
   try {
-    const auto map_to_odom = tf_buffer_->lookupTransform(
-      map_frame_id_,
-      odom_frame_id_,
-      tf2::TimePointZero);
-    for (auto pose : mission_chunks_.at(active_chunk_index_)) {
-      pose.header.stamp = latest_transform_stamp;
-      geometry_msgs::msg::PoseStamped transformed_pose;
-      tf2::doTransform(pose, transformed_pose, map_to_odom);
-      transformed_pose.header.frame_id = map_frame_id_;
-      transformed_pose.header.stamp = latest_transform_stamp;
-      goal.poses.push_back(transformed_pose);
+    if (odom_only_navigation) {
+      for (auto pose : mission_chunks_.at(active_chunk_index_)) {
+        pose.header.stamp = latest_transform_stamp;
+        pose.header.frame_id = odom_frame_id_;
+        goal.poses.push_back(pose);
+      }
+    } else {
+      const auto map_to_odom = tf_buffer_->lookupTransform(
+        map_frame_id_,
+        odom_frame_id_,
+        tf2::TimePointZero);
+      for (auto pose : mission_chunks_.at(active_chunk_index_)) {
+        pose.header.stamp = latest_transform_stamp;
+        geometry_msgs::msg::PoseStamped transformed_pose;
+        tf2::doTransform(pose, transformed_pose, map_to_odom);
+        transformed_pose.header.frame_id = map_frame_id_;
+        transformed_pose.header.stamp = latest_transform_stamp;
+        goal.poses.push_back(transformed_pose);
+      }
     }
   } catch (const tf2::TransformException & exception) {
     RCLCPP_INFO_THROTTLE(
