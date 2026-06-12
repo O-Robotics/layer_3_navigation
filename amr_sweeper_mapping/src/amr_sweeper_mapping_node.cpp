@@ -1031,6 +1031,44 @@ void MappingNode::writeActualPathArtifact() const
   }
 }
 
+void MappingNode::writeAnchoredMissionRouteArtifact(const std::string & source_coordinate_frame) const
+{
+  const std::string route_path = routeGeoJsonPath();
+  if (route_path.empty() || mission_route_.empty()) {
+    return;
+  }
+
+  nlohmann::json coordinates = nlohmann::json::array();
+  for (const auto & pose : mission_route_) {
+    coordinates.push_back({pose.pose.position.x, pose.pose.position.y});
+  }
+
+  nlohmann::json properties{
+    {"name", mission_id_.empty() ? "mission_route" : mission_id_ + "_path"},
+    {"coordinate_frame", odom_frame_id_},
+    {"anchored_at_mission_start", true},
+    {"anchored_from_coordinate_frame", source_coordinate_frame}};
+
+  const nlohmann::json document{
+    {"type", "FeatureCollection"},
+    {"features", nlohmann::json::array({
+      {
+        {"type", "Feature"},
+        {"properties", properties},
+        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
+      }
+    })}};
+
+  try {
+    writeJsonDocumentAtomic(route_path, document);
+  } catch (const std::exception &) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to write anchored mission route artifact into %s",
+      route_path.c_str());
+  }
+}
+
 void MappingNode::tickMissionExecution()
 {
   if (!auto_start_mission_ || waiting_for_goal_result_) {
@@ -1200,6 +1238,9 @@ void MappingNode::convertMissionRoute()
     mission_route_ = densifyRoute(mission_route_, max_waypoint_spacing_m_);
   }
   mission_route_ = orientRoute(std::move(mission_route_));
+  if (uses_base_footprint_anchor) {
+    writeAnchoredMissionRouteArtifact(coordinate_frame);
+  }
   mission_chunks_ = chunkRoute(mission_route_);
   mission_converted_ = !mission_chunks_.empty();
   publishRouteMarker();

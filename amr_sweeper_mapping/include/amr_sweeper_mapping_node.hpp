@@ -112,6 +112,7 @@ private:
   void publishRouteMarker() const;
   void writeMissionSessionMetadata() const;
   void writeActualPathArtifact() const;
+  void writeAnchoredMissionRouteArtifact(const std::string & source_coordinate_frame) const;
   [[nodiscard]] std::string routeGeoJsonPath() const;
   [[nodiscard]] std::string resolveRuntimePath(const std::string & configured_path) const;
   [[nodiscard]] std::vector<MissionCoordinate> loadRouteCoordinates(const std::string & path) const;
