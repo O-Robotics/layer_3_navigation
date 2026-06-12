@@ -56,29 +56,28 @@ controller_server:
       simulate_ahead_time:           1.0                                 # Allow the shim to collision-check the near-term spin behavior before committing.
       rotate_to_goal_heading:        true                                # Also align at the end of short sweep chunks so chunk-to-chunk transitions stay predictable.
 
-      primary_controller:
-        plugin:                      "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"  # Nav2's exact-path-following controller, better suited than DWB for tight builtin sweep geometry.
-        desired_linear_vel:          0.18                                # Start conservatively while we verify tracking on the real platform.
-        lookahead_dist:              0.55                                # Keep the carrot close so the robot tracks compact local patterns instead of smoothing them away.
-        min_lookahead_dist:          0.30                                # Preserve responsiveness on short legs and near reversals in path heading.
-        max_lookahead_dist:          0.90                                # Avoid looking too far ahead on the small builtin mission workspace.
-        lookahead_time:              1.5                                 # Standard velocity-scaled lookahead timing from Nav2 guidance.
-        transform_tolerance:         0.2                                 # Tighter TF tolerance than the old DWB stack while still leaving room for real-robot timing jitter.
-        use_velocity_scaled_lookahead_dist: true                         # Scale lookahead with speed so the controller remains stable from turn-in to cruise.
-        min_approach_linear_velocity: 0.05                               # Prevent stalling as the robot settles into each short goal.
-        approach_velocity_scaling_dist: 0.8                              # Start slowing down early enough for the compact builtin path segments.
-        use_collision_detection:     true                                # Keep the standard RPP collision checking behavior enabled.
-        max_allowed_time_to_collision_up_to_carrot: 1.0                  # Limit forward simulation to the near-term carrot region in the local sweep workspace.
-        use_regulated_linear_velocity_scaling: true                      # Let curvature reduce speed automatically on the tighter local turns.
-        use_fixed_curvature_lookahead: false                             # Use the standard adaptive curvature handling recommended by Nav2.
-        curvature_lookahead_dist:    0.25                                # Use a short curvature probe distance to reflect tight local sweep bends quickly.
-        use_cost_regulated_linear_velocity_scaling: false                # Keep speed regulation dominated by curvature first while we validate tracking behavior.
-        regulated_linear_scaling_min_radius: 0.8                         # Slow the robot more aggressively once the path curvature gets tight.
-        regulated_linear_scaling_min_speed: 0.05                         # Never reduce below a controllable crawl speed.
-        use_rotate_to_heading:       false                               # Rotation Shim is responsible for heading acquisition in this stack.
-        allow_reversing:             false                               # Builtin local sweeps are authored as forward-tracking patterns.
-        max_angular_accel:           1.2                                 # Match the shim and robot platform angular acceleration envelope.
-        stateful:                    true                                # Keep controller state across updates for smoother short-path behavior.
+      primary_controller:           "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"  # The shim expects this as a string-valued child controller plugin parameter in Jazzy.
+      primary_controller.desired_linear_vel: 0.18                        # Start conservatively while we verify tracking on the real platform.
+      primary_controller.lookahead_dist: 0.55                            # Keep the carrot close so the robot tracks compact local patterns instead of smoothing them away.
+      primary_controller.min_lookahead_dist: 0.30                        # Preserve responsiveness on short legs and near reversals in path heading.
+      primary_controller.max_lookahead_dist: 0.90                        # Avoid looking too far ahead on the small builtin mission workspace.
+      primary_controller.lookahead_time: 1.5                             # Standard velocity-scaled lookahead timing from Nav2 guidance.
+      primary_controller.transform_tolerance: 0.2                        # Tighter TF tolerance than the old DWB stack while still leaving room for real-robot timing jitter.
+      primary_controller.use_velocity_scaled_lookahead_dist: true        # Scale lookahead with speed so the controller remains stable from turn-in to cruise.
+      primary_controller.min_approach_linear_velocity: 0.05              # Prevent stalling as the robot settles into each short goal.
+      primary_controller.approach_velocity_scaling_dist: 0.8             # Start slowing down early enough for the compact builtin path segments.
+      primary_controller.use_collision_detection: true                   # Keep the standard RPP collision checking behavior enabled.
+      primary_controller.max_allowed_time_to_collision_up_to_carrot: 1.0 # Limit forward simulation to the near-term carrot region in the local sweep workspace.
+      primary_controller.use_regulated_linear_velocity_scaling: true     # Let curvature reduce speed automatically on the tighter local turns.
+      primary_controller.use_fixed_curvature_lookahead: false            # Use the standard adaptive curvature handling recommended by Nav2.
+      primary_controller.curvature_lookahead_dist: 0.25                  # Use a short curvature probe distance to reflect tight local sweep bends quickly.
+      primary_controller.use_cost_regulated_linear_velocity_scaling: false  # Keep speed regulation dominated by curvature first while we validate tracking behavior.
+      primary_controller.regulated_linear_scaling_min_radius: 0.8        # Slow the robot more aggressively once the path curvature gets tight.
+      primary_controller.regulated_linear_scaling_min_speed: 0.05        # Never reduce below a controllable crawl speed.
+      primary_controller.use_rotate_to_heading: false                    # Rotation Shim is responsible for heading acquisition in this stack.
+      primary_controller.allow_reversing: false                          # Builtin local sweeps are authored as forward-tracking patterns.
+      primary_controller.max_angular_accel: 1.2                          # Match the shim and robot platform angular acceleration envelope.
+      primary_controller.stateful: true                                  # Keep controller state across updates for smoother short-path behavior.
 
 local_costmap:
   local_costmap:
