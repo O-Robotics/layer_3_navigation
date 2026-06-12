@@ -2,6 +2,8 @@
 #define AMR_SWEEPER_MAPPING__AMR_SWEEPER_MAPPING_NODE_HPP_
 
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +20,7 @@
 #include <nav2_msgs/action/follow_waypoints.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_broadcaster.h>
@@ -33,6 +36,35 @@ struct MissionCoordinate
   double y;
   bool use_local_frame{false};
   std::string frame_id{"odom"};
+};
+
+struct GeoPoint
+{
+  double latitude{0.0};
+  double longitude{0.0};
+};
+
+struct GeoTransform
+{
+  bool valid{false};
+  double longitude_coefficients[3]{0.0, 0.0, 0.0};
+  double latitude_coefficients[3]{0.0, 0.0, 0.0};
+};
+
+struct RawNavSatSample
+{
+  double longitude{0.0};
+  double latitude{0.0};
+  double altitude{0.0};
+  rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+};
+
+struct SynchronizedPathSample
+{
+  geometry_msgs::msg::Point odom_position;
+  double yaw{0.0};
+  rclcpp::Time odom_stamp{0, 0, RCL_ROS_TIME};
+  RawNavSatSample raw_navsat;
 };
 
 struct LoadedCostmapArtifact
@@ -95,6 +127,7 @@ private:
   void handleSlamStatus(const std_msgs::msg::String::SharedPtr message);
   void handleGaussianStatus(const std_msgs::msg::String::SharedPtr message);
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
+  void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishCoordinatorStatus();
   void tickMissionExecution();
@@ -112,6 +145,7 @@ private:
   void publishRouteMarker() const;
   void writeMissionSessionMetadata() const;
   void writeActualPathArtifact() const;
+  void writeActualPathNavSatArtifact() const;
   void writeAnchoredMissionRouteArtifact(const std::string & source_coordinate_frame) const;
   [[nodiscard]] std::string routeGeoJsonPath() const;
   [[nodiscard]] std::string resolveRuntimePath(const std::string & configured_path) const;
@@ -141,6 +175,7 @@ private:
   std::string earth_frame_id_;
   std::string map_frame_id_;
   std::string odom_frame_id_;
+  std::string navsat_topic_;
   std::string seeded_map_frame_id_;
   std::string fromll_service_name_;
   std::string datum_service_name_;
@@ -187,9 +222,13 @@ private:
   double padded_live_map_max_x_{0.0};
   double padded_live_map_max_y_{0.0};
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
+  mutable std::mutex synchronized_path_mutex_;
+  std::optional<RawNavSatSample> latest_raw_navsat_sample_;
+  std::vector<SynchronizedPathSample> synchronized_path_samples_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr live_map_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr route_marker_publisher_;

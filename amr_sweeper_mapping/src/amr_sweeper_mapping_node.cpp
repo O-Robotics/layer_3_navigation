@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -18,6 +19,7 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <nlohmann/json.hpp>
 #include <pluginlib/class_list_macros.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Transform.h>
@@ -38,6 +40,7 @@ constexpr char kDefaultArtifactFrameId[] = "odom";
 constexpr char kDefaultMissionRoutePath[] = "";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
+constexpr char kDefaultNavSatTopic[] = "gnss/navsat";
 
 struct EcefPoint
 {
@@ -50,6 +53,12 @@ struct LocalPoint
 {
   double x;
   double y;
+};
+
+struct MapPoint
+{
+  double x{0.0};
+  double y{0.0};
 };
 
 std::string trim(const std::string & value)
@@ -70,6 +79,132 @@ std::string to_lower(std::string value)
     value.begin(),
     [](unsigned char character) {return static_cast<char>(std::tolower(character));});
   return value;
+}
+
+std::string formatTimestamp(const rclcpp::Time & stamp)
+{
+  std::ostringstream stream;
+  const auto seconds = static_cast<long long>(stamp.nanoseconds() / 1000000000LL);
+  const auto nanoseconds = static_cast<long long>(stamp.nanoseconds() % 1000000000LL);
+  stream << seconds << "." << std::setw(9) << std::setfill('0') << std::llabs(nanoseconds);
+  return stream.str();
+}
+
+bool solveLinear3x3(double matrix[3][4], double solution[3])
+{
+  for (int pivot = 0; pivot < 3; ++pivot) {
+    int best_row = pivot;
+    for (int row = pivot + 1; row < 3; ++row) {
+      if (std::abs(matrix[row][pivot]) > std::abs(matrix[best_row][pivot])) {
+        best_row = row;
+      }
+    }
+    if (std::abs(matrix[best_row][pivot]) <= 1.0e-12) {
+      return false;
+    }
+    if (best_row != pivot) {
+      for (int column = pivot; column < 4; ++column) {
+        std::swap(matrix[pivot][column], matrix[best_row][column]);
+      }
+    }
+    const double pivot_value = matrix[pivot][pivot];
+    for (int column = pivot; column < 4; ++column) {
+      matrix[pivot][column] /= pivot_value;
+    }
+    for (int row = 0; row < 3; ++row) {
+      if (row == pivot) {
+        continue;
+      }
+      const double factor = matrix[row][pivot];
+      for (int column = pivot; column < 4; ++column) {
+        matrix[row][column] -= factor * matrix[pivot][column];
+      }
+    }
+  }
+
+  for (int row = 0; row < 3; ++row) {
+    solution[row] = matrix[row][3];
+  }
+  return true;
+}
+
+bool fitAffineComponent(
+  const std::vector<MapPoint> & local_points,
+  const std::vector<double> & targets,
+  double coefficients[3])
+{
+  if (local_points.size() != targets.size() || local_points.size() < 3U) {
+    return false;
+  }
+
+  double ata[3][3] = {};
+  double atb[3] = {};
+  for (std::size_t index = 0U; index < local_points.size(); ++index) {
+    const double row[3] = {local_points.at(index).x, local_points.at(index).y, 1.0};
+    for (int i = 0; i < 3; ++i) {
+      atb[i] += row[i] * targets.at(index);
+      for (int j = 0; j < 3; ++j) {
+        ata[i][j] += row[i] * row[j];
+      }
+    }
+  }
+
+  double augmented[3][4] = {
+    {ata[0][0], ata[0][1], ata[0][2], atb[0]},
+    {ata[1][0], ata[1][1], ata[1][2], atb[1]},
+    {ata[2][0], ata[2][1], ata[2][2], atb[2]},
+  };
+  return solveLinear3x3(augmented, coefficients);
+}
+
+std::optional<nlohmann::json> buildGeoReferenceMetadata(
+  const std::vector<MapPoint> & local_trace,
+  const std::vector<GeoPoint> & geo_trace,
+  const std::string & companion_file)
+{
+  if (local_trace.size() < 3U || geo_trace.size() < 3U || local_trace.size() != geo_trace.size()) {
+    return std::nullopt;
+  }
+
+  const std::size_t sample_count = std::min<std::size_t>(12U, local_trace.size());
+  std::vector<MapPoint> sampled_local_points;
+  std::vector<double> sampled_longitudes;
+  std::vector<double> sampled_latitudes;
+  sampled_local_points.reserve(sample_count);
+  sampled_longitudes.reserve(sample_count);
+  sampled_latitudes.reserve(sample_count);
+
+  for (std::size_t index = 0U; index < sample_count; ++index) {
+    const std::size_t sample_index =
+      sample_count == 1U ? 0U : ((index * (local_trace.size() - 1U)) / (sample_count - 1U));
+    sampled_local_points.push_back(local_trace.at(sample_index));
+    sampled_longitudes.push_back(geo_trace.at(sample_index).longitude);
+    sampled_latitudes.push_back(geo_trace.at(sample_index).latitude);
+  }
+
+  GeoTransform transform;
+  if (!fitAffineComponent(sampled_local_points, sampled_longitudes, transform.longitude_coefficients) ||
+    !fitAffineComponent(sampled_local_points, sampled_latitudes, transform.latitude_coefficients))
+  {
+    return std::nullopt;
+  }
+
+  transform.valid = true;
+  nlohmann::json georeference{
+    {"type", "affine_xy_to_wgs84"},
+    {"sample_count", sample_count},
+    {"longitude_coefficients", {
+       transform.longitude_coefficients[0],
+       transform.longitude_coefficients[1],
+       transform.longitude_coefficients[2]}},
+    {"latitude_coefficients", {
+       transform.latitude_coefficients[0],
+       transform.latitude_coefficients[1],
+       transform.latitude_coefficients[2]}}};
+  if (!companion_file.empty()) {
+    georeference["companion_file"] = companion_file;
+  }
+  return georeference;
 }
 
 double yawForSegment(
@@ -260,6 +395,92 @@ nlohmann::json buildLocalPathGeoJson(
     {"coordinate_frame", "odom"}};
   if (!geographic_companion_file.empty()) {
     properties["geographic_companion_file"] = geographic_companion_file;
+  }
+
+  return {
+    {"type", "FeatureCollection"},
+    {"features", nlohmann::json::array({
+      {
+        {"type", "Feature"},
+        {"properties", properties},
+        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
+      }
+    })}
+  };
+}
+
+nlohmann::json buildSynchronizedLocalPathGeoJson(
+  const std::vector<SynchronizedPathSample> & samples,
+  const std::string & geographic_companion_file)
+{
+  nlohmann::json coordinates = nlohmann::json::array();
+  nlohmann::json sample_timestamps = nlohmann::json::array();
+  nlohmann::json yaw_values = nlohmann::json::array();
+  std::vector<MapPoint> local_trace;
+  std::vector<GeoPoint> geo_trace;
+  local_trace.reserve(samples.size());
+  geo_trace.reserve(samples.size());
+
+  for (const auto & sample : samples) {
+    coordinates.push_back({sample.odom_position.x, sample.odom_position.y});
+    sample_timestamps.push_back(formatTimestamp(sample.odom_stamp));
+    yaw_values.push_back(sample.yaw);
+    local_trace.push_back({sample.odom_position.x, sample.odom_position.y});
+    geo_trace.push_back({sample.raw_navsat.latitude, sample.raw_navsat.longitude});
+  }
+
+  nlohmann::json properties{
+    {"name", "actual_path"},
+    {"coordinate_frame", "odom"},
+    {"sample_count", samples.size()},
+    {"sample_timestamps", sample_timestamps},
+    {"point_yaws_rad", yaw_values},
+    {"position_source", "odometry/fused"},
+    {"orientation_source", "odometry/fused"}};
+  if (!geographic_companion_file.empty()) {
+    properties["geographic_companion_file"] = geographic_companion_file;
+  }
+
+  const auto georeference = buildGeoReferenceMetadata(local_trace, geo_trace, geographic_companion_file);
+  if (georeference.has_value()) {
+    properties["georeference"] = *georeference;
+  }
+
+  return {
+    {"type", "FeatureCollection"},
+    {"features", nlohmann::json::array({
+      {
+        {"type", "Feature"},
+        {"properties", properties},
+        {"geometry", {{"type", "LineString"}, {"coordinates", coordinates}}}
+      }
+    })}
+  };
+}
+
+nlohmann::json buildSynchronizedNavSatGeoJson(
+  const std::vector<SynchronizedPathSample> & samples,
+  const std::string & local_companion_file)
+{
+  nlohmann::json coordinates = nlohmann::json::array();
+  nlohmann::json paired_sample_timestamps = nlohmann::json::array();
+  nlohmann::json raw_navsat_timestamps = nlohmann::json::array();
+
+  for (const auto & sample : samples) {
+    coordinates.push_back({sample.raw_navsat.longitude, sample.raw_navsat.latitude});
+    paired_sample_timestamps.push_back(formatTimestamp(sample.odom_stamp));
+    raw_navsat_timestamps.push_back(formatTimestamp(sample.raw_navsat.stamp));
+  }
+
+  nlohmann::json properties{
+    {"name", "actual_path_navsat"},
+    {"coordinate_frame", "wgs84"},
+    {"sample_count", samples.size()},
+    {"sample_timestamps", paired_sample_timestamps},
+    {"raw_navsat_timestamps", raw_navsat_timestamps},
+    {"position_source", "gnss/navsat"}};
+  if (!local_companion_file.empty()) {
+    properties["local_companion_file"] = local_companion_file;
   }
 
   return {
@@ -595,6 +816,7 @@ MappingNode::MappingNode()
   declare_parameter("earth_frame", std::string("earth"));
   declare_parameter("map_frame", std::string("map"));
   declare_parameter("odom_frame", std::string("odom"));
+  declare_parameter("navsat_topic", std::string(kDefaultNavSatTopic));
   declare_parameter("seeded_map_frame", std::string("map"));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("datum_service", std::string("/get_datum"));
@@ -632,6 +854,7 @@ MappingNode::MappingNode()
   earth_frame_id_ = get_parameter("earth_frame").as_string();
   map_frame_id_ = get_parameter("map_frame").as_string();
   odom_frame_id_ = get_parameter("odom_frame").as_string();
+  navsat_topic_ = get_parameter("navsat_topic").as_string();
   seeded_map_frame_id_ = get_parameter("seeded_map_frame").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   datum_service_name_ = get_parameter("datum_service").as_string();
@@ -681,6 +904,10 @@ MappingNode::MappingNode()
     "odometry/fused",
     50,
     std::bind(&MappingNode::handleOdometry, this, std::placeholders::_1));
+  navsat_subscription_ = create_subscription<sensor_msgs::msg::NavSatFix>(
+    navsat_topic_,
+    rclcpp::SystemDefaultsQoS(),
+    std::bind(&MappingNode::handleNavSat, this, std::placeholders::_1));
   live_map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
     "mapping/map",
     rclcpp::QoS(1).reliable().transient_local(),
@@ -776,7 +1003,43 @@ void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
   }
 
   traveled_path_points_.push_back(position);
+  if (!manual_mapping_mode_) {
+    std::lock_guard<std::mutex> lock(synchronized_path_mutex_);
+    if (latest_raw_navsat_sample_.has_value()) {
+      tf2::Quaternion quaternion;
+      tf2::fromMsg(message->pose.pose.orientation, quaternion);
+      double roll = 0.0;
+      double pitch = 0.0;
+      double yaw = 0.0;
+      tf2::Matrix3x3(quaternion).getRPY(roll, pitch, yaw);
+      SynchronizedPathSample synchronized_sample;
+      synchronized_sample.odom_position = position;
+      synchronized_sample.yaw = yaw;
+      synchronized_sample.odom_stamp = message->header.stamp.sec == 0 &&
+        message->header.stamp.nanosec == 0 ? now() : rclcpp::Time(message->header.stamp);
+      synchronized_sample.raw_navsat = *latest_raw_navsat_sample_;
+      synchronized_path_samples_.push_back(synchronized_sample);
+    }
+  }
   writeActualPathArtifact();
+  writeActualPathNavSatArtifact();
+}
+
+void MappingNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message)
+{
+  if (!message) {
+    return;
+  }
+
+  RawNavSatSample sample;
+  sample.longitude = message->longitude;
+  sample.latitude = message->latitude;
+  sample.altitude = message->altitude;
+  sample.stamp = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
+    now() : rclcpp::Time(message->header.stamp);
+
+  std::lock_guard<std::mutex> lock(synchronized_path_mutex_);
+  latest_raw_navsat_sample_ = sample;
 }
 
 void MappingNode::handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
@@ -1010,15 +1273,24 @@ void MappingNode::writeActualPathArtifact() const
   }
 
   std::filesystem::create_directories(std::filesystem::path(actual_path_output_file_).parent_path());
-  nlohmann::json coordinates = nlohmann::json::array();
-  for (const auto & point : traveled_path_points_) {
-    coordinates.push_back({point.x, point.y});
+  std::vector<SynchronizedPathSample> synchronized_samples;
+  {
+    std::lock_guard<std::mutex> lock(synchronized_path_mutex_);
+    synchronized_samples = synchronized_path_samples_;
   }
 
-  const std::string navsat_companion_file = actual_path_navsat_output_file_.empty() ?
-    std::string{} :
+  const std::string navsat_companion_file = actual_path_navsat_output_file_.empty() ? std::string{} :
     std::filesystem::path(actual_path_navsat_output_file_).filename().string();
-  nlohmann::json document = buildLocalPathGeoJson(coordinates, navsat_companion_file);
+  nlohmann::json document;
+  if (!synchronized_samples.empty()) {
+    document = buildSynchronizedLocalPathGeoJson(synchronized_samples, navsat_companion_file);
+  } else {
+    nlohmann::json coordinates = nlohmann::json::array();
+    for (const auto & point : traveled_path_points_) {
+      coordinates.push_back({point.x, point.y});
+    }
+    document = buildLocalPathGeoJson(coordinates, navsat_companion_file);
+  }
 
   try {
     writeJsonDocumentAtomic(actual_path_output_file_, document);
@@ -1028,6 +1300,36 @@ void MappingNode::writeActualPathArtifact() const
       "Failed to write actual path artifact into %s",
       actual_path_output_file_.c_str());
     return;
+  }
+}
+
+void MappingNode::writeActualPathNavSatArtifact() const
+{
+  if (manual_mapping_mode_ || actual_path_navsat_output_file_.empty()) {
+    return;
+  }
+
+  std::vector<SynchronizedPathSample> synchronized_samples;
+  {
+    std::lock_guard<std::mutex> lock(synchronized_path_mutex_);
+    synchronized_samples = synchronized_path_samples_;
+  }
+  if (synchronized_samples.empty()) {
+    return;
+  }
+
+  const std::string local_companion_file = actual_path_output_file_.empty() ? std::string{} :
+    std::filesystem::path(actual_path_output_file_).filename().string();
+  const nlohmann::json document =
+    buildSynchronizedNavSatGeoJson(synchronized_samples, local_companion_file);
+
+  try {
+    writeJsonDocumentAtomic(actual_path_navsat_output_file_, document);
+  } catch (const std::exception &) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to write actual navsat path artifact into %s",
+      actual_path_navsat_output_file_.c_str());
   }
 }
 

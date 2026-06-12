@@ -18,6 +18,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - Publishes REP-105 `earth -> map` from the FusionCore GNSS datum and the live SLAM `map -> odom` correction, so the `map` frame stays georeferenced while Nav2 continues to plan in `map` and control in `odom`.
 - Supports mission route GeoJSON features tagged with `properties.coordinate_frame: "odom"` or `"local"` so small built-in sweep patterns can run directly in the local navigation frame.
 - Rewrites builtin local-pattern run-folder route artifacts into `odom` once they are anchored at mission start, so the saved planned path can be compared directly against `actual_path.geojson`.
+- Writes synchronized runtime trace artifacts where each `actual_path.geojson` odom sample has a matching raw-`gnss/navsat` point in `actual_path_navsat.geojson`, along with per-sample timestamps and odom yaw values.
 - Supports mission JSON files with `execution_mode: "manual_mapping"` so a mission such as `RecordMap` can keep SLAM and gaussian mapping active while an operator manually drives the robot.
 - Supervises the selected SLAM backend and the gaussian-world builder during runtime.
 - Reads the exact scheduler-selected mission execution directory passed through the FSM RUNNING launch path and loads that folder's `execution_context.json` so the selected mission route, mission window, and mission output directory follow the active mission.
