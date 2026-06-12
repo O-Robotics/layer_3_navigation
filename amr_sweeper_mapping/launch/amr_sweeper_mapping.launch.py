@@ -45,16 +45,19 @@ def _build_nodes(context):
     params_file = LaunchConfiguration("mapping_params_file").perform(context)
     slam_params_file = LaunchConfiguration("slam_params_file").perform(context)
     mission_execution_directory = LaunchConfiguration("mission_execution_directory").perform(context)
+    configured_mission_file = LaunchConfiguration("mission_file").perform(context)
+    configured_mission_id = LaunchConfiguration("mission_id").perform(context)
+    configured_mission_type = LaunchConfiguration("mission_type").perform(context).lower()
     use_test = LaunchConfiguration("use_test").perform(context).lower() == "true"
     test_output_directory = LaunchConfiguration("test_output_directory").perform(context)
     configured_mission_costmap_yaml = LaunchConfiguration("mission_costmap_yaml").perform(context)
     auto_start_mission = LaunchConfiguration("auto_start_mission").perform(context).lower() == "true"
 
     mission_context = _resolve_execution_context(mission_execution_directory)
-    mission_type = str(mission_context.get("mission_type", "")).lower()
+    mission_type = configured_mission_type or str(mission_context.get("mission_type", "")).lower()
     builtin_local_pattern_mode = mission_type == "builtin_local_pattern"
-    mission_id = mission_context.get("mission_id", "")
-    mission_file = mission_context.get("mission_file", "")
+    mission_id = configured_mission_id or mission_context.get("mission_id", "")
+    mission_file = configured_mission_file or mission_context.get("mission_file", "")
     mission_route_file = mission_context.get("mission_route_file", "")
     mission_run_directory = mission_context.get("mission_run_directory", "")
     mission_window_start = mission_context.get("mission_window_start", "")
@@ -245,6 +248,21 @@ def generate_launch_description():
                 "mission_execution_directory",
                 default_value="",
                 description="Exact scheduler-selected mission execution folder for the active RUNNING mission.",
+            ),
+            DeclareLaunchArgument(
+                "mission_file",
+                default_value="",
+                description="Optional direct mission definition file for builtin direct-run profiles.",
+            ),
+            DeclareLaunchArgument(
+                "mission_id",
+                default_value="",
+                description="Optional mission identifier override for direct-run builtin profiles.",
+            ),
+            DeclareLaunchArgument(
+                "mission_type",
+                default_value="",
+                description="Optional mission type override used to specialize direct-run builtin profiles.",
             ),
             DeclareLaunchArgument(
                 "use_test",

@@ -65,9 +65,9 @@ def _resolve_execution_context(mission_execution_directory: str) -> dict:
     return _load_json_file(Path(mission_execution_directory) / "execution_context.json")
 
 
-def _resolve_navigation_launch_filename(mission_context: dict) -> str:
-    mission_type = str(mission_context.get("mission_type", "")).lower()
-    execution_mode = str(mission_context.get("execution_mode", "")).lower()
+def _resolve_navigation_launch_filename(mission_type: str, execution_mode: str) -> str:
+    mission_type = str(mission_type).lower()
+    execution_mode = str(execution_mode).lower()
 
     if mission_type == "builtin_local_pattern":
         return "default_missions_navigation.launch.py"
@@ -103,12 +103,23 @@ def _build_launches(context):
     use_amr_sweeper_navigation = LaunchConfiguration('use_amr_sweeper_navigation').perform(context).lower() == 'true'
     use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping').perform(context).lower() == 'true'
     mission_execution_directory = LaunchConfiguration('mission_execution_directory').perform(context)
+    mission_file = LaunchConfiguration('mission_file').perform(context)
+    mission_id = LaunchConfiguration('mission_id').perform(context)
+    mission_type = LaunchConfiguration('mission_type').perform(context)
+    mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml').perform(context)
     auto_start_mission = LaunchConfiguration('auto_start_mission').perform(context)
     use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
     test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
     mission_context = _resolve_execution_context(mission_execution_directory)
-    mission_costmap_yaml = mission_context.get("mission_costmap_yaml", "")
-    navigation_launch_filename = _resolve_navigation_launch_filename(mission_context)
+    effective_mission_type = mission_type or mission_context.get("mission_type", "")
+    effective_execution_mode = mission_context.get("execution_mode", "")
+    effective_mission_file = mission_file or mission_context.get("mission_file", "")
+    effective_mission_id = mission_id or mission_context.get("mission_id", "")
+    effective_mission_costmap_yaml = mission_costmap_yaml or mission_context.get("mission_costmap_yaml", "")
+    navigation_launch_filename = _resolve_navigation_launch_filename(
+        effective_mission_type,
+        effective_execution_mode,
+    )
     effective_use_amr_sweeper_mapping = _mission_requires_mapping(
         mission_context,
         use_amr_sweeper_mapping,
@@ -134,7 +145,7 @@ def _build_launches(context):
         launch_arguments={
             'namespace': namespace,
             'use_sim_time': use_sim_time,
-            'mission_costmap_yaml': mission_costmap_yaml,
+            'mission_costmap_yaml': effective_mission_costmap_yaml,
         }.items(),
     )
     mapping_launch = IncludeLaunchDescription(
@@ -145,6 +156,10 @@ def _build_launches(context):
             'namespace': namespace,
             'use_sim_time': use_sim_time,
             'mission_execution_directory': mission_execution_directory,
+            'mission_file': effective_mission_file,
+            'mission_id': effective_mission_id,
+            'mission_type': effective_mission_type,
+            'mission_costmap_yaml': effective_mission_costmap_yaml,
             'auto_start_mission': auto_start_mission,
             'use_test': 'true' if use_test else 'false',
             'test_output_directory': test_output_directory,
@@ -280,6 +295,10 @@ def generate_launch_description():
             description='Seconds to wait after mapping launch starts before bringing up the navigation stack.',
         ),
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
+        DeclareLaunchArgument('mission_file', default_value=''),
+        DeclareLaunchArgument('mission_id', default_value=''),
+        DeclareLaunchArgument('mission_type', default_value=''),
+        DeclareLaunchArgument('mission_costmap_yaml', default_value=''),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('use_test', default_value='false'),
         DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
