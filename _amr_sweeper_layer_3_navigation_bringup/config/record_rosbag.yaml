@@ -1,0 +1,97 @@
+topics:
+  - /clock
+  - /parameter_events
+  - /rosout
+  - /tf
+  - /tf_static
+
+  - /amr_sweeper/fsm_state
+  - /amr_sweeper/fsm_status
+  - /amr_sweeper/safety_msgs/stop
+  - /amr_sweeper/safety_controller/status
+  - /amr_sweeper/safety_controller/web_status
+
+  - /amr_sweeper/battery/battery_state
+  - /amr_sweeper/battery/battery_health
+  - /amr_sweeper/system_info/system_info
+  - /amr_sweeper/joint_states
+  - /amr_sweeper/robot_description
+
+  - /amr_sweeper/imu/data_raw
+  - /amr_sweeper/imu/data_acc_gyro
+  - /amr_sweeper/imu/data_heading
+  - /amr_sweeper/gnss/navsat
+  - /amr_sweeper/gnss/rtcm
+
+  - /amr_sweeper/depth_camera/scan
+  - /amr_sweeper/depth_camera/depth/camera_info
+  - /amr_sweeper/depth_camera/depth/color/points
+  - /amr_sweeper/depth_camera/motion/imu
+
+  - /amr_sweeper/cmd_vel_drive
+  - /amr_sweeper/cmd_vel_tools
+  - /amr_sweeper/cmd_vel_joy_drive
+  - /amr_sweeper/cmd_vel_joy_tools
+  - /amr_sweeper/cmd_vel_nav
+  - /amr_sweeper/drive_controller/cmd_vel
+  - /amr_sweeper/drive_controller/odom
+  - /amr_sweeper/tool_controller/commands
+  - /amr_sweeper/attitude/roll_pitch
+  - /amr_sweeper/attitude/status
+  - /amr_sweeper/collision_detector/impact_detected
+  - /amr_sweeper/collision_detector/status
+  - /amr_sweeper/sweeping_controller/status
+
+  - /amr_sweeper/visual_odometry/odom
+  - /amr_sweeper/visual_odometry/status
+  - /amr_sweeper/odometry/fused
+  - /amr_sweeper/pose
+  - /amr_sweeper/slam/pose
+  - /amr_sweeper/slam/status
+  - /amr_sweeper/gaussian/world_points
+  - /amr_sweeper/gaussian/status
+  - /amr_sweeper/mapping/map
+  - /amr_sweeper/mapping/map_metadata
+  - /amr_sweeper/mapping/map_padded
+  - /amr_sweeper/mapping/route_marker
+  - /amr_sweeper/mapping/status
+
+  - /amr_sweeper/plan
+  - /amr_sweeper/local_plan
+  - /amr_sweeper/cost_cloud
+  - /amr_sweeper/particle_cloud
+  - /amr_sweeper/goal_pose
+  - /amr_sweeper/initialpose
+  - /amr_sweeper/waypoint_follower/transition_event
+  - /amr_sweeper/controller_server/transition_event
+  - /amr_sweeper/planner_server/transition_event
+  - /amr_sweeper/bt_navigator/transition_event
+  - /amr_sweeper/slam_toolbox/transition_event
+  - /amr_sweeper/fusioncore/transition_event
+
+  - /amr_sweeper/mission_parser/status
+
+  # Image-heavy topics are intentionally disabled by default.
+  # Uncomment as needed for camera-focused debugging.
+  # - /amr_sweeper/usb_cameras/tools_camera/image_raw
+  # - /amr_sweeper/usb_cameras/tools_camera/image_raw/compressed
+  # - /amr_sweeper/usb_cameras/tools_camera/tools_camera_info
+  # - /amr_sweeper/usb_cameras/front_left_camera/image_raw
+  # - /amr_sweeper/usb_cameras/front_left_camera/image_raw/compressed
+  # - /amr_sweeper/usb_cameras/front_left_camera/front_left_camera_info
+  # - /amr_sweeper/usb_cameras/front_right_camera/image_raw
+  # - /amr_sweeper/usb_cameras/front_right_camera/image_raw/compressed
+  # - /amr_sweeper/usb_cameras/front_right_camera/front_right_camera_info
+  # - /amr_sweeper/usb_cameras/rear_left_camera/image_raw
+  # - /amr_sweeper/usb_cameras/rear_left_camera/image_raw/compressed
+  # - /amr_sweeper/usb_cameras/rear_left_camera/rear_left_camera_info
+  # - /amr_sweeper/usb_cameras/rear_right_camera/image_raw
+  # - /amr_sweeper/usb_cameras/rear_right_camera/image_raw/compressed
+  # - /amr_sweeper/usb_cameras/rear_right_camera/rear_right_camera_info
+  # - /amr_sweeper/depth_camera/color/image_raw
+  # - /amr_sweeper/depth_camera/color/camera_info
+  # - /amr_sweeper/depth_camera/depth/image
+  # - /amr_sweeper/depth_camera/infra1/image
+  # - /amr_sweeper/depth_camera/infra1/camera_info
+  # - /amr_sweeper/depth_camera/infra2/image
+  # - /amr_sweeper/depth_camera/infra2/camera_info
