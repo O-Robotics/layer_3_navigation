@@ -36,6 +36,26 @@
 using namespace std::chrono_literals;
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
+namespace
+{
+
+const char * gnssRejectReasonToString(const fusioncore::GnssRejectReason reason)
+{
+  switch (reason) {
+    case fusioncore::GnssRejectReason::NONE:
+      return "none";
+    case fusioncore::GnssRejectReason::QUALITY_GATE:
+      return "quality_gate";
+    case fusioncore::GnssRejectReason::DELAY_REPLAY_FAILED:
+      return "delay_replay_failed";
+    case fusioncore::GnssRejectReason::OUTLIER_GATE:
+      return "outlier_gate";
+  }
+  return "unknown";
+}
+
+}  // namespace
+
 class FusionNode : public rclcpp_lifecycle::LifecycleNode
 {
 public:
@@ -2025,11 +2045,17 @@ private:
         std::ostringstream stream;
         stream << std::fixed << std::setprecision(2)
                << "GNSS fix rejected (";
-        if (fc_status.last_gnss_mahalanobis_valid) {
-          stream << "mahalanobis_d2=" << fc_status.last_gnss_mahalanobis_d2
-                 << ", outlier_threshold_gnss=" << get_parameter("outlier_threshold_gnss").as_double();
+        if (fc_status.last_gnss_reject_reason == fusioncore::GnssRejectReason::OUTLIER_GATE) {
+          stream << "reason=" << gnssRejectReasonToString(fc_status.last_gnss_reject_reason);
+          if (fc_status.last_gnss_mahalanobis_valid) {
+            stream << ", mahalanobis_d2=" << fc_status.last_gnss_mahalanobis_d2
+                   << ", outlier_threshold_gnss=" << get_parameter("outlier_threshold_gnss").as_double();
+          } else {
+            stream << ", mahalanobis_d2=unknown, outlier_threshold_gnss="
+                   << get_parameter("outlier_threshold_gnss").as_double();
+          }
         } else {
-          stream << "mahalanobis_d2=unknown, outlier_threshold_gnss=" << get_parameter("outlier_threshold_gnss").as_double();
+          stream << "reason=" << gnssRejectReasonToString(fc_status.last_gnss_reject_reason);
         }
         stream << ")";
         RCLCPP_WARN_THROTTLE(

@@ -115,6 +115,13 @@ enum class SensorHealth {
   NOT_INIT
 };
 
+enum class GnssRejectReason {
+  NONE = 0,
+  QUALITY_GATE = 1,
+  DELAY_REPLAY_FAILED = 2,
+  OUTLIER_GATE = 3,
+};
+
 struct FusionCoreStatus {
   bool         initialized          = false;
   SensorHealth imu_health           = SensorHealth::NOT_INIT;
@@ -136,6 +143,7 @@ struct FusionCoreStatus {
   int vslam_outliers = 0;
 
   SensorHealth vslam_health = SensorHealth::NOT_INIT;
+  GnssRejectReason last_gnss_reject_reason = GnssRejectReason::NONE;
   bool   last_gnss_mahalanobis_valid = false;
   double last_gnss_mahalanobis_d2    = 0.0;
 };
@@ -348,6 +356,7 @@ private:
   // Heading observability tracking
   bool          heading_validated_ = false;
   HeadingSource heading_source_    = HeadingSource::NONE;
+  GnssRejectReason last_gnss_reject_reason_ = GnssRejectReason::NONE;
 
   // For GPS track heading observability
   double last_gnss_x_     = 0.0;

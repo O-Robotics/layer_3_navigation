@@ -594,7 +594,13 @@ bool FusionCore::update_gnss(
   if (!initialized_)
     throw std::runtime_error("FusionCore: update_gnss() called before init()");
 
-  if (!fix.is_valid(config_.gnss)) return false;
+  last_gnss_reject_reason_ = GnssRejectReason::NONE;
+
+  if (!fix.is_valid(config_.gnss)) {
+    last_gnss_reject_reason_ = GnssRejectReason::QUALITY_GATE;
+    last_gnss_mahalanobis_valid_ = false;
+    return false;
+  }
 
   // Check if this measurement is delayed
   bool is_delayed = (last_timestamp_ - timestamp_seconds) > config_.min_dt;
@@ -612,7 +618,15 @@ bool FusionCore::update_gnss(
         ukf_.state().x[VY] * ukf_.state().x[VY]);
       gnss_fused = apply_gnss_update(timestamp_seconds, fix);
     });
-    if (!applied || !gnss_fused) return false;
+    if (!applied) {
+      last_gnss_reject_reason_ = GnssRejectReason::DELAY_REPLAY_FAILED;
+      last_gnss_mahalanobis_valid_ = false;
+      return false;
+    }
+    if (!gnss_fused) {
+      last_gnss_reject_reason_ = GnssRejectReason::OUTLIER_GATE;
+      return false;
+    }
     update_distance_traveled(fix.x, fix.y, pre_update_speed_delayed);
     last_gnss_time_ = timestamp_seconds;
     ++update_count_;
@@ -625,7 +639,10 @@ bool FusionCore::update_gnss(
   double pre_update_speed = std::sqrt(
     ukf_.state().x[VX] * ukf_.state().x[VX] +
     ukf_.state().x[VY] * ukf_.state().x[VY]);
-  if (!apply_gnss_update(timestamp_seconds, fix)) return false;
+  if (!apply_gnss_update(timestamp_seconds, fix)) {
+    last_gnss_reject_reason_ = GnssRejectReason::OUTLIER_GATE;
+    return false;
+  }
   update_distance_traveled(fix.x, fix.y, pre_update_speed);
   last_gnss_time_ = timestamp_seconds;
   ++update_count_;
@@ -808,6 +825,7 @@ FusionCoreStatus FusionCore::get_status() const {
   status.enc_outliers   = enc_outliers_;
   status.hdg_outliers   = hdg_outliers_;
   status.vslam_outliers = vslam_outliers_;
+  status.last_gnss_reject_reason = last_gnss_reject_reason_;
   status.last_gnss_mahalanobis_valid = last_gnss_mahalanobis_valid_;
   status.last_gnss_mahalanobis_d2    = last_gnss_mahalanobis_d2_;
 
