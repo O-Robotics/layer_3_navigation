@@ -1129,6 +1129,7 @@ private:
           init_window_start_ = init_window_start_is_msg_time_
             ? t : this->now().seconds();
           init_window_aborted_    = false;
+          init_window_completion_logged_ = false;
           init_win_n_             = 0;
           init_win_wx_ = init_win_wy_ = init_win_wz_ = 0.0;
           init_win_ax_ = init_win_ay_ = init_win_az_ = 0.0;
@@ -1191,18 +1192,27 @@ private:
               initial.x[fusioncore::B_AX] = init_win_ax_ / n - gx;
               initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
               initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
-              RCLCPP_INFO(get_logger(),
-                "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] rad/s, m/s²",
-                initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
-                initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
+              if (!init_window_completion_logged_) {
+                RCLCPP_INFO(get_logger(),
+                  "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] rad/s, m/s²",
+                  initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
+                  initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
+                init_window_completion_logged_ = true;
+              }
             } else {
-              RCLCPP_INFO(get_logger(),
-                "Bias window done (gyro only, no orientation): gyro=[%.4f,%.4f,%.4f]",
-                initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ]);
+              if (!init_window_completion_logged_) {
+                RCLCPP_INFO(get_logger(),
+                  "Bias window done (gyro only, no orientation): gyro=[%.4f,%.4f,%.4f]",
+                  initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ]);
+                init_window_completion_logged_ = true;
+              }
             }
           } else {
-            RCLCPP_WARN(get_logger(),
-              "Bias window aborted (robot moved). Starting with zero bias.");
+            if (!init_window_completion_logged_) {
+              RCLCPP_WARN(get_logger(),
+                "Bias window aborted (robot moved). Starting with zero bias.");
+              init_window_completion_logged_ = true;
+            }
           }
 
           if (init_win_orient_n_ == 0) {
@@ -2378,6 +2388,7 @@ private:
   double init_window_duration_         = 0.0;
   bool   init_window_collecting_       = false;
   bool   init_window_aborted_          = false;
+  bool   init_window_completion_logged_ = false;
   double init_window_start_            = 0.0;
   bool   init_window_start_is_msg_time_ = false;  // true: msg timestamps; false: wall clock
   int    init_win_n_                   = 0;
