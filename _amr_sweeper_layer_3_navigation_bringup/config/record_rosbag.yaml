@@ -20,7 +20,7 @@ topics:
   - /amr_sweeper/depth_camera/scan
   - /amr_sweeper/depth_camera/depth/camera_info
   - /amr_sweeper/depth_camera/depth/color/points
-  - /amr_sweeper/depth_camera/motion/imu
+  - /amr_sweeper/depth_camera/motion/sample
 
   - /amr_sweeper/description/robot_description
 
