@@ -225,6 +225,12 @@ public:
     // Only activates if the robot is stationary during the window (encoder check).
     declare_parameter("init.stationary_window", 0.0);
 
+    // Wait for required TF frames before starting the filter (default true).
+    // This prevents startup races where the IMU and sensor mount frames exist,
+    // but the dynamic base_footprint -> base_link chain from robot_state_publisher
+    // has not been published yet.
+    declare_parameter("init.wait_for_required_tf", true);
+
     // Wait for all configured sensors before starting the filter (default false).
     // When true, FusionCore holds initialization until every subscribed sensor
     // has published at least one message, so the filter starts with a full set
@@ -399,6 +405,7 @@ public:
     zupt_noise_sigma_        = get_parameter("zupt.noise_sigma").as_double();
 
     init_window_duration_    = get_parameter("init.stationary_window").as_double();
+    wait_for_required_tf_    = get_parameter("init.wait_for_required_tf").as_bool();
     wait_for_all_sensors_    = get_parameter("init.wait_for_all_sensors").as_bool();
     sensor_wait_timeout_     = get_parameter("init.sensor_wait_timeout").as_double();
     checkpoint_path_         = get_parameter("replay.checkpoint_path").as_string();
@@ -824,10 +831,13 @@ private:
   // Prints [OK] or [MISSING] + exact fix command for each.
   // Returns true only if all critical transforms are found.
 
-    bool validate_transforms()
+  bool validate_transforms()
   {
     bool all_ok = true;
     RCLCPP_INFO(get_logger(), "--- TF Validation ---");
+    const std::string sensor_mount_frame = "base_link";
+    const bool base_frame_exists = tf_buffer_->_frameExists(base_frame_);
+    const bool mount_frame_exists = tf_buffer_->_frameExists(sensor_mount_frame);
 
     // Use configured IMU frame instead of hardcoded "imu_link"
     std::string imu_tf_frame = imu_frame_override_.empty() ? "imu_link" : imu_frame_override_;
@@ -841,6 +851,23 @@ private:
     };
 
     for (const auto& [from, to] : to_check) {
+      if (!base_frame_exists) {
+        if (base_frame_ == "base_footprint" && mount_frame_exists &&
+            check_transform(from, sensor_mount_frame))
+        {
+          RCLCPP_INFO(
+            get_logger(),
+            "  [PENDING] %s -> %s  Waiting for base_footprint -> base_link chain from robot_state_publisher/attitude controller.",
+            from.c_str(), to.c_str());
+        } else {
+          RCLCPP_INFO(
+            get_logger(),
+            "  [PENDING] %s -> %s  Base frame '%s' not available yet during startup.",
+            from.c_str(), to.c_str(), base_frame_.c_str());
+        }
+        continue;
+      }
+
       if (check_transform(from, to)) {
         RCLCPP_INFO(get_logger(), "  [OK]      %s -> %s", from.c_str(), to.c_str());
       } else {
@@ -852,7 +879,21 @@ private:
 
     // Check GNSS frame if primary lever arm is configured
     if (!gnss_lever_arm_.is_zero()) {
-      if (check_transform("gnss_link", base_frame_)) {
+      if (!base_frame_exists) {
+        if (base_frame_ == "base_footprint" && mount_frame_exists &&
+            check_transform("gnss_link", sensor_mount_frame))
+        {
+          RCLCPP_INFO(
+            get_logger(),
+            "  [PENDING] gnss_link -> %s  Waiting for base_footprint -> base_link chain from robot_state_publisher/attitude controller.",
+            base_frame_.c_str());
+        } else {
+          RCLCPP_INFO(
+            get_logger(),
+            "  [PENDING] gnss_link -> %s  Base frame '%s' not available yet during startup.",
+            base_frame_.c_str(), base_frame_.c_str());
+        }
+      } else if (check_transform("gnss_link", base_frame_)) {
         RCLCPP_INFO(get_logger(), "  [OK]      gnss_link -> %s", base_frame_.c_str());
       } else {
         RCLCPP_WARN(get_logger(),
@@ -866,7 +907,21 @@ private:
 
     // Check GNSS2 frame if secondary lever arm is configured
     if (!gnss_lever_arm2_.is_zero()) {
-      if (check_transform("gnss2_link", base_frame_)) {
+      if (!base_frame_exists) {
+        if (base_frame_ == "base_footprint" && mount_frame_exists &&
+            check_transform("gnss2_link", sensor_mount_frame))
+        {
+          RCLCPP_INFO(
+            get_logger(),
+            "  [PENDING] gnss2_link -> %s  Waiting for base_footprint -> base_link chain from robot_state_publisher/attitude controller.",
+            base_frame_.c_str());
+        } else {
+          RCLCPP_INFO(
+            get_logger(),
+            "  [PENDING] gnss2_link -> %s  Base frame '%s' not available yet during startup.",
+            base_frame_.c_str(), base_frame_.c_str());
+        }
+      } else if (check_transform("gnss2_link", base_frame_)) {
         RCLCPP_INFO(get_logger(), "  [OK]      gnss2_link -> %s", base_frame_.c_str());
       } else {
         RCLCPP_WARN(get_logger(),
@@ -897,6 +952,48 @@ private:
     } catch (const tf2::TransformException&) {
       return false;
     }
+  }
+
+  bool required_startup_transforms_ready(std::string* reason = nullptr)
+  {
+    const std::string sensor_mount_frame = "base_link";
+    const std::string imu_tf_frame = imu_frame_override_.empty() ? "imu_link" : imu_frame_override_;
+
+    if (!tf_buffer_->_frameExists(base_frame_)) {
+      if (reason != nullptr) {
+        if (base_frame_ == "base_footprint" && tf_buffer_->_frameExists(sensor_mount_frame)) {
+          *reason =
+            "waiting for base_footprint -> base_link chain from robot_state_publisher/"
+            "attitude_controller";
+        } else {
+          *reason = "base frame '" + base_frame_ + "' not available yet";
+        }
+      }
+      return false;
+    }
+
+    if (!check_transform(imu_tf_frame, base_frame_, 0.05)) {
+      if (reason != nullptr) {
+        *reason = "missing transform '" + imu_tf_frame + "' -> '" + base_frame_ + "'";
+      }
+      return false;
+    }
+
+    if (!gnss_lever_arm_.is_zero() && !check_transform("gnss_link", base_frame_, 0.05)) {
+      if (reason != nullptr) {
+        *reason = "missing transform 'gnss_link' -> '" + base_frame_ + "'";
+      }
+      return false;
+    }
+
+    if (!gnss_lever_arm2_.is_zero() && !check_transform("gnss2_link", base_frame_, 0.05)) {
+      if (reason != nullptr) {
+        *reason = "missing transform 'gnss2_link' -> '" + base_frame_ + "'";
+      }
+      return false;
+    }
+
+    return true;
   }
 
   // ─── IMU callback: with frame transform ──────────────────────────────────
@@ -1099,6 +1196,17 @@ private:
     mark_sensor_received("IMU");
 
     if (pending_init_) {
+      if (wait_for_required_tf_) {
+        std::string tf_wait_reason;
+        if (!required_startup_transforms_ready(&tf_wait_reason)) {
+          RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "Waiting for required TF before FusionCore init: %s",
+            tf_wait_reason.c_str());
+          return;
+        }
+      }
+
       // Sensor wait gate: hold initialization until all expected sensors checked in.
       if (wait_for_all_sensors_ && !sensor_wait_done_) {
         if (sensors_received_ != sensors_expected_) {
@@ -2452,6 +2560,7 @@ private:
 
   // Sensor wait (#28)
   bool                     wait_for_all_sensors_ = false;
+  bool                     wait_for_required_tf_ = true;
   double                   sensor_wait_timeout_  = 10.0;
   double                   activate_time_        = 0.0;
   bool                     sensor_wait_done_     = false;
