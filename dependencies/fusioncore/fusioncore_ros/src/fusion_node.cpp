@@ -466,7 +466,7 @@ public:
     sensor_opts.callback_group = sensor_cb_group_;
 
     imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-      imu_topic_, 100,
+      imu_topic_, rclcpp::SensorDataQoS(),
       [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
         std::lock_guard<std::mutex> lock(fc_mutex_);
         imu_callback(msg);
@@ -475,7 +475,7 @@ public:
 
     if (!imu2_topic_.empty()) {
       imu2_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-        imu2_topic_, 100,
+        imu2_topic_, rclcpp::SensorDataQoS(),
         [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
           std::lock_guard<std::mutex> lock(fc_mutex_);
           imu2_callback(msg);
@@ -575,7 +575,7 @@ public:
     // This is the standard way dual antenna GPS receivers report heading in ROS.
     if (!heading_topic_.empty()) {
       gnss_heading_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-        heading_topic_, 10,
+        heading_topic_, rclcpp::SensorDataQoS(),
         [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
           std::lock_guard<std::mutex> lock(fc_mutex_);
           gnss_heading_callback(msg);
