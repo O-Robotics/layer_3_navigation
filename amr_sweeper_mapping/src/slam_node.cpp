@@ -156,8 +156,18 @@ void SlamNode::publishStatus()
   const bool tracking = have_slam_pose_;
   bool have_scan_to_base_tf = false;
   bool have_map_to_odom_tf = false;
+  bool have_base_frame = false;
+  bool have_scan_frame = false;
+
+  if (tf_buffer_._frameExists(base_frame_)) {
+    have_base_frame = true;
+  }
 
   if (have_scan_ && !last_scan_frame_id_.empty()) {
+    have_scan_frame = tf_buffer_._frameExists(last_scan_frame_id_);
+  }
+
+  if (have_scan_ && have_base_frame && have_scan_frame && !last_scan_frame_id_.empty()) {
     have_scan_to_base_tf = tf_buffer_.canTransform(
       base_frame_,
       last_scan_frame_id_,
@@ -178,6 +188,8 @@ void SlamNode::publishStatus()
     << "ready=" << (ready ? "true" : "false")
     << "; tracking=" << (tracking ? "true" : "false")
     << "; scan_tf=" << (have_scan_to_base_tf ? "true" : "false")
+    << "; base_frame=" << (have_base_frame ? "true" : "false")
+    << "; scan_frame_exists=" << (have_scan_frame ? "true" : "false")
     << "; map_tf=" << (have_map_to_odom_tf ? "true" : "false")
     << "; scan_frame=" << (last_scan_frame_id_.empty() ? "<none>" : last_scan_frame_id_)
     << "; pose_frame=" <<
