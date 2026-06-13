@@ -4,13 +4,12 @@
 
 import json
 import os
-import re
 from pathlib import Path
 import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, TimerAction
+from launch.actions import DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -87,58 +86,6 @@ def _bool_override(context: dict, key: str, default_value: bool) -> bool:
     return bool(overrides.get(key))
 
 
-def _bool_context_value(context: dict, key: str, default_value: bool) -> bool:
-    if key not in context:
-        return default_value
-    return bool(context.get(key))
-
-
-def _collected_artifacts_directory(mission_context: dict, mission_execution_directory: str) -> str:
-    collected_directory = str(mission_context.get("collected_artifacts_directory", "")).strip()
-    if collected_directory:
-        return collected_directory
-    if mission_execution_directory:
-        return str(Path(mission_execution_directory) / "artifacts")
-    return ""
-
-
-def _record_rosbag_topics_path() -> Path:
-    return (
-        Path(get_package_share_directory("amr_sweeper_layer_3_navigation_bringup")) /
-        "config" /
-        "record_rosbag.yaml"
-    )
-
-
-def _load_record_rosbag_topics() -> list[str]:
-    path = _record_rosbag_topics_path()
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8") as stream:
-        document = yaml.safe_load(stream) or {}
-    if not isinstance(document, dict):
-        return []
-    topics = document.get("topics", [])
-    if not isinstance(topics, list):
-        return []
-    normalized_topics: list[str] = []
-    for topic in topics:
-        if not isinstance(topic, str):
-            continue
-        value = topic.strip()
-        if not value:
-            continue
-        normalized_topics.append(value)
-    return normalized_topics
-
-
-def _record_rosbag_topic_regex(topics: list[str]) -> str:
-    if not topics:
-        return ""
-    escaped_topics = [re.escape(topic) for topic in topics]
-    return "^(" + "|".join(escaped_topics) + ")$"
-
-
 def _mission_requires_mapping(mission_context: dict, mapping_requested: bool) -> bool:
     if not mapping_requested:
         return False
@@ -168,7 +115,6 @@ def _build_launches(context):
     mission_type = LaunchConfiguration('mission_type').perform(context)
     mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml').perform(context)
     auto_start_mission = LaunchConfiguration('auto_start_mission').perform(context)
-    record_rosbag = LaunchConfiguration('record_rosbag').perform(context).lower() == 'true'
     use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
     test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
     mission_context = _resolve_execution_context(mission_execution_directory)
@@ -192,20 +138,11 @@ def _build_launches(context):
         'use_amr_sweeper_mapping',
         use_amr_sweeper_mapping,
     )
-    record_rosbag = _bool_context_value(
-        mission_context,
-        'record_rosbag',
-        record_rosbag,
-    )
     effective_mission_type = mission_type or mission_context.get("mission_type", "")
     effective_execution_mode = mission_context.get("execution_mode", "")
     effective_mission_file = mission_file or mission_context.get("mission_file", "")
     effective_mission_id = mission_id or mission_context.get("mission_id", "")
     effective_mission_costmap_yaml = mission_costmap_yaml or mission_context.get("mission_costmap_yaml", "")
-    effective_collected_artifacts_directory = _collected_artifacts_directory(
-        mission_context,
-        mission_execution_directory,
-    )
     navigation_launch_filename = _resolve_navigation_launch_filename(
         effective_mission_type,
         effective_execution_mode,
@@ -227,27 +164,6 @@ def _build_launches(context):
             condition=IfCondition(use_amr_sweeper_visual_odometry),
         ),
     ]
-    if record_rosbag and effective_collected_artifacts_directory:
-        rosbag_output_directory = str(Path(effective_collected_artifacts_directory) / 'rosbag')
-        rosbag_topics = _load_record_rosbag_topics()
-        rosbag_topic_regex = _record_rosbag_topic_regex(rosbag_topics)
-        os.makedirs(effective_collected_artifacts_directory, exist_ok=True)
-        if rosbag_topic_regex:
-            actions.append(
-                ExecuteProcess(
-                    cmd=[
-                        'ros2',
-                        'bag',
-                        'record',
-                        '--regex',
-                        rosbag_topic_regex,
-                        '-o',
-                        rosbag_output_directory,
-                    ],
-                    output='screen',
-                )
-            )
-
     navigation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             _launch_file('amr_sweeper_navigation', navigation_launch_filename)
@@ -410,7 +326,6 @@ def generate_launch_description():
         DeclareLaunchArgument('mission_type', default_value=''),
         DeclareLaunchArgument('mission_costmap_yaml', default_value=''),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
-        DeclareLaunchArgument('record_rosbag', default_value='false'),
         DeclareLaunchArgument('use_test', default_value='false'),
         DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
         OpaqueFunction(function=_build_launches),
