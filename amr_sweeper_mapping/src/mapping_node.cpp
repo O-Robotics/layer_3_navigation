@@ -1,4 +1,4 @@
-#include "amr_sweeper_mapping_node.hpp"
+#include "mapping_node.hpp"
 
 #include <algorithm>
 #include <array>
@@ -435,8 +435,8 @@ nlohmann::json buildSynchronizedLocalPathGeoJson(
     {"sample_count", samples.size()},
     {"sample_timestamps", sample_timestamps},
     {"point_yaws_rad", yaw_values},
-    {"position_source", "odometry/fused"},
-    {"orientation_source", "odometry/fused"}};
+    {"position_source", "localization/odometry_fused"},
+    {"orientation_source", "localization/odometry_fused"}};
   if (!geographic_companion_file.empty()) {
     properties["geographic_companion_file"] = geographic_companion_file;
   }
@@ -799,7 +799,7 @@ unsigned char Vda5050CostmapLayer::sampleCostAtWorld(const double world_x, const
 }
 
 MappingNode::MappingNode()
-: Node("amr_sweeper_mapping_node")
+: Node("mapping_node")
 {
   declare_parameter("mission_file", std::string(""));
   declare_parameter("mission_route_file", std::string(kDefaultMissionRoutePath));
@@ -893,15 +893,15 @@ MappingNode::MappingNode()
   mission_converted_ = manual_mapping_mode_;
 
   slam_status_subscription_ = create_subscription<std_msgs::msg::String>(
-    "slam/status",
+    "mapping/slam_toolbox/status",
     10,
     std::bind(&MappingNode::handleSlamStatus, this, std::placeholders::_1));
   gaussian_status_subscription_ = create_subscription<std_msgs::msg::String>(
-    "gaussian/status",
+    "mapping/gaussian/status",
     10,
     std::bind(&MappingNode::handleGaussianStatus, this, std::placeholders::_1));
   odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
-    "odometry/fused",
+    "localization/odometry_fused",
     50,
     std::bind(&MappingNode::handleOdometry, this, std::placeholders::_1));
   navsat_subscription_ = create_subscription<sensor_msgs::msg::NavSatFix>(
@@ -909,7 +909,7 @@ MappingNode::MappingNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNavSat, this, std::placeholders::_1));
   live_map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
-    "mapping/map",
+    "mapping/occupancy_grid_raw",
     rclcpp::QoS(1).reliable().transient_local(),
     std::bind(&MappingNode::handleLiveMap, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
@@ -917,7 +917,7 @@ MappingNode::MappingNode()
     "mapping/route_marker",
     rclcpp::QoS(1).reliable().transient_local());
   padded_live_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
-    "mapping/map_padded",
+    "mapping/occupancy_grid",
     rclcpp::QoS(1).reliable().transient_local());
 
   mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
@@ -1060,7 +1060,7 @@ void MappingNode::publishCoordinatorStatus()
 {
   std_msgs::msg::String message;
   message.data =
-    "amr_sweeper_mapping_node mission=" + mission_file_ +
+    "mapping_node mission=" + mission_file_ +
     "; mission_type=" + mission_type_ +
     "; execution_mode=" + execution_mode_ +
     "; route=" + mission_route_file_ +
@@ -1846,7 +1846,7 @@ void MappingNode::tryRequestMissionEnd()
   request->mission_id = mission_id_;
   request->reason = pending_end_reason_;
   request->outcome = pending_end_outcome_;
-  request->requester = "amr_sweeper_mapping_node";
+  request->requester = "mapping_node";
   request->priority = 0U;
   request->force = false;
   request->request_idling = true;

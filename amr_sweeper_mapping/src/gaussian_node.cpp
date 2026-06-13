@@ -66,7 +66,7 @@ std::size_t GaussianVoxelKeyHash::operator()(const GaussianVoxelKey & key) const
 }
 
 GaussianNode::GaussianNode()
-: Node("amr_sweeper_gaussian_node"),
+: Node("gaussian_node"),
   tf_buffer_(get_clock()),
   tf_listener_(tf_buffer_)
 {
@@ -119,8 +119,8 @@ GaussianNode::GaussianNode()
       std::bind(&GaussianNode::handleSurfaceTextureImage, this, std::placeholders::_1));
   }
   debug_pointcloud_publisher_ =
-    create_publisher<sensor_msgs::msg::PointCloud2>("gaussian/world_points", 1);
-  status_publisher_ = create_publisher<std_msgs::msg::String>("gaussian/status", 10);
+    create_publisher<sensor_msgs::msg::PointCloud2>("mapping/gaussian/world_points", 1);
+  status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/gaussian/status", 10);
 
   status_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("status_period_seconds").as_double()),
@@ -244,7 +244,7 @@ void GaussianNode::publishStatus()
 {
   std_msgs::msg::String message;
   message.data =
-    "amr_sweeper_gaussian_node ready; source_mode=" + source_mode_ +
+    "gaussian_node ready; source_mode=" + source_mode_ +
     "; world_frame=" + world_frame_ +
     "; voxels=" + std::to_string(voxels_.size()) +
     "; integrated_frames=" + std::to_string(integrated_frames_) +

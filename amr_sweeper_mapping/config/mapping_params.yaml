@@ -17,8 +17,8 @@
     base_frame:                   base_footprint   # Robot body frame used by SLAM.
 
     # -- Input topics ---------------------------------------------------------
-    fusion_pose_topic:            pose             # Fused localization pose topic inside the selected robot namespace.
-    slam_pose_topic:              slam/pose        # Remapped slam_toolbox pose topic relative to the node namespace.
+    fusion_pose_topic:            localization/pose  # Fused localization pose topic inside the selected robot namespace.
+    slam_pose_topic:              mapping/slam_toolbox/pose  # Remapped slam_toolbox pose topic relative to the node namespace.
     scan_topic:                   depth_camera/scan  # Depth-camera laserscan topic relative to the robot namespace.
 
     # -- Startup seeding ------------------------------------------------------
@@ -27,7 +27,7 @@
     status_period_seconds:        2.0              # Periodic status publication cadence.
     max_seed_publications:        5                # Stop startup seeding after this many successful seed publications.
 
-/**/amr_sweeper_gaussian_node:
+/**/gaussian_node:
   ros__parameters:
     # -- Output artifacts -----------------------------------------------------
     output_directory:              ""                               # Leave empty until a mission execution folder is injected; gaussian artifacts should stay inside per-run folders.
@@ -55,7 +55,7 @@
     debug_publish_period_seconds:  3.0
     artifact_save_period_seconds:  10.0
 
-/**/amr_sweeper_mapping_node:
+/**/mapping_node:
   ros__parameters:
     # -- Mission inputs and outputs -------------------------------------------
     mission_file:                  ""                               # Resolved launch-time mission file path. Leave empty until a mission is selected.

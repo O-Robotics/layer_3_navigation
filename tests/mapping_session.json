@@ -1,0 +1,16 @@
+{
+  "actual_path_navsat_output_file": "src/layer_3_navigation/tests/actual_path_navsat.geojson",
+  "actual_path_output_file": "src/layer_3_navigation/tests/actual_path.geojson",
+  "execution_mode": "follow_waypoints",
+  "frame_id": "odom",
+  "gaussian_mode": "voxel_gaussians",
+  "manual_drive_required": false,
+  "mission_costmap_yaml": "",
+  "mission_file": "",
+  "mission_id": "",
+  "mission_route_file": "",
+  "mission_type": "",
+  "mission_window_end": "",
+  "mission_window_start": "",
+  "slam_backend": "slam_toolbox"
+}

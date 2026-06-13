@@ -27,7 +27,7 @@ find_package(tf2_ros REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
-  src/amr_sweeper_mapping_node.cpp
+  src/mapping_node.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
@@ -92,7 +92,7 @@ ament_target_dependencies(
   tf2_ros
 )
 
-add_executable(amr_sweeper_mapping_node src/amr_sweeper_mapping_node.cpp)
+add_executable(amr_sweeper_mapping_node src/mapping_node.cpp)
 set_target_properties(amr_sweeper_mapping_node PROPERTIES OUTPUT_NAME mapping_node)
 target_compile_features(amr_sweeper_mapping_node PUBLIC cxx_std_17)
 target_include_directories(amr_sweeper_mapping_node

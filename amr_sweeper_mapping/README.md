@@ -9,8 +9,8 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 
 ## Nodes
 - `amr_sweeper_slam_node`
-- `amr_sweeper_gaussian_node`
-- `amr_sweeper_mapping_node`
+- `gaussian_node`
+- `mapping_node`
 
 ## Current Capabilities
 - Loads generated costmap artifacts from `/missions` into a Nav2 global costmap plugin.
@@ -27,7 +27,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - Calls `amr_sweeper_mission_executor/end_mission` when an autonomous routed mission finishes or aborts so the run is finalized and the FSM returns to `IDLING`.
 
 ## Runtime Structure
-- `amr_sweeper_mapping_node.cpp/.hpp` contains both the Nav2 costmap plugin and the mapping coordinator node.
+- `mapping_node.cpp/.hpp` contains both the Nav2 costmap plugin and the `mapping_node` coordinator.
 - `slam_node.cpp/.hpp` provides SLAM supervision and startup seeding for `slam_toolbox`.
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 

@@ -14,9 +14,9 @@ namespace amr_sweeper_mapping
 namespace
 {
 
-constexpr char kDefaultFusionPoseTopic[] = "/fusion/pose";
-constexpr char kDefaultSlamPoseTopic[] = "/pose";
-constexpr char kDefaultScanTopic[] = "/amr_sweeper/depth_camera/scan";
+constexpr char kDefaultFusionPoseTopic[] = "localization/pose";
+constexpr char kDefaultSlamPoseTopic[] = "mapping/slam_toolbox/pose";
+constexpr char kDefaultScanTopic[] = "depth_camera/scan";
 
 }  // namespace
 
@@ -60,9 +60,9 @@ SlamNode::SlamNode()
     rclcpp::SensorDataQoS(),
     std::bind(&SlamNode::handleScan, this, std::placeholders::_1));
   initial_pose_publisher_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-    "initialpose",
+    "navigation/slam/initialpose",
     rclcpp::QoS(10).reliable());
-  status_publisher_ = create_publisher<std_msgs::msg::String>("slam/status", 10);
+  status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/slam_toolbox/status", 10);
 
   seed_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("seed_period_seconds").as_double()),
@@ -144,7 +144,7 @@ void SlamNode::maybeSeedInitialPose()
 
   RCLCPP_INFO(
     get_logger(),
-    "Published SLAM seed pose %d/%d from FusionCore onto initialpose.",
+    "Published SLAM seed pose %d/%d from FusionCore onto navigation/slam/initialpose.",
     seed_publications_,
     max_seed_publications_);
 }

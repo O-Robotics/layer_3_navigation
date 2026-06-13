@@ -4,7 +4,7 @@ bt_navigator:
     use_sim_time:                    false                               # Use simulated clock if /clock is being published. Nav2 default is typically false on real robots.
     global_frame:                    odom                                # Built-in local missions stay entirely in odom so no map-frame corrections disturb a short sweep.
     robot_base_frame:                base_footprint                      # Robot body frame Nav2 plans and controls against. Common default is base_link.
-    odom_topic:                      odometry/fused                      # Odometry topic consumed by the navigator for robot motion estimates. Under the default namespace this resolves to /amr_sweeper/odometry/fused.
+    odom_topic:                      localization/odometry_fused         # Odometry topic consumed by the navigator for robot motion estimates. Under the default namespace this resolves to /amr_sweeper/localization/odometry_fused.
     bt_loop_duration:                100                                 # Behavior tree tick period in milliseconds. Faster than the programmed stack because these missions are short and local.
     default_server_timeout:          20                                  # Seconds to wait for BT action/service servers before timing out. Common examples often use 20 s.
     wait_for_service_timeout:        1000                                # Milliseconds to wait when connecting to required ROS services. Common default is 1000 ms.

@@ -49,7 +49,7 @@ def _rewrite_nav2_params(context) -> dict:
         'use_sim_time': use_sim_time,
         'autostart': autostart,
         'costmap_yaml_path': mission_costmap_yaml,
-        'map_topic': _qualify_topic(namespace_value, 'mapping/map_padded'),
+        'map_topic': _qualify_topic(namespace_value, 'mapping/occupancy_grid'),
     }
 
     rewritten_params_path = RewrittenYaml(
@@ -76,7 +76,7 @@ def _build_configured_params(context):
         'use_sim_time': use_sim_time,
         'autostart': autostart,
         'costmap_yaml_path': mission_costmap_yaml,
-        'map_topic': _qualify_topic(namespace_value, 'mapping/map_padded'),
+        'map_topic': _qualify_topic(namespace_value, 'mapping/occupancy_grid'),
     }
 
     return ParameterFile(
@@ -152,8 +152,11 @@ def _build_nav2_group(context):
                 respawn=use_respawn,
                 respawn_delay=2.0,
                 parameters=[configured_params],
-                remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
-                            ('odom', 'odometry/fused')]),
+                remappings=[('cmd_vel', 'navigation/cmd_vel_raw'),
+                            ('odom', 'localization/odometry_fused'),
+                            ('local_plan', 'navigation/controller_server/local_plan'),
+                            ('cost_cloud', 'navigation/controller_server/cost_cloud'),
+                            ('transition_event', 'navigation/controller_server/transition_event')]),
             Node(
                 namespace=namespace_value,
                 package='nav2_smoother',
@@ -171,7 +174,9 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[configured_params],
+                remappings=[('plan', 'navigation/planner_server/plan'),
+                            ('transition_event', 'navigation/planner_server/transition_event')],),
             Node(
                 namespace=namespace_value,
                 package='nav2_behaviors',
@@ -189,7 +194,9 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[configured_params],
+                remappings=[('goal_pose', 'navigation/bt_navigator/goal_pose'),
+                            ('transition_event', 'navigation/bt_navigator/transition_event')],),
             Node(
                 namespace=namespace_value,
                 package='nav2_waypoint_follower',
@@ -198,7 +205,8 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
+                parameters=[configured_params],
+                remappings=[('transition_event', 'navigation/waypoint_follower/transition_event')],),
             Node(
                 namespace=namespace_value,
                 package='nav2_velocity_smoother',
@@ -208,9 +216,9 @@ def _build_nav2_group(context):
                 respawn=use_respawn,
                 respawn_delay=2.0,
                 parameters=[configured_params],
-                remappings=[('cmd_vel', 'cmd_vel_nav_raw'),
-                            ('cmd_vel_smoothed', 'cmd_vel_nav'),
-                            ('odom', 'odometry/fused')]),
+                remappings=[('cmd_vel', 'navigation/cmd_vel_raw'),
+                            ('cmd_vel_smoothed', 'navigation/cmd_vel'),
+                            ('odom', 'localization/odometry_fused')]),
             Node(
                 namespace=namespace_value,
                 package='nav2_lifecycle_manager',

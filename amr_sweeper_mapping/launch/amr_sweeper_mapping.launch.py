@@ -137,10 +137,10 @@ def _build_nodes(context):
                 },
             ],
             remappings=[
-                ("/map", "mapping/map"),
-                ("/map_metadata", "mapping/map_metadata"),
+                ("/map", "mapping/occupancy_grid_raw"),
+                ("/map_metadata", "mapping/occupancy_grid_metadata_raw"),
                 ("scan", "depth_camera/scan"),
-                ("pose", "slam/pose"),
+                ("pose", "mapping/slam_toolbox/pose"),
             ],
         )
 
@@ -189,7 +189,7 @@ def _build_nodes(context):
             Node(
                 package="amr_sweeper_mapping",
                 executable="gaussian_node",
-                name="amr_sweeper_gaussian_node",
+                name="gaussian_node",
                 namespace=namespace,
                 output="screen",
                 parameters=[
@@ -207,7 +207,7 @@ def _build_nodes(context):
         Node(
             package="amr_sweeper_mapping",
             executable="mapping_node",
-            name="amr_sweeper_mapping_node",
+            name="mapping_node",
             namespace=namespace,
             output="screen",
             parameters=[params_file, common_runtime_parameters],
