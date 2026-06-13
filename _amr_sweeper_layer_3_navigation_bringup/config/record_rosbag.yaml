@@ -6,8 +6,8 @@ topics:
   - /tf_static
 
 # Layer 0 Mission and FSM topics. These provide high-level insights into the robot's intended behavior and state transitions, which are crucial for understanding the context of any issues that arise during navigation.
-  - /amr_sweeper/fsm/supervisor/fsm_state
-  - /amr_sweeper/fsm/supervisor/fsm_status
+  - /amr_sweeper/fsm/supervisor_node/fsm_state
+  - /amr_sweeper/fsm/supervisor_node/fsm_status
 
   - /amr_sweeper/safety_msgs/stop
 
