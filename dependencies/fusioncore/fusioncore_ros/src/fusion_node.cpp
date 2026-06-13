@@ -949,6 +949,20 @@ private:
       return true;
     }
 
+    if (!tf_buffer_->_frameExists(base_frame_)) {
+      if (error_message != nullptr) {
+        *error_message = "target frame not available yet";
+      }
+      return false;
+    }
+
+    if (!tf_buffer_->_frameExists(imu_frame)) {
+      if (error_message != nullptr) {
+        *error_message = "source frame not available yet";
+      }
+      return false;
+    }
+
     try {
       const auto tf_stamped = tf_buffer_->lookupTransform(
         base_frame_, imu_frame, tf2::TimePointZero);
@@ -975,6 +989,12 @@ private:
     tf2::Quaternion q_base;
     std::string error_message;
     if (!try_get_base_orientation_quaternion(msg, &q_base, &error_message)) {
+      if (
+        error_message == "target frame not available yet" ||
+        error_message == "source frame not available yet")
+      {
+        return false;
+      }
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
         "Startup orientation seed skipped during %s: %s",
