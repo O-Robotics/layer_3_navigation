@@ -380,6 +380,24 @@ private:
   };
   std::deque<ImuOrientationBufferEntry> imu_orientation_buffer_;
 
+  struct EncoderBufferEntry {
+    double timestamp;
+    double vx, vy, wz;
+    sensors::EncoderNoiseMatrix R;
+  };
+  std::deque<EncoderBufferEntry> encoder_buffer_;
+
+  struct GroundConstraintBufferEntry {
+    double timestamp;
+  };
+  std::deque<GroundConstraintBufferEntry> ground_constraint_buffer_;
+
+  struct ZuptBufferEntry {
+    double timestamp;
+    double noise_sigma;
+  };
+  std::deque<ZuptBufferEntry> zupt_buffer_;
+
   // Heading observability tracking
   bool          heading_validated_ = false;
   HeadingSource heading_source_    = HeadingSource::NONE;
