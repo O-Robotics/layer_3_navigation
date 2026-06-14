@@ -46,7 +46,6 @@
     gnss.min_fix_type:                     1               # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic:                       ""              # Optional second GNSS receiver topic; leave empty to disable.
     gnss.heading_topic:                    ""              # Disabled because yaw is fused directly from the configured IMU topic.
-    gnss.azimuth_topic:                    ""              # Optional REP-145 compass_msgs/Azimuth heading topic.
     gnss.lever_arm_x:                      0.0             # Antenna offset from base frame in meters: X forward.
     gnss.lever_arm_y:                      0.0             # Antenna offset from base frame in meters: Y left.
     gnss.lever_arm_z:                      0.199           # Antenna offset from base frame in meters: Z up.

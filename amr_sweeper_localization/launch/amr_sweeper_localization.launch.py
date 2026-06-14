@@ -58,7 +58,6 @@ def _launch_fusioncore(context, *args, **kwargs):
             use_visual_odometry, parameters.get("encoder2.topic", "visual_odometry/odom")),
         "gnss.fix2_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.fix2_topic", "")),
         "gnss.heading_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.heading_topic", "")),
-        "gnss.azimuth_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.azimuth_topic", "")),
     }
 
     node = LifecycleNode(

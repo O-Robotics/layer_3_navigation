@@ -218,8 +218,6 @@ def _build_launches(context):
             "gnss.fix2_topic": _topic_if_enabled(use_gnss, localization_parameters.get("gnss.fix2_topic", "")),
             "gnss.heading_topic": _topic_if_enabled(
                 use_gnss, localization_parameters.get("gnss.heading_topic", "")),
-            "gnss.azimuth_topic": _topic_if_enabled(
-                use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
         }
 
         fusioncore_node = LifecycleNode(

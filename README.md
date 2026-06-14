@@ -35,7 +35,9 @@ The repository also ships built-in mission assets inside `amr_sweeper_navigation
 - The default command launches the full layer 3 navigation bringup package.
 - Layer 3 depends on a running layer 1 and layer 2 stack.
 - This layer is configured for the trimmed real-robot stack only.
+- The vendored FusionCore subtree used by localization is now reduced to the two runtime packages we actually use: `fusioncore_core` and `fusioncore_ros`.
 - The localization launch now consumes `/amr_sweeper/gnss/navsat` directly because the local GNSS node publishes a compatible `NavSatFix` stream without the old bridge workaround.
+- The old `compass_msgs` / `gnss.azimuth_topic` path has been removed; optional heading aid now comes only from `gnss.heading_topic` when configured.
 - `amr_sweeper_visual_odometry` now publishes only `/amr_sweeper/visual_odometry/odom`; `amr_sweeper_localization` is the only package that launches FusionCore and it consumes that VO topic as `encoder2.topic`.
 - Nav2 runtime parameters now live in mission-class-specific files under `amr_sweeper_navigation/config/`, and the shared launcher keeps package-owned sensor topics relative so the same files work under custom robot namespaces.
 - Mission execution is disabled by default at the layer 3 entrypoints and should only be enabled by FSM `RUNNING` profiles.
