@@ -110,21 +110,37 @@ void SlamNode::maybeSeedInitialPose()
     return;
   }
 
+  const bool have_map_to_odom_tf =
+    tf_buffer_._frameExists(map_frame_) &&
+    tf_buffer_._frameExists(odom_frame_) &&
+    tf_buffer_.canTransform(
+    map_frame_,
+    odom_frame_,
+    tf2::TimePointZero,
+    tf2::durationFromSec(0.05));
+  if (have_map_to_odom_tf && have_slam_pose_) {
+    return;
+  }
+
   if (seed_publications_ >= max_seed_publications_ || !have_fusion_pose_) {
     return;
   }
 
-  geometry_msgs::msg::PoseWithCovarianceStamped initial_pose;
-  if (!buildSeedPose(initial_pose)) {
-    return;
+  if (!seed_pose_ready_) {
+    if (!buildSeedPose(frozen_seed_pose_)) {
+      return;
+    }
+    seed_pose_ready_ = true;
   }
 
+  geometry_msgs::msg::PoseWithCovarianceStamped initial_pose = frozen_seed_pose_;
+  initial_pose.header.stamp = now();
   initial_pose_publisher_->publish(initial_pose);
   ++seed_publications_;
 
   RCLCPP_INFO(
     get_logger(),
-    "Published SLAM seed pose %d/%d from FusionCore onto navigation/slam/initialpose in frame '%s'.",
+    "Published frozen SLAM seed pose %d/%d from FusionCore onto navigation/slam/initialpose in frame '%s'.",
     seed_publications_,
     max_seed_publications_,
     initial_pose.header.frame_id.c_str());
