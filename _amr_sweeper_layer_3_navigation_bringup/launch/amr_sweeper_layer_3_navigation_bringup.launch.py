@@ -65,11 +65,20 @@ def _resolve_execution_context(mission_execution_directory: str) -> dict:
     return _load_json_file(Path(mission_execution_directory) / "execution_context.json")
 
 
+def _uses_odom_only_runtime(mission_type: str, execution_mode: str) -> bool:
+    mission_type = str(mission_type).lower()
+    execution_mode = str(execution_mode).lower()
+    return (
+        mission_type in {"builtin_local_pattern", "vda5050_scheduled_mission_local"} or
+        execution_mode == "teleoperation"
+    )
+
+
 def _resolve_navigation_launch_filename(mission_type: str, execution_mode: str) -> str:
     mission_type = str(mission_type).lower()
     execution_mode = str(execution_mode).lower()
 
-    if mission_type == "builtin_local_pattern":
+    if mission_type in {"builtin_local_pattern", "vda5050_scheduled_mission_local"}:
         return "default_missions_navigation.launch.py"
     if (
         mission_type in {"builtin_manual_mapping", "builtin_teleop"} or
@@ -86,10 +95,28 @@ def _bool_override(context: dict, key: str, default_value: bool) -> bool:
     return bool(overrides.get(key))
 
 
-def _mission_requires_mapping(mission_context: dict, mapping_requested: bool) -> bool:
-    if not mapping_requested:
+def _mission_requires_mapping(
+    mission_type: str,
+    execution_mode: str,
+    mission_context: dict,
+    mapping_requested: bool,
+) -> bool:
+    del mission_context
+
+    if _uses_odom_only_runtime(mission_type, execution_mode):
         return False
-    return True
+    if str(execution_mode).lower() == "manual_mapping":
+        return True
+    if mapping_requested:
+        return True
+
+    # Programmed scheduled missions navigate in the map frame, and profile 201
+    # expects slam_toolbox to own map -> odom. Ignore stale mission overrides
+    # that would disable mapping for those runs.
+    if str(mission_type).lower() in {"vda5050_scheduled_mission", "scheduled"}:
+        return True
+
+    return False
 
 
 def _build_launches(context):
@@ -148,9 +175,21 @@ def _build_launches(context):
         effective_execution_mode,
     )
     effective_use_amr_sweeper_mapping = _mission_requires_mapping(
+        effective_mission_type,
+        effective_execution_mode,
         mission_context,
         use_amr_sweeper_mapping,
     )
+
+    if (
+        not use_amr_sweeper_mapping and
+        effective_use_amr_sweeper_mapping and
+        not _uses_odom_only_runtime(effective_mission_type, effective_execution_mode)
+    ):
+        print(
+            "Layer 3 bringup: forcing mapping on because this mission navigates in 'map' and "
+            "depends on slam_toolbox publishing map -> odom."
+        )
 
     actions = [
         IncludeLaunchDescription(

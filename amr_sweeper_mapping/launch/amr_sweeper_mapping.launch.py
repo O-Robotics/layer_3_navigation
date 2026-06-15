@@ -32,6 +32,11 @@ def _resolve_execution_context(mission_execution_directory):
     )
 
 
+def _uses_odom_only_runtime(mission_type):
+    mission_type = str(mission_type).lower()
+    return mission_type in {"builtin_local_pattern", "vda5050_scheduled_mission_local"}
+
+
 def _build_nodes(context):
     default_record_map_mission_file = str(
         Path(get_package_share_directory("amr_sweeper_navigation"))
@@ -55,7 +60,7 @@ def _build_nodes(context):
 
     mission_context = _resolve_execution_context(mission_execution_directory)
     mission_type = configured_mission_type or str(mission_context.get("mission_type", "")).lower()
-    builtin_local_pattern_mode = mission_type == "builtin_local_pattern"
+    builtin_local_pattern_mode = _uses_odom_only_runtime(mission_type)
     mission_id = configured_mission_id or mission_context.get("mission_id", "")
     mission_file = configured_mission_file or mission_context.get("mission_file", "")
     mission_route_file = mission_context.get("mission_route_file", "")

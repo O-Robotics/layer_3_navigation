@@ -175,6 +175,8 @@ public:
     declare_parameter("gnss.max_hdop",       4.0);
     declare_parameter("gnss.max_vdop",       6.0);
     declare_parameter("gnss.min_satellites", 4);
+    declare_parameter("gnss.suppress_position_while_stationary", false);
+    declare_parameter("gnss.stationary_encoder_timeout", 0.5);
     // Minimum fix type for GNSS fusion: 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
     // Note: NavSatFix status only goes up to 2 (GBAS) which maps to RTK_FIXED.
     // RTK_FLOAT (3) is unreachable via NavSatFix alone.
@@ -344,6 +346,10 @@ public:
     gnss_max_hdop_ = config.gnss.max_hdop;
     gnss_max_vdop_ = config.gnss.max_vdop;
     gnss_min_satellites_ = config.gnss.min_satellites;
+    suppress_gnss_position_while_stationary_ =
+      get_parameter("gnss.suppress_position_while_stationary").as_bool();
+    stationary_encoder_timeout_ =
+      get_parameter("gnss.stationary_encoder_timeout").as_double();
     RCLCPP_INFO(get_logger(),
                 "GNSS min_fix_type: %d (1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED)",
                 static_cast<int>(min_fix_type_));
@@ -1748,6 +1754,9 @@ private:
     const double vx = msg->twist.twist.linear.x;
     const double vy = msg->twist.twist.linear.y;
     const double wz = msg->twist.twist.angular.z;
+    last_primary_encoder_speed_ = std::sqrt(vx * vx + vy * vy);
+    last_primary_encoder_wz_ = wz;
+    last_primary_encoder_time_ = t;
 
     const bool accepted = fc_->update_encoder(t, vx, vy, wz, var_vx, var_vy, var_wz);
     if (!accepted) {
@@ -2013,6 +2022,15 @@ private:
 
     double t = rclcpp::Time(msg->header.stamp).seconds();
 
+    if (source_id == 0 && shouldSuppressGnssPositionWhileStationary(t)) {
+      RCLCPP_DEBUG_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Suppressing stationary GNSS position fusion while encoder reports standstill.");
+      return;
+    }
+
     fusioncore::sensors::LLAPoint lla;
     lla.lat_rad = msg->latitude  * M_PI / 180.0;
     lla.lon_rad = msg->longitude * M_PI / 180.0;
@@ -2207,6 +2225,25 @@ private:
         fc_status.distance_traveled,
         5.0);
     }
+  }
+
+  bool shouldSuppressGnssPositionWhileStationary(double timestamp_seconds) const
+  {
+    if (!suppress_gnss_position_while_stationary_) {
+      return false;
+    }
+    if (last_primary_encoder_time_ <= 0.0 || stationary_encoder_timeout_ <= 0.0) {
+      return false;
+    }
+
+    const double encoder_age = timestamp_seconds - last_primary_encoder_time_;
+    if (encoder_age < 0.0 || encoder_age > stationary_encoder_timeout_) {
+      return false;
+    }
+
+    return
+      last_primary_encoder_speed_ < zupt_velocity_threshold_ &&
+      std::abs(last_primary_encoder_wz_) < zupt_angular_threshold_;
   }
 
   // ─── Dual antenna heading callback ────────────────────────────────────────
@@ -2656,8 +2693,13 @@ private:
   double                            gnss_max_hdop_ = 4.0;
   double                            gnss_max_vdop_ = 6.0;
   int                               gnss_min_satellites_ = 4;
+  bool                              suppress_gnss_position_while_stationary_ = false;
+  double                            stationary_encoder_timeout_ = 0.5;
   fusioncore::sensors::GnssLeverArm gnss_lever_arm_;    // primary receiver
   fusioncore::sensors::GnssLeverArm gnss_lever_arm2_;   // secondary receiver (fix2_topic)
+  double                            last_primary_encoder_time_ = -1.0;
+  double                            last_primary_encoder_speed_ = 0.0;
+  double                            last_primary_encoder_wz_ = 0.0;
 
   // ZUPT parameters
   bool   zupt_enabled_            = true;
