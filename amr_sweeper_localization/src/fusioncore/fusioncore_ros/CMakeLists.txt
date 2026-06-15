@@ -99,4 +99,21 @@ if(BUILD_TESTING)
   target_link_libraries(test_proj_axis_order PROJ::proj)
 endif()
 
+ament_export_dependencies(
+  rosidl_default_runtime
+  rclcpp
+  rclcpp_lifecycle
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  geographic_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  eigen3_cmake_module
+  fusioncore_core
+  diagnostic_msgs
+  std_srvs
+)
+
 ament_package()
