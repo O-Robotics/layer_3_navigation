@@ -31,7 +31,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 
 ## Notes
 - REP-105 ownership in this workspace is now: FusionCore publishes `odom -> base_footprint`, and `amr_sweeper_mapping` publishes the `map -> odom` alignment used by the in-package map builder.
-- The mapping coordinator republishes the live SLAM occupancy grid on `mapping/occupancy_grid` in `map` and publishes `mapping/occupancy_grid_local` as a rolling 10x10 m odom-frame view for local planning.
+- The mapping coordinator republishes the live occupancy grid on `mapping/occupancy_grid` in `map` and publishes matching metadata on `mapping/occupancy_grid_metadata`.
 - The required runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
 - The mission route and mission costmap must come from that execution folder's `execution_context.json`, not from shared top-level alias files.
 - `auto_start_mission` defaults to `false`; FSM `RUNNING` profiles are expected to enable it explicitly when mission execution is intended.

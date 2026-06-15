@@ -125,15 +125,13 @@ public:
 
 private:
   void handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message);
-  void handleGaussianStatus(const std_msgs::msg::String::SharedPtr message);
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void publishCoordinatorStatus();
-  void publishMapBuilderStatus();
+  [[nodiscard]] std::string composeMapBuilderStatus() const;
   void tickMissionExecution();
   void tryRequestMissionEnd();
   void publishMapAlignmentTransform();
-  void publishLocalRollingMap();
   void integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan & message);
   void ensureMissionLoaded();
   void convertMissionRoute();
@@ -154,8 +152,6 @@ private:
   [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> buildPoseSequence(
     const std::vector<MissionCoordinate> & coordinates) const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(const nav_msgs::msg::OccupancyGrid & message);
-  [[nodiscard]] nav_msgs::msg::OccupancyGrid buildLocalRollingMap(
-    const nav_msgs::msg::OccupancyGrid & source_map) const;
   void initializeGlobalMap(const geometry_msgs::msg::Point & center);
   void expandGlobalMapToFit(
     double min_x,
@@ -195,7 +191,6 @@ private:
   std::string navsat_topic_;
   std::string scan_topic_;
   std::string seeded_map_frame_id_;
-  std::string map_builder_status_topic_{"mapping/map_builder/status"};
   std::string fromll_service_name_;
   std::string end_mission_service_name_;
   std::string waypoint_follower_state_service_name_;
@@ -221,12 +216,10 @@ private:
   std::vector<geometry_msgs::msg::Point> traveled_path_points_;
   std::vector<std::vector<geometry_msgs::msg::PoseStamped>> mission_chunks_;
   std::string last_map_builder_status_{"unavailable"};
-  std::string last_gaussian_status_{"unavailable"};
   bool pad_live_map_to_minimum_size_{true};
   double min_global_map_size_m_{10.0};
   bool live_map_ready_{false};
   bool latest_padded_live_map_ready_{false};
-  bool latest_local_live_map_ready_{false};
   bool latest_odometry_pose_ready_{false};
   bool mission_anchor_pose_ready_{false};
   bool padded_live_map_bounds_ready_{false};
@@ -249,16 +242,12 @@ private:
   std::optional<RawNavSatSample> latest_raw_navsat_sample_;
   std::vector<SynchronizedPathSample> synchronized_path_samples_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr map_builder_status_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr raw_live_map_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::MapMetaData>::SharedPtr raw_live_map_metadata_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr live_map_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::MapMetaData>::SharedPtr live_map_metadata_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr route_marker_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr padded_live_map_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_live_map_publisher_;
   rclcpp::CallbackGroup::SharedPtr mission_callback_group_;
   rclcpp::CallbackGroup::SharedPtr status_callback_group_;
   rclcpp::TimerBase::SharedPtr status_timer_;

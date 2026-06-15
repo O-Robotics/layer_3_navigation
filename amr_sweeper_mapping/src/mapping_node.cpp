@@ -42,7 +42,6 @@ constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
 constexpr char kDefaultNavSatTopic[] = "gnss/navsat";
 constexpr char kDefaultScanTopic[] = "depth_camera/scan";
-constexpr char kDefaultMapBuilderStatusTopic[] = "mapping/map_builder/status";
 
 struct LocalPoint
 {
@@ -786,7 +785,6 @@ MappingNode::MappingNode()
   declare_parameter("navsat_topic", std::string(kDefaultNavSatTopic));
   declare_parameter("scan_topic", std::string(kDefaultScanTopic));
   declare_parameter("seeded_map_frame", std::string("map"));
-  declare_parameter("map_builder_status_topic", std::string(kDefaultMapBuilderStatusTopic));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("auto_start_mission", true);
   declare_parameter("repeat_mission", false);
@@ -825,7 +823,6 @@ MappingNode::MappingNode()
   navsat_topic_ = get_parameter("navsat_topic").as_string();
   scan_topic_ = get_parameter("scan_topic").as_string();
   seeded_map_frame_id_ = get_parameter("seeded_map_frame").as_string();
-  map_builder_status_topic_ = get_parameter("map_builder_status_topic").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
   waypoint_follower_state_service_name_ =
@@ -865,10 +862,6 @@ MappingNode::MappingNode()
     scan_topic_,
     rclcpp::SensorDataQoS(),
     std::bind(&MappingNode::handleScan, this, std::placeholders::_1));
-  gaussian_status_subscription_ = create_subscription<std_msgs::msg::String>(
-    "mapping/gaussian/status",
-    10,
-    std::bind(&MappingNode::handleGaussianStatus, this, std::placeholders::_1));
   odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
     "localization/odometry_fused",
     50,
@@ -878,21 +871,14 @@ MappingNode::MappingNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNavSat, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
-  map_builder_status_publisher_ = create_publisher<std_msgs::msg::String>(map_builder_status_topic_, 10);
-  raw_live_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
-    "mapping/occupancy_grid_raw",
+  live_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+    "mapping/occupancy_grid",
     rclcpp::QoS(1).reliable().transient_local());
-  raw_live_map_metadata_publisher_ = create_publisher<nav_msgs::msg::MapMetaData>(
-    "mapping/occupancy_grid_metadata_raw",
+  live_map_metadata_publisher_ = create_publisher<nav_msgs::msg::MapMetaData>(
+    "mapping/occupancy_grid_metadata",
     rclcpp::QoS(1).reliable().transient_local());
   route_marker_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
     "mapping/route_marker",
-    rclcpp::QoS(1).reliable().transient_local());
-  padded_live_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
-    "mapping/occupancy_grid",
-    rclcpp::QoS(1).reliable().transient_local());
-  local_live_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
-    "mapping/occupancy_grid_local",
     rclcpp::QoS(1).reliable().transient_local());
 
   mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
@@ -922,10 +908,7 @@ MappingNode::MappingNode()
 
   status_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("status_period_seconds").as_double()),
-    [this]() {
-      publishCoordinatorStatus();
-      publishMapBuilderStatus();
-    },
+    std::bind(&MappingNode::publishCoordinatorStatus, this),
     status_callback_group_);
   mission_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("mission_tick_period_seconds").as_double()),
@@ -960,11 +943,6 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
   if (latest_odometry_pose_ready_) {
     integrateScanIntoGlobalMap(*message);
   }
-}
-
-void MappingNode::handleGaussianStatus(const std_msgs::msg::String::SharedPtr message)
-{
-  last_gaussian_status_ = message->data;
 }
 
 void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message)
@@ -1009,9 +987,6 @@ void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
     writeActualPathArtifact();
     writeActualPathNavSatArtifact();
   }
-  if (live_map_ready_) {
-    publishLocalRollingMap();
-  }
 }
 
 void MappingNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message)
@@ -1031,38 +1006,8 @@ void MappingNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
   latest_raw_navsat_sample_ = sample;
 }
 
-void MappingNode::publishCoordinatorStatus()
+std::string MappingNode::composeMapBuilderStatus() const
 {
-  std_msgs::msg::String message;
-  message.data =
-    "mapping_node mission=" + mission_file_ +
-    "; mission_type=" + mission_type_ +
-    "; execution_mode=" + execution_mode_ +
-    "; route=" + mission_route_file_ +
-    "; mission_id=" + mission_id_ +
-    "; mission_output_directory=" + mission_output_directory_ +
-    "; mission_costmap_yaml=" + mission_costmap_yaml_ +
-    "; mission_window_start=" + mission_window_start_ +
-    "; mission_window_end=" + mission_window_end_ +
-    "; slam_backend=" + slam_backend_ +
-    "; gaussian_mode=" + gaussian_mode_ +
-    "; seeded_map_to_odom=" + std::string(publish_seeded_map_to_odom_ ? "true" : "false") +
-    "; global_resolution=" + std::to_string(global_map_resolution_m_) +
-    "; global_map_ready=" + std::string(latest_padded_live_map_ready_ ? "true" : "false") +
-    "; local_map_ready=" + std::string(latest_local_live_map_ready_ ? "true" : "false") +
-    "; mission_loaded=" + std::string(mission_loaded_ ? "true" : "false") +
-    "; mission_converted=" + std::string(mission_converted_ ? "true" : "false") +
-    "; mission_active=" + std::string(mission_active_ ? "true" : "false") +
-    "; mission_completed=" + std::string(mission_completed_ ? "true" : "false") +
-    "; active_chunk=" + std::to_string(active_chunk_index_) + "/" + std::to_string(mission_chunks_.size()) +
-    "; map_builder_status=" + last_map_builder_status_ +
-    "; gaussian_status=" + last_gaussian_status_;
-  status_publisher_->publish(message);
-}
-
-void MappingNode::publishMapBuilderStatus()
-{
-  std_msgs::msg::String message;
   const bool ready = have_scan_ && latest_odometry_pose_ready_;
   const bool have_global_map = latest_live_map_.info.width > 0U && latest_live_map_.info.height > 0U;
   bool have_scan_to_base_tf = false;
@@ -1105,9 +1050,35 @@ void MappingNode::publishMapBuilderStatus()
     << "; global_map=" << (have_global_map ? "true" : "false")
     << "; scan_frame=" << (last_scan_frame_id_.empty() ? "<none>" : last_scan_frame_id_)
     << "; pose_frame=" << (latest_odometry_pose_ready_ ? odom_frame_id_ : "<none>");
-  message.data = stream.str();
-  last_map_builder_status_ = message.data;
-  map_builder_status_publisher_->publish(message);
+  return stream.str();
+}
+
+void MappingNode::publishCoordinatorStatus()
+{
+  last_map_builder_status_ = composeMapBuilderStatus();
+  std_msgs::msg::String message;
+  message.data =
+    "mapping_node mission=" + mission_file_ +
+    "; mission_type=" + mission_type_ +
+    "; execution_mode=" + execution_mode_ +
+    "; route=" + mission_route_file_ +
+    "; mission_id=" + mission_id_ +
+    "; mission_output_directory=" + mission_output_directory_ +
+    "; mission_costmap_yaml=" + mission_costmap_yaml_ +
+    "; mission_window_start=" + mission_window_start_ +
+    "; mission_window_end=" + mission_window_end_ +
+    "; slam_backend=" + slam_backend_ +
+    "; gaussian_mode=" + gaussian_mode_ +
+    "; seeded_map_to_odom=" + std::string(publish_seeded_map_to_odom_ ? "true" : "false") +
+    "; global_resolution=" + std::to_string(global_map_resolution_m_) +
+    "; global_map_ready=" + std::string(latest_padded_live_map_ready_ ? "true" : "false") +
+    "; mission_loaded=" + std::string(mission_loaded_ ? "true" : "false") +
+    "; mission_converted=" + std::string(mission_converted_ ? "true" : "false") +
+    "; mission_active=" + std::string(mission_active_ ? "true" : "false") +
+    "; mission_completed=" + std::string(mission_completed_ ? "true" : "false") +
+    "; active_chunk=" + std::to_string(active_chunk_index_) + "/" + std::to_string(mission_chunks_.size()) +
+    "; map_builder_status=" + last_map_builder_status_;
+  status_publisher_->publish(message);
 }
 
 void MappingNode::writeMissionSessionMetadata() const
@@ -1165,21 +1136,6 @@ void MappingNode::publishMapAlignmentTransform()
         map_frame_id_,
         odom_frame_id_));
   }
-}
-
-void MappingNode::publishLocalRollingMap()
-{
-  if (!latest_odometry_pose_ready_ || latest_live_map_.info.width == 0U || latest_live_map_.info.height == 0U) {
-    return;
-  }
-
-  const nav_msgs::msg::OccupancyGrid local_map = buildLocalRollingMap(latest_live_map_);
-  if (local_map.info.width == 0U || local_map.info.height == 0U) {
-    return;
-  }
-
-  latest_local_live_map_ready_ = true;
-  local_live_map_publisher_->publish(local_map);
 }
 
 void MappingNode::integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan & message)
@@ -2310,109 +2266,15 @@ void MappingNode::publishGlobalMaps()
 
   latest_live_map_.header.stamp = now();
   latest_live_map_.info.map_load_time = latest_live_map_.header.stamp;
-  raw_live_map_publisher_->publish(latest_live_map_);
-  raw_live_map_metadata_publisher_->publish(latest_live_map_.info);
 
   latest_padded_live_map_ = padLiveMap(latest_live_map_);
   if (latest_padded_live_map_.info.width == 0U || latest_padded_live_map_.info.height == 0U) {
     return;
   }
   latest_padded_live_map_ready_ = true;
-  padded_live_map_publisher_->publish(latest_padded_live_map_);
+  live_map_publisher_->publish(latest_padded_live_map_);
+  live_map_metadata_publisher_->publish(latest_padded_live_map_.info);
   live_map_ready_ = true;
-  publishLocalRollingMap();
-}
-
-nav_msgs::msg::OccupancyGrid MappingNode::buildLocalRollingMap(
-  const nav_msgs::msg::OccupancyGrid & source_map) const
-{
-  nav_msgs::msg::OccupancyGrid local_map;
-  const double resolution = static_cast<double>(source_map.info.resolution);
-  if (resolution <= 0.0 || local_map_size_m_ <= 0.0 || !latest_odometry_pose_ready_) {
-    return local_map;
-  }
-
-  geometry_msgs::msg::TransformStamped source_from_odom;
-  try {
-    source_from_odom = tf_buffer_->lookupTransform(
-      source_map.header.frame_id,
-      odom_frame_id_,
-      tf2::TimePointZero,
-      tf2::durationFromSec(0.05));
-  } catch (const tf2::TransformException & exception) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      3000,
-      "Unable to build local rolling occupancy map from %s into %s: %s",
-      source_map.header.frame_id.c_str(),
-      odom_frame_id_.c_str(),
-      exception.what());
-    return nav_msgs::msg::OccupancyGrid{};
-  }
-
-  const uint32_t width_cells = static_cast<uint32_t>(
-    std::max(1.0, std::ceil(local_map_size_m_ / resolution)));
-  const uint32_t height_cells = static_cast<uint32_t>(
-    std::max(1.0, std::ceil(local_map_size_m_ / resolution)));
-  const double width_m = static_cast<double>(width_cells) * resolution;
-  const double height_m = static_cast<double>(height_cells) * resolution;
-  const double origin_x = latest_odometry_position_.x - width_m * 0.5;
-  const double origin_y = latest_odometry_position_.y - height_m * 0.5;
-
-  local_map.header.stamp = now();
-  local_map.header.frame_id = odom_frame_id_;
-  local_map.info.map_load_time = local_map.header.stamp;
-  local_map.info.resolution = source_map.info.resolution;
-  local_map.info.width = width_cells;
-  local_map.info.height = height_cells;
-  local_map.info.origin.position.x = origin_x;
-  local_map.info.origin.position.y = origin_y;
-  local_map.info.origin.position.z = 0.0;
-  local_map.info.origin.orientation.w = 1.0;
-  local_map.data.assign(static_cast<std::size_t>(width_cells) * height_cells, -1);
-
-  const double source_min_x = source_map.info.origin.position.x;
-  const double source_min_y = source_map.info.origin.position.y;
-  const double source_max_x =
-    source_min_x + static_cast<double>(source_map.info.width) * resolution;
-  const double source_max_y =
-    source_min_y + static_cast<double>(source_map.info.height) * resolution;
-
-  for (uint32_t row = 0U; row < height_cells; ++row) {
-    for (uint32_t col = 0U; col < width_cells; ++col) {
-      geometry_msgs::msg::PointStamped odom_point;
-      odom_point.header.frame_id = odom_frame_id_;
-      odom_point.point.x = origin_x + (static_cast<double>(col) + 0.5) * resolution;
-      odom_point.point.y = origin_y + (static_cast<double>(row) + 0.5) * resolution;
-      odom_point.point.z = 0.0;
-
-      geometry_msgs::msg::PointStamped source_point;
-      tf2::doTransform(odom_point, source_point, source_from_odom);
-      if (
-        source_point.point.x < source_min_x || source_point.point.x >= source_max_x ||
-        source_point.point.y < source_min_y || source_point.point.y >= source_max_y)
-      {
-        continue;
-      }
-
-      const uint32_t source_col = static_cast<uint32_t>(
-        (source_point.point.x - source_min_x) / resolution);
-      const uint32_t source_row = static_cast<uint32_t>(
-        (source_point.point.y - source_min_y) / resolution);
-      if (source_col >= source_map.info.width || source_row >= source_map.info.height) {
-        continue;
-      }
-
-      const std::size_t source_index =
-        static_cast<std::size_t>(source_row) * source_map.info.width + source_col;
-      const std::size_t destination_index =
-        static_cast<std::size_t>(row) * width_cells + col;
-      local_map.data.at(destination_index) = source_map.data.at(source_index);
-    }
-  }
-
-  return local_map;
 }
 
 std::vector<std::vector<geometry_msgs::msg::PoseStamped>> MappingNode::chunkRoute(

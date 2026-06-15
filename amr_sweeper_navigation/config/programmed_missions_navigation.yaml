@@ -109,10 +109,10 @@ local_costmap:
 
       # -- Rolling occupancy layer --------------------------------------------
       static_layer:
-        plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the mapping coordinator's rolling odom-frame occupancy grid.
-        map_topic:                   mapping/occupancy_grid_local         # 10x10 m rolling occupancy grid published by amr_sweeper_mapping in odom.
+        plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the mapping coordinator's shared occupancy grid feed.
+        map_topic:                   mapping/occupancy_grid               # The mapping coordinator now publishes one stable occupancy-grid topic for both global and local consumers.
         map_subscribe_transient_local: false                              # Subscribe with normal durability so the layer stays compatible with the live republisher.
-        subscribe_to_updates:        false                                # The local rolling occupancy grid is republished as full OccupancyGrid messages.
+        subscribe_to_updates:        false                                # The occupancy grid is republished as full OccupancyGrid messages.
 
       # -- Inflation layer -----------------------------------------------------
       inflation_layer:
