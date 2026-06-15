@@ -9,12 +9,10 @@
 
 #include <amr_sweeper_mission_executor/srv/end_mission.hpp>
 #include <fusioncore_ros/srv/from_ll.hpp>
-#include <fusioncore_ros/srv/get_datum.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
-#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
-#include <geographic_msgs/msg/geo_point.hpp>
 #include <lifecycle_msgs/srv/get_state.hpp>
+#include <nav_msgs/msg/map_meta_data.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav2_costmap_2d/costmap_layer.hpp>
@@ -127,21 +125,20 @@ public:
 
 private:
   void handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message);
-  void handleSlamPose(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message);
   void handleGaussianStatus(const std_msgs::msg::String::SharedPtr message);
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
-  void handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishCoordinatorStatus();
-  void publishSlamStatus();
+  void publishMapBuilderStatus();
   void tickMissionExecution();
   void tryRequestMissionEnd();
-  void publishEarthToMapTransform();
+  void publishMapAlignmentTransform();
+  void publishLocalRollingMap();
+  void integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan & message);
   void ensureMissionLoaded();
   void convertMissionRoute();
   void startNextMissionChunk();
   [[nodiscard]] bool isWaypointFollowerActive();
-  [[nodiscard]] bool refreshFusionDatum();
   void handleGoalResponse(
     rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::SharedPtr goal_handle);
   void handleGoalResult(
@@ -156,8 +153,24 @@ private:
   [[nodiscard]] std::vector<MissionCoordinate> loadRouteCoordinates(const std::string & path) const;
   [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> buildPoseSequence(
     const std::vector<MissionCoordinate> & coordinates) const;
-  [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(
-    const nav_msgs::msg::OccupancyGrid & message);
+  [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(const nav_msgs::msg::OccupancyGrid & message);
+  [[nodiscard]] nav_msgs::msg::OccupancyGrid buildLocalRollingMap(
+    const nav_msgs::msg::OccupancyGrid & source_map) const;
+  void initializeGlobalMap(const geometry_msgs::msg::Point & center);
+  void expandGlobalMapToFit(
+    double min_x,
+    double min_y,
+    double max_x,
+    double max_y);
+  [[nodiscard]] bool worldToGrid(
+    const nav_msgs::msg::OccupancyGrid & map,
+    double world_x,
+    double world_y,
+    int & grid_x,
+    int & grid_y) const;
+  void markCellFree(int grid_x, int grid_y);
+  void markCellOccupied(int grid_x, int grid_y);
+  void publishGlobalMaps();
   [[nodiscard]] std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunkRoute(
     const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   void markMissionTerminal(const std::string & outcome, const std::string & reason);
@@ -176,23 +189,19 @@ private:
   std::string mission_window_start_;
   std::string mission_window_end_;
   std::string frame_id_;
-  std::string earth_frame_id_;
   std::string map_frame_id_;
   std::string odom_frame_id_;
   std::string base_frame_;
   std::string navsat_topic_;
-  std::string slam_pose_topic_;
   std::string scan_topic_;
   std::string seeded_map_frame_id_;
+  std::string map_builder_status_topic_{"mapping/map_builder/status"};
   std::string fromll_service_name_;
-  std::string datum_service_name_;
   std::string end_mission_service_name_;
   std::string waypoint_follower_state_service_name_;
   bool auto_start_mission_{true};
   bool repeat_mission_{false};
-  bool publish_earth_to_map_{true};
   bool publish_seeded_map_to_odom_{false};
-  bool earth_to_map_planar_only_{true};
   bool manual_mapping_mode_{false};
   bool mission_loaded_{false};
   bool mission_converted_{false};
@@ -203,25 +212,25 @@ private:
   bool mission_end_pending_{false};
   std::size_t active_chunk_index_{0U};
   int max_segments_per_goal_{4};
+  double global_map_resolution_m_{0.05};
+  double local_map_size_m_{10.0};
   double max_waypoint_spacing_m_{0.5};
   std::string pending_end_outcome_{"completed"};
   std::string pending_end_reason_;
   std::vector<geometry_msgs::msg::PoseStamped> mission_route_;
   std::vector<geometry_msgs::msg::Point> traveled_path_points_;
   std::vector<std::vector<geometry_msgs::msg::PoseStamped>> mission_chunks_;
-  std::string last_slam_status_{"unavailable"};
+  std::string last_map_builder_status_{"unavailable"};
   std::string last_gaussian_status_{"unavailable"};
-  geographic_msgs::msg::GeoPoint fusion_datum_;
-  bool fusion_datum_ready_{false};
   bool pad_live_map_to_minimum_size_{true};
   double min_global_map_size_m_{10.0};
   bool live_map_ready_{false};
   bool latest_padded_live_map_ready_{false};
+  bool latest_local_live_map_ready_{false};
   bool latest_odometry_pose_ready_{false};
   bool mission_anchor_pose_ready_{false};
   bool padded_live_map_bounds_ready_{false};
   bool have_scan_{false};
-  bool have_slam_pose_{false};
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   geometry_msgs::msg::Point mission_anchor_position_;
@@ -231,29 +240,31 @@ private:
   double padded_live_map_min_y_{0.0};
   double padded_live_map_max_x_{0.0};
   double padded_live_map_max_y_{0.0};
+  std::vector<int16_t> global_map_scores_;
+  std::vector<uint16_t> global_map_observations_;
+  nav_msgs::msg::OccupancyGrid latest_live_map_;
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
-  rclcpp::Time last_slam_pose_time_{0, 0, RCL_ROS_TIME};
   mutable std::mutex synchronized_path_mutex_;
   std::optional<RawNavSatSample> latest_raw_navsat_sample_;
   std::vector<SynchronizedPathSample> synchronized_path_samples_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr slam_pose_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr live_map_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr slam_status_publisher_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr map_builder_status_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr raw_live_map_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::MapMetaData>::SharedPtr raw_live_map_metadata_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr route_marker_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr padded_live_map_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_live_map_publisher_;
   rclcpp::CallbackGroup::SharedPtr mission_callback_group_;
   rclcpp::CallbackGroup::SharedPtr status_callback_group_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr mission_timer_;
-  rclcpp::TimerBase::SharedPtr earth_to_map_timer_;
+  rclcpp::TimerBase::SharedPtr map_alignment_timer_;
   rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;
-  rclcpp::Client<fusioncore_ros::srv::GetDatum>::SharedPtr datum_client_;
   rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedPtr end_mission_client_;
   rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr waypoint_follower_state_client_;
   rclcpp_action::Client<nav2_msgs::action::FollowWaypoints>::SharedPtr follow_waypoints_client_;

@@ -111,7 +111,8 @@ def _mission_requires_mapping(
         return True
 
     # Programmed scheduled missions navigate in the map frame, and profile 201
-    # expects slam_toolbox to own map -> odom. Ignore stale mission overrides
+    # expects the mapping package to own map construction and map -> odom.
+    # Ignore stale mission overrides
     # that would disable mapping for those runs.
     if str(mission_type).lower() in {"vda5050_scheduled_mission", "scheduled"}:
         return True
@@ -188,7 +189,7 @@ def _build_launches(context):
     ):
         print(
             "Layer 3 bringup: forcing mapping on because this mission navigates in 'map' and "
-            "depends on slam_toolbox publishing map -> odom."
+            "depends on amr_sweeper_mapping publishing map -> odom."
         )
 
     actions = [

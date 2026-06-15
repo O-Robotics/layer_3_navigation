@@ -14,7 +14,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 ## Current Capabilities
 - Loads generated costmap artifacts from `/missions` into a Nav2 global costmap plugin.
 - Converts generated mission routes through FusionCore `/fromLL` and executes them with Nav2 `follow_waypoints`.
-- Publishes REP-105 `earth -> map` from the FusionCore GNSS datum and the live SLAM `map -> odom` correction, so the `map` frame stays georeferenced while Nav2 continues to plan in `map` and control in `odom`.
+- Keeps the live SLAM global occupancy grid in `map` and republishes a rolling 10x10 m local occupancy grid in `odom` for local planning.
 - Supports mission route GeoJSON features tagged with `properties.coordinate_frame: "odom"` or `"local"` so small built-in sweep patterns can run directly in the local navigation frame.
 - Rewrites builtin local-pattern run-folder route artifacts into `odom` once they are anchored at mission start, so the saved planned path can be compared directly against `actual_path.geojson`.
 - Writes synchronized runtime trace artifacts where each `actual_path.geojson` odom sample has a matching raw-`gnss/navsat` point in `actual_path_navsat.geojson`, along with per-sample timestamps and odom yaw values.
@@ -26,12 +26,12 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - Calls `amr_sweeper_mission_executor/end_mission` when an autonomous routed mission finishes or aborts so the run is finalized and the FSM returns to `IDLING`.
 
 ## Runtime Structure
-- `mapping_node.cpp/.hpp` contains the Nav2 costmap plugin, the `mapping_node` coordinator, and the SLAM supervision/startup-seeding logic for `slam_toolbox`.
+- `mapping_node.cpp/.hpp` contains the Nav2 costmap plugin, the `mapping_node` coordinator, and the in-package occupancy-grid map builder.
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
-- REP-105 ownership in this workspace is now: FusionCore publishes `odom -> base_footprint`, slam_toolbox publishes `map -> odom`, and `amr_sweeper_mapping` publishes `earth -> map`.
-- The REP-105 georeference path assumes FusionCore is configured for a local ENU frame at the selected GNSS datum, which is the current workspace default (`output.convert_to_enu_at_reference: true`).
+- REP-105 ownership in this workspace is now: FusionCore publishes `odom -> base_footprint`, and `amr_sweeper_mapping` publishes the `map -> odom` alignment used by the in-package map builder.
+- The mapping coordinator republishes the live SLAM occupancy grid on `mapping/occupancy_grid` in `map` and publishes `mapping/occupancy_grid_local` as a rolling 10x10 m odom-frame view for local planning.
 - The required runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
 - The mission route and mission costmap must come from that execution folder's `execution_context.json`, not from shared top-level alias files.
 - `auto_start_mission` defaults to `false`; FSM `RUNNING` profiles are expected to enable it explicitly when mission execution is intended.

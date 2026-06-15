@@ -68,10 +68,9 @@ topics:
   - /amr_sweeper/mapping/occupancy_grid_raw
   - /amr_sweeper/mapping/occupancy_grid_metadata_raw
   - /amr_sweeper/mapping/occupancy_grid
+  - /amr_sweeper/mapping/occupancy_grid_local
   - /amr_sweeper/mapping/route_marker
-  - /amr_sweeper/mapping/slam_toolbox/pose
-  - /amr_sweeper/mapping/slam_toolbox/status
-  - /amr_sweeper/mapping/slam_toolbox/transition_event
+  - /amr_sweeper/mapping/map_builder/status
   - /amr_sweeper/mapping/status
 
   - /amr_sweeper/navigation/bt_navigator/goal_pose

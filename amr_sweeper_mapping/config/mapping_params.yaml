@@ -49,22 +49,19 @@
     mission_window_end:            ""
 
     # -- Mapping runtime ------------------------------------------------------
-    slam_backend:                  slam_toolbox
+    slam_backend:                  map_builder
     gaussian_mode:                 voxel_gaussians
     frame_id:                      odom                             # Route and marker frame used for mission execution. Keep this in odom because FusionCore /fromLL returns local ENU coordinates in the odom frame.
-    earth_frame:                   earth                            # REP-105 global earth frame (ECEF parent for a georeferenced map).
     map_frame:                     map                              # REP-105 global map frame produced by SLAM and consumed by Nav2 global planning.
     odom_frame:                    odom                             # REP-105 continuous local frame produced by FusionCore.
-    base_frame:                    base_footprint                   # Robot body frame used by slam_toolbox readiness checks.
-    slam_pose_topic:               mapping/slam_toolbox/pose        # Remapped slam_toolbox pose topic relative to the node namespace.
+    base_frame:                    base_footprint                   # Robot body frame used by the in-package scan map builder readiness checks.
     scan_topic:                    depth_camera/scan                # Depth-camera laserscan topic relative to the robot namespace.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
-    datum_service:                 /get_datum                       # FusionCore service exposing the chosen GNSS datum used to anchor earth -> map.
-    publish_earth_to_map:          true                             # Publish REP-105 earth -> map from the FusionCore datum and the live slam_toolbox map -> odom correction.
-    earth_to_map_planar_only:      true                             # Keep earth -> map strictly 2D for Nav2 by dropping roll/pitch tilt from the geodetic anchor.
-    earth_to_map_publish_period_seconds: 0.5                        # Keep the georeference updated as SLAM refines map -> odom.
+    map_alignment_publish_period_seconds: 0.5                        # When odom-only runtime mode is enabled, keep the optional identity map -> odom alignment refreshed.
+    global_map_resolution_m:       0.05                             # Resolution of the in-package global occupancy-grid map builder.
+    local_map_size_m:              10.0                             # Publish a rolling 10x10 m local occupancy map in odom, centered on /localization/odometry_fused.
     follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
-    pad_live_map_to_minimum_size:  true                             # Republish the live slam_toolbox occupancy grid with a minimum square footprint so short default missions are plan-able immediately.
+    pad_live_map_to_minimum_size:  true                             # Republish the live global occupancy grid with a minimum square footprint so short default missions are plan-able immediately.
     min_global_map_size_m:         10.0                             # Minimum width/height of the republished live map in meters before Nav2 sees it.
 
     # -- Mission execution policy ---------------------------------------------

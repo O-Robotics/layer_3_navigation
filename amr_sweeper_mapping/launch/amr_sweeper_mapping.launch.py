@@ -7,14 +7,11 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 	
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler, TimerAction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import LifecycleNode, Node
-from launch_ros.event_handlers import OnStateTransition
-from launch_ros.events.lifecycle import ChangeState
+from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
-from lifecycle_msgs.msg import Transition
 
 
 def _load_json_file(path):
@@ -48,7 +45,6 @@ def _build_nodes(context):
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
     params_file = LaunchConfiguration("mapping_params_file").perform(context)
-    slam_params_file = LaunchConfiguration("slam_params_file").perform(context)
     mission_execution_directory = LaunchConfiguration("mission_execution_directory").perform(context)
     configured_mission_file = LaunchConfiguration("mission_file").perform(context)
     configured_mission_id = LaunchConfiguration("mission_id").perform(context)
@@ -101,7 +97,6 @@ def _build_nodes(context):
         "auto_start_mission": auto_start_mission,
     }
     if builtin_local_pattern_mode:
-        common_runtime_parameters["publish_earth_to_map"] = False
         common_runtime_parameters["map_frame"] = "odom"
         common_runtime_parameters["pad_live_map_to_minimum_size"] = False
         common_runtime_parameters["publish_seeded_map_to_odom"] = True
@@ -125,64 +120,9 @@ def _build_nodes(context):
     if mission_window_end:
         common_runtime_parameters["mission_window_end"] = mission_window_end
 
-    slam_toolbox_node = LifecycleNode(
-            package="slam_toolbox",
-            executable="async_slam_toolbox_node",
-            name="slam_toolbox",
-            namespace=namespace,
-            output="screen",
-            parameters=[
-                slam_params_file,
-                {
-                    "use_sim_time": use_sim_time,
-                    "odom_frame": "odom",
-                    "map_frame": "map",
-                    "base_frame": "base_footprint",
-                    "scan_topic": "depth_camera/scan",
-                },
-            ],
-            remappings=[
-                ("/map", "mapping/occupancy_grid_raw"),
-                ("/map_metadata", "mapping/occupancy_grid_metadata_raw"),
-                ("scan", "depth_camera/scan"),
-                ("pose", "mapping/slam_toolbox/pose"),
-            ],
-        )
-
-    configure_slam_toolbox = TimerAction(
-        period=2.0,
-        actions=[
-            EmitEvent(
-                event=ChangeState(
-                    lifecycle_node_matcher=lambda action: action is slam_toolbox_node,
-                    transition_id=Transition.TRANSITION_CONFIGURE,
-                )
-            )
-        ],
-    )
-
-    activate_slam_toolbox = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=slam_toolbox_node,
-            start_state="configuring",
-            goal_state="inactive",
-            entities=[
-                EmitEvent(
-                    event=ChangeState(
-                        lifecycle_node_matcher=lambda action: action is slam_toolbox_node,
-                        transition_id=Transition.TRANSITION_ACTIVATE,
-                    )
-                )
-            ],
-        )
-    )
-
     actions = []
     if not builtin_local_pattern_mode:
         actions.extend([
-            slam_toolbox_node,
-            configure_slam_toolbox,
-            activate_slam_toolbox,
             Node(
                 package="amr_sweeper_mapping",
                 executable="gaussian_node",
@@ -233,13 +173,6 @@ def generate_launch_description():
                     [FindPackageShare("amr_sweeper_mapping"), "config", "mapping_params.yaml"]
                 ),
                 description="Shared parameter file for mapping package nodes.",
-            ),
-            DeclareLaunchArgument(
-                "slam_params_file",
-                default_value=PathJoinSubstitution(
-                    [FindPackageShare("amr_sweeper_mapping"), "config", "slam_toolbox.yaml"]
-                ),
-                description="slam_toolbox parameter file used for live mapping and map->odom TF publication.",
             ),
             DeclareLaunchArgument(
                 "mission_execution_directory",

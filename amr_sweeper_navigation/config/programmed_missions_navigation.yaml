@@ -97,7 +97,7 @@ local_costmap:
       # -- Local costmap core --------------------------------------------------
       update_frequency:              5.0                                 # Costmap update rate in Hz. Common Nav2 example default is 5 Hz.
       publish_frequency:             2.0                                 # Costmap publish rate in Hz for downstream consumers and visualization. Common examples use 2 Hz.
-      global_frame:                  map                                 # Keep the controller's rolling costmap in the same frame as the global path so SLAM map->odom updates do not prune the whole path away mid-mission.
+      global_frame:                  odom                                # Keep the controller's rolling costmap in the continuous local frame owned by FusionCore.
       robot_base_frame:              base_footprint                      # Robot body frame used to place the footprint in the costmap. Common default is base_link.
       use_sim_time:                  false                               # Use simulated clock if /clock is present. Default is typically false.
       rolling_window:                true                                # Keep the local costmap centered on the robot instead of storing a fixed map. Common local costmap default is true.
@@ -105,7 +105,14 @@ local_costmap:
       height:                        10                                  # Height of the local rolling costmap in meters. Many examples use 3 m.
       resolution:                    0.05                                # Costmap cell size in meters. Common local costmap example value is 0.05 m.
       footprint:                     "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]"  # Robot footprint polygon in meters in base_footprint. Replaces robot_radius=0.22 to include the front tool width.
-      plugins:                       ["obstacle_layer", "inflation_layer"]  # Local costmap layers to load. This setup uses obstacle marking plus inflation.
+      plugins:                       ["static_layer", "obstacle_layer", "inflation_layer"]  # Local planning uses the rolling odom-frame occupancy map plus live obstacle marking and inflation.
+
+      # -- Rolling occupancy layer --------------------------------------------
+      static_layer:
+        plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the mapping coordinator's rolling odom-frame occupancy grid.
+        map_topic:                   mapping/occupancy_grid_local         # 10x10 m rolling occupancy grid published by amr_sweeper_mapping in odom.
+        map_subscribe_transient_local: false                              # Subscribe with normal durability so the layer stays compatible with the live republisher.
+        subscribe_to_updates:        false                                # The local rolling occupancy grid is republished as full OccupancyGrid messages.
 
       # -- Inflation layer -----------------------------------------------------
       inflation_layer:
