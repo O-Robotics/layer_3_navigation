@@ -2025,12 +2025,12 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
     source_min_y + static_cast<double>(message.info.height) * resolution;
 
   if (!padded_live_map_bounds_ready_) {
-    if (!mission_anchor_pose_ready_ || !anchor_available) {
+    if (!latest_odometry_pose_ready_ || !anchor_available) {
       RCLCPP_INFO_THROTTLE(
         get_logger(),
         *get_clock(),
         2000,
-        "Waiting to initialize the mission startup map until the seeded robot pose can be centered in %s.",
+        "Waiting to initialize the mission startup map until the robot reference pose can be centered in %s.",
         message.header.frame_id.c_str());
       return nav_msgs::msg::OccupancyGrid{};
     }

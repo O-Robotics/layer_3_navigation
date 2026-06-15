@@ -22,7 +22,7 @@
     scan_topic:                   depth_camera/scan  # Depth-camera laserscan topic relative to the robot namespace.
 
     # -- Startup seeding ------------------------------------------------------
-    seed_slam_from_fusion_pose:   false            # Online async mapping starts from odom-referenced motion; do not inject FusionCore odom poses as map-frame seeds.
+    seed_slam_from_fusion_pose:   true             # Seed slam_toolbox from the startup FusionCore pose so map -> odom starts from a stable identity-aligned pose.
     seed_period_seconds:          2.0              # Retry period for startup seeding.
     status_period_seconds:        2.0              # Periodic status publication cadence.
     max_seed_publications:        5                # Stop startup seeding after this many successful seed publications.
@@ -74,7 +74,7 @@
     earth_frame:                   earth                            # REP-105 global earth frame (ECEF parent for a georeferenced map).
     map_frame:                     map                              # REP-105 global map frame produced by SLAM and consumed by Nav2 global planning.
     odom_frame:                    odom                             # REP-105 continuous local frame produced by FusionCore.
-    fromll_service:                fromLL                           # Coordinate-conversion service used for geographic mission routes.
+    fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
     datum_service:                 /get_datum                       # FusionCore service exposing the chosen GNSS datum used to anchor earth -> map.
     publish_earth_to_map:          true                             # Publish REP-105 earth -> map from the FusionCore datum and the live slam_toolbox map -> odom correction.
     earth_to_map_planar_only:      true                             # Keep earth -> map strictly 2D for Nav2 by dropping roll/pitch tilt from the geodetic anchor.

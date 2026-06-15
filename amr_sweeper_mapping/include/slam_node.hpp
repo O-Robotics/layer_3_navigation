@@ -25,6 +25,7 @@ private:
   void handleSlamPose(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message);
   void publishStatus();
   void maybeSeedInitialPose();
+  [[nodiscard]] bool buildSeedPose(geometry_msgs::msg::PoseWithCovarianceStamped & initial_pose);
 
   std::string backend_;
   std::string map_frame_;
@@ -36,6 +37,7 @@ private:
   bool seed_slam_from_fusion_pose_{true};
   int max_seed_publications_{5};
   int seed_publications_{0};
+  bool warned_about_seed_projection_{false};
   bool have_fusion_pose_{false};
   bool have_scan_{false};
   bool have_slam_pose_{false};

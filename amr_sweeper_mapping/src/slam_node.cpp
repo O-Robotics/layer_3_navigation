@@ -1,10 +1,12 @@
 #include "slam_node.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <sstream>
 #include <utility>
 
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/exceptions.h>
 #include <tf2/time.h>
 
@@ -112,41 +114,78 @@ void SlamNode::maybeSeedInitialPose()
     return;
   }
 
-  if (latest_fusion_pose_frame_id_.empty()) {
-    if (!warned_about_seed_frame_mismatch_) {
-      warned_about_seed_frame_mismatch_ = true;
-      RCLCPP_WARN(
-        get_logger(),
-        "Skipping SLAM seed pose because FusionCore pose arrived without a frame_id. "
-        "Expected a pose in '%s' if startup seeding is enabled.",
-        map_frame_.c_str());
-    }
+  geometry_msgs::msg::PoseWithCovarianceStamped initial_pose;
+  if (!buildSeedPose(initial_pose)) {
     return;
   }
 
-  if (latest_fusion_pose_frame_id_ != map_frame_) {
-    if (!warned_about_seed_frame_mismatch_) {
-      warned_about_seed_frame_mismatch_ = true;
-      RCLCPP_WARN(
-        get_logger(),
-        "Skipping SLAM seed pose because FusionCore pose is in frame '%s', not '%s'. "
-        "This wrapper will not relabel an odom-frame pose as map-frame data.",
-        latest_fusion_pose_frame_id_.c_str(),
-        map_frame_.c_str());
-    }
-    return;
-  }
-
-  geometry_msgs::msg::PoseWithCovarianceStamped initial_pose = latest_fusion_pose_;
-  initial_pose.header.stamp = now();
   initial_pose_publisher_->publish(initial_pose);
   ++seed_publications_;
 
   RCLCPP_INFO(
     get_logger(),
-    "Published SLAM seed pose %d/%d from FusionCore onto navigation/slam/initialpose.",
+    "Published SLAM seed pose %d/%d from FusionCore onto navigation/slam/initialpose in frame '%s'.",
     seed_publications_,
-    max_seed_publications_);
+    max_seed_publications_,
+    initial_pose.header.frame_id.c_str());
+}
+
+bool SlamNode::buildSeedPose(geometry_msgs::msg::PoseWithCovarianceStamped & initial_pose)
+{
+  if (latest_fusion_pose_frame_id_.empty()) {
+    if (!warned_about_seed_frame_mismatch_) {
+      warned_about_seed_frame_mismatch_ = true;
+      RCLCPP_WARN(
+        get_logger(),
+        "Skipping SLAM seed pose because FusionCore pose arrived without a frame_id.");
+    }
+    return false;
+  }
+
+  initial_pose = latest_fusion_pose_;
+  initial_pose.header.stamp = now();
+  initial_pose.header.frame_id = map_frame_;
+
+  if (latest_fusion_pose_frame_id_ == map_frame_) {
+    return true;
+  }
+
+  geometry_msgs::msg::PoseStamped source_pose;
+  source_pose.header = latest_fusion_pose_.header;
+  source_pose.pose = latest_fusion_pose_.pose.pose;
+  geometry_msgs::msg::PoseStamped projected_pose;
+
+  try {
+    const auto transform = tf_buffer_.lookupTransform(
+      map_frame_,
+      latest_fusion_pose_frame_id_,
+      tf2::TimePointZero,
+      tf2::durationFromSec(0.05));
+    tf2::doTransform(source_pose, projected_pose, transform);
+    initial_pose.pose.pose = projected_pose.pose;
+    return true;
+  } catch (const tf2::TransformException &) {
+    if (latest_fusion_pose_frame_id_ != odom_frame_) {
+      if (!warned_about_seed_frame_mismatch_) {
+        warned_about_seed_frame_mismatch_ = true;
+        RCLCPP_WARN(
+          get_logger(),
+          "Skipping SLAM seed pose because FusionCore pose is in frame '%s' and no transform into '%s' is available yet.",
+          latest_fusion_pose_frame_id_.c_str(),
+          map_frame_.c_str());
+      }
+      return false;
+    }
+  }
+
+  if (!warned_about_seed_projection_) {
+    warned_about_seed_projection_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Seeding SLAM from FusionCore odom pose before map -> odom exists; assuming startup map and odom are initially aligned.");
+  }
+
+  return true;
 }
 
 void SlamNode::publishStatus()

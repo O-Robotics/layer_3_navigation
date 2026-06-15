@@ -70,6 +70,7 @@ ament_target_dependencies(
   sensor_msgs
   std_msgs
   tf2
+  tf2_geometry_msgs
   tf2_ros
 )
 
