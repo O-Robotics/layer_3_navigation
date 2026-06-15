@@ -33,7 +33,7 @@
     enable_interactive_mode:               true                         # Keep upstream interactive tooling support available for RViz debugging.
 
     # -- Scan Processing -------------------------------------------------------
-    use_scan_matching:                     true                         # Enable online scan matching for pose refinement.
+    use_scan_matching:                     false                        # Single-test setting: disable scan matching so slam_toolbox follows odom only and we can isolate whether scan matching is causing the circular pose instability.
     use_scan_barycenter:                   true                         # Preserve the current workspace behavior for scan centering.
     minimum_travel_distance:               0.10                         # Keep the robot's tighter local-motion threshold before processing a scan.
     minimum_travel_heading:                0.10                         # Keep the robot's tighter heading-change threshold before processing a scan.
@@ -45,7 +45,7 @@
     link_match_minimum_response_fine:      0.1                          # Upstream async default fine match response threshold.
     link_scan_maximum_distance:            1.5                          # Upstream async default maximum scan-linking distance.
     loop_search_maximum_distance:          3.0                          # Upstream async default maximum loop-search distance.
-    do_loop_closing:                       false                        # Disable loop closure so runtime mapping cannot apply large global pose-graph corrections during startup or mission execution.
+    do_loop_closing:                       true                         # Keep loop closure enabled for continuous runtime mapping.
     loop_match_minimum_chain_size:         10                           # Upstream async default minimum chain size for loop matching.
     loop_match_maximum_variance_coarse:    3.0                          # Upstream async default coarse loop variance threshold.
     loop_match_minimum_response_coarse:    0.35                         # Upstream async default coarse loop response threshold.
