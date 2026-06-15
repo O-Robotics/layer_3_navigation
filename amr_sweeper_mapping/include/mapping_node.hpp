@@ -11,6 +11,7 @@
 #include <fusioncore_ros/srv/from_ll.hpp>
 #include <fusioncore_ros/srv/get_datum.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geographic_msgs/msg/geo_point.hpp>
 #include <lifecycle_msgs/srv/get_state.hpp>
@@ -20,6 +21,7 @@
 #include <nav2_msgs/action/follow_waypoints.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <tf2_ros/buffer.h>
@@ -124,12 +126,14 @@ public:
   MappingNode();
 
 private:
-  void handleSlamStatus(const std_msgs::msg::String::SharedPtr message);
+  void handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message);
+  void handleSlamPose(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message);
   void handleGaussianStatus(const std_msgs::msg::String::SharedPtr message);
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleLiveMap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishCoordinatorStatus();
+  void publishSlamStatus();
   void tickMissionExecution();
   void tryRequestMissionEnd();
   void publishEarthToMapTransform();
@@ -175,7 +179,10 @@ private:
   std::string earth_frame_id_;
   std::string map_frame_id_;
   std::string odom_frame_id_;
+  std::string base_frame_;
   std::string navsat_topic_;
+  std::string slam_pose_topic_;
+  std::string scan_topic_;
   std::string seeded_map_frame_id_;
   std::string fromll_service_name_;
   std::string datum_service_name_;
@@ -213,24 +220,31 @@ private:
   bool latest_odometry_pose_ready_{false};
   bool mission_anchor_pose_ready_{false};
   bool padded_live_map_bounds_ready_{false};
+  bool have_scan_{false};
+  bool have_slam_pose_{false};
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   geometry_msgs::msg::Point mission_anchor_position_;
   geometry_msgs::msg::Quaternion mission_anchor_orientation_;
+  std::string last_scan_frame_id_;
   double padded_live_map_min_x_{0.0};
   double padded_live_map_min_y_{0.0};
   double padded_live_map_max_x_{0.0};
   double padded_live_map_max_y_{0.0};
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
+  rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_slam_pose_time_{0, 0, RCL_ROS_TIME};
   mutable std::mutex synchronized_path_mutex_;
   std::optional<RawNavSatSample> latest_raw_navsat_sample_;
   std::vector<SynchronizedPathSample> synchronized_path_samples_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr slam_status_subscription_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr slam_pose_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gaussian_status_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr live_map_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr slam_status_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr route_marker_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr padded_live_map_publisher_;
   rclcpp::CallbackGroup::SharedPtr mission_callback_group_;

@@ -8,7 +8,6 @@ ros2 launch amr_sweeper_mapping amr_sweeper_mapping.launch.py
 This package provides the runtime mapping layer for AMR Sweeper, including artifact-backed Nav2 costmap integration, SLAM orchestration, gaussian-map orchestration, and a mapping coordinator node.
 
 ## Nodes
-- `amr_sweeper_slam_node`
 - `gaussian_node`
 - `mapping_node`
 
@@ -27,8 +26,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - Calls `amr_sweeper_mission_executor/end_mission` when an autonomous routed mission finishes or aborts so the run is finalized and the FSM returns to `IDLING`.
 
 ## Runtime Structure
-- `mapping_node.cpp/.hpp` contains both the Nav2 costmap plugin and the `mapping_node` coordinator.
-- `slam_node.cpp/.hpp` provides SLAM supervision and startup seeding for `slam_toolbox`.
+- `mapping_node.cpp/.hpp` contains the Nav2 costmap plugin, the `mapping_node` coordinator, and the SLAM supervision/startup-seeding logic for `slam_toolbox`.
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
@@ -42,4 +40,4 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - The scheduler-prepared execution context is expected at `missions/logs/<mission_id>/<execution_timestamp>/execution_context.json`.
 - Gaussian outputs are expected under the execution folder's `gaussian/` subdirectory.
 - VDA5050 mission parsing and artifact generation now live in layer 0 inside `amr_sweeper_vda5050_parser`.
-- The SLAM node and gaussian node are orchestration shells in this pass so backend selection stays flexible while we wire the package structure.
+- `mapping_node` now owns the SLAM supervision/status topic and startup seeding behavior directly, so there is no separate `slam_node` process in the launch graph.

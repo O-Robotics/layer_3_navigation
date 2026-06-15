@@ -8,25 +8,6 @@
         costmap_yaml_path:        ""               # Resolved from mission_execution_directory/execution_context.json when available; leave empty for standalone launch and the layer will warn then stay inactive.
         artifact_frame_id:        odom
 
-/**/amr_sweeper_slam_node:
-  ros__parameters:
-    # -- SLAM backend ---------------------------------------------------------
-    slam_backend:                 slam_toolbox     # Backend identifier consumed by the wrapper node.
-    map_frame:                    map              # Global mapping frame.
-    odom_frame:                   odom             # Local odometry frame.
-    base_frame:                   base_footprint   # Robot body frame used by SLAM.
-
-    # -- Input topics ---------------------------------------------------------
-    fusion_pose_topic:            localization/pose  # Fused localization pose topic inside the selected robot namespace.
-    slam_pose_topic:              mapping/slam_toolbox/pose  # Remapped slam_toolbox pose topic relative to the node namespace.
-    scan_topic:                   depth_camera/scan  # Depth-camera laserscan topic relative to the robot namespace.
-
-    # -- Startup seeding ------------------------------------------------------
-    seed_slam_from_fusion_pose:   true             # Seed slam_toolbox from the startup FusionCore pose so map -> odom starts from a stable identity-aligned pose.
-    seed_period_seconds:          2.0              # Retry period for startup seeding.
-    status_period_seconds:        2.0              # Periodic status publication cadence.
-    max_seed_publications:        5                # Stop startup seeding after this many successful seed publications.
-
 /**/gaussian_node:
   ros__parameters:
     # -- Output artifacts -----------------------------------------------------
@@ -74,6 +55,9 @@
     earth_frame:                   earth                            # REP-105 global earth frame (ECEF parent for a georeferenced map).
     map_frame:                     map                              # REP-105 global map frame produced by SLAM and consumed by Nav2 global planning.
     odom_frame:                    odom                             # REP-105 continuous local frame produced by FusionCore.
+    base_frame:                    base_footprint                   # Robot body frame used by slam_toolbox readiness checks.
+    slam_pose_topic:               mapping/slam_toolbox/pose        # Remapped slam_toolbox pose topic relative to the node namespace.
+    scan_topic:                    depth_camera/scan                # Depth-camera laserscan topic relative to the robot namespace.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
     datum_service:                 /get_datum                       # FusionCore service exposing the chosen GNSS datum used to anchor earth -> map.
     publish_earth_to_map:          true                             # Publish REP-105 earth -> map from the FusionCore datum and the live slam_toolbox map -> odom correction.

@@ -45,7 +45,7 @@
     link_match_minimum_response_fine:      0.1                          # Upstream async default fine match response threshold.
     link_scan_maximum_distance:            1.5                          # Upstream async default maximum scan-linking distance.
     loop_search_maximum_distance:          3.0                          # Upstream async default maximum loop-search distance.
-    do_loop_closing:                       true                         # Keep loop closure enabled for continuous runtime mapping.
+    do_loop_closing:                       false                        # Single-test setting: disable loop closure so pose-graph corrections cannot perturb startup pose behavior.
     loop_match_minimum_chain_size:         10                           # Upstream async default minimum chain size for loop matching.
     loop_match_maximum_variance_coarse:    3.0                          # Upstream async default coarse loop variance threshold.
     loop_match_minimum_response_coarse:    0.35                         # Upstream async default coarse loop response threshold.

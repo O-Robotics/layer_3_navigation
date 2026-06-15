@@ -185,14 +185,6 @@ def _build_nodes(context):
             activate_slam_toolbox,
             Node(
                 package="amr_sweeper_mapping",
-                executable="slam_node",
-                name="amr_sweeper_slam_node",
-                namespace=namespace,
-                output="screen",
-                parameters=[params_file, {"use_sim_time": use_sim_time}],
-            ),
-            Node(
-                package="amr_sweeper_mapping",
                 executable="gaussian_node",
                 name="gaussian_node",
                 namespace=namespace,

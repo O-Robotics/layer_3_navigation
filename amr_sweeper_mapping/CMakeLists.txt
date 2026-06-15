@@ -48,30 +48,12 @@ ament_target_dependencies(${PROJECT_NAME}
   pluginlib
   rclcpp
   rclcpp_action
-  std_msgs
-  tf2
-  tf2_geometry_msgs
-  tf2_ros
-  visualization_msgs
-)
-
-add_executable(amr_sweeper_slam_node src/slam_node.cpp)
-set_target_properties(amr_sweeper_slam_node PROPERTIES OUTPUT_NAME slam_node)
-target_compile_features(amr_sweeper_slam_node PUBLIC cxx_std_17)
-target_include_directories(amr_sweeper_slam_node
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-ament_target_dependencies(
-  amr_sweeper_slam_node
-  geometry_msgs
-  rclcpp
   sensor_msgs
   std_msgs
   tf2
   tf2_geometry_msgs
   tf2_ros
+  visualization_msgs
 )
 
 add_executable(amr_sweeper_gaussian_node src/gaussian_node.cpp)
@@ -114,6 +96,7 @@ ament_target_dependencies(
   pluginlib
   rclcpp
   rclcpp_action
+  sensor_msgs
   std_msgs
   tf2
   tf2_geometry_msgs
@@ -128,7 +111,6 @@ install(DIRECTORY include DESTINATION include)
 install(
   TARGETS
     ${PROJECT_NAME}
-    amr_sweeper_slam_node
     amr_sweeper_gaussian_node
     amr_sweeper_mapping_node
   EXPORT export_${PROJECT_NAME}

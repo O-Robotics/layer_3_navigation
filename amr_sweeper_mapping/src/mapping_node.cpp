@@ -41,6 +41,8 @@ constexpr char kDefaultMissionRoutePath[] = "";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
 constexpr char kDefaultNavSatTopic[] = "gnss/navsat";
+constexpr char kDefaultSlamPoseTopic[] = "mapping/slam_toolbox/pose";
+constexpr char kDefaultScanTopic[] = "depth_camera/scan";
 
 struct EcefPoint
 {
@@ -816,7 +818,10 @@ MappingNode::MappingNode()
   declare_parameter("earth_frame", std::string("earth"));
   declare_parameter("map_frame", std::string("map"));
   declare_parameter("odom_frame", std::string("odom"));
+  declare_parameter("base_frame", std::string("base_footprint"));
   declare_parameter("navsat_topic", std::string(kDefaultNavSatTopic));
+  declare_parameter("slam_pose_topic", std::string(kDefaultSlamPoseTopic));
+  declare_parameter("scan_topic", std::string(kDefaultScanTopic));
   declare_parameter("seeded_map_frame", std::string("map"));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("datum_service", std::string("/get_datum"));
@@ -854,7 +859,10 @@ MappingNode::MappingNode()
   earth_frame_id_ = get_parameter("earth_frame").as_string();
   map_frame_id_ = get_parameter("map_frame").as_string();
   odom_frame_id_ = get_parameter("odom_frame").as_string();
+  base_frame_ = get_parameter("base_frame").as_string();
   navsat_topic_ = get_parameter("navsat_topic").as_string();
+  slam_pose_topic_ = get_parameter("slam_pose_topic").as_string();
+  scan_topic_ = get_parameter("scan_topic").as_string();
   seeded_map_frame_id_ = get_parameter("seeded_map_frame").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   datum_service_name_ = get_parameter("datum_service").as_string();
@@ -892,10 +900,14 @@ MappingNode::MappingNode()
   mission_loaded_ = manual_mapping_mode_;
   mission_converted_ = manual_mapping_mode_;
 
-  slam_status_subscription_ = create_subscription<std_msgs::msg::String>(
-    "mapping/slam_toolbox/status",
-    10,
-    std::bind(&MappingNode::handleSlamStatus, this, std::placeholders::_1));
+  slam_pose_subscription_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+    slam_pose_topic_,
+    rclcpp::QoS(10),
+    std::bind(&MappingNode::handleSlamPose, this, std::placeholders::_1));
+  scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
+    scan_topic_,
+    rclcpp::SensorDataQoS(),
+    std::bind(&MappingNode::handleScan, this, std::placeholders::_1));
   gaussian_status_subscription_ = create_subscription<std_msgs::msg::String>(
     "mapping/gaussian/status",
     10,
@@ -913,6 +925,7 @@ MappingNode::MappingNode()
     rclcpp::QoS(1).reliable().transient_local(),
     std::bind(&MappingNode::handleLiveMap, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
+  slam_status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/slam_toolbox/status", 10);
   route_marker_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
     "mapping/route_marker",
     rclcpp::QoS(1).reliable().transient_local());
@@ -951,7 +964,10 @@ MappingNode::MappingNode()
 
   status_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("status_period_seconds").as_double()),
-    std::bind(&MappingNode::publishCoordinatorStatus, this),
+    [this]() {
+      publishCoordinatorStatus();
+      publishSlamStatus();
+    },
     status_callback_group_);
   mission_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("mission_tick_period_seconds").as_double()),
@@ -976,9 +992,22 @@ MappingNode::MappingNode()
     execution_mode_.c_str());
 }
 
-void MappingNode::handleSlamStatus(const std_msgs::msg::String::SharedPtr message)
+void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message)
 {
-  last_slam_status_ = message->data;
+  last_scan_frame_id_ = message->header.frame_id;
+  last_scan_time_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
+    now() :
+    rclcpp::Time(message->header.stamp);
+  have_scan_ = true;
+}
+
+void MappingNode::handleSlamPose(
+  const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message)
+{
+  last_slam_pose_time_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
+    now() :
+    rclcpp::Time(message->header.stamp);
+  have_slam_pose_ = true;
 }
 
 void MappingNode::handleGaussianStatus(const std_msgs::msg::String::SharedPtr message)
@@ -1083,6 +1112,55 @@ void MappingNode::publishCoordinatorStatus()
     "; slam_status=" + last_slam_status_ +
     "; gaussian_status=" + last_gaussian_status_;
   status_publisher_->publish(message);
+}
+
+void MappingNode::publishSlamStatus()
+{
+  std_msgs::msg::String message;
+  const bool ready = have_scan_ && latest_odometry_pose_ready_;
+  const bool tracking = have_slam_pose_;
+  bool have_scan_to_base_tf = false;
+  bool have_map_to_odom_tf = false;
+  bool have_base_frame = false;
+  bool have_scan_frame = false;
+
+  if (tf_buffer_->_frameExists(base_frame_)) {
+    have_base_frame = true;
+  }
+
+  if (have_scan_ && !last_scan_frame_id_.empty()) {
+    have_scan_frame = tf_buffer_->_frameExists(last_scan_frame_id_);
+  }
+
+  if (have_scan_ && have_base_frame && have_scan_frame && !last_scan_frame_id_.empty()) {
+    have_scan_to_base_tf = tf_buffer_->canTransform(
+      base_frame_,
+      last_scan_frame_id_,
+      tf2::TimePointZero,
+      tf2::durationFromSec(0.05));
+  }
+
+  if (tf_buffer_->_frameExists(map_frame_id_) && tf_buffer_->_frameExists(odom_frame_id_)) {
+    have_map_to_odom_tf = tf_buffer_->canTransform(
+      map_frame_id_,
+      odom_frame_id_,
+      tf2::TimePointZero,
+      tf2::durationFromSec(0.05));
+  }
+
+  std::ostringstream stream;
+  stream
+    << "ready=" << (ready ? "true" : "false")
+    << "; tracking=" << (tracking ? "true" : "false")
+    << "; scan_tf=" << (have_scan_to_base_tf ? "true" : "false")
+    << "; base_frame=" << (have_base_frame ? "true" : "false")
+    << "; scan_frame_exists=" << (have_scan_frame ? "true" : "false")
+    << "; map_tf=" << (have_map_to_odom_tf ? "true" : "false")
+    << "; scan_frame=" << (last_scan_frame_id_.empty() ? "<none>" : last_scan_frame_id_)
+    << "; pose_frame=" << (latest_odometry_pose_ready_ ? odom_frame_id_ : "<none>");
+  message.data = stream.str();
+  last_slam_status_ = message.data;
+  slam_status_publisher_->publish(message);
 }
 
 void MappingNode::writeMissionSessionMetadata() const
