@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -23,7 +24,6 @@
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -75,6 +75,15 @@ struct LoadedCostmapArtifact
   double resolution{0.0};
   double origin_x{0.0};
   double origin_y{0.0};
+  double occupied_thresh{0.65};
+  double free_thresh{0.196};
+  bool georeference_valid{false};
+  std::string georeference_type;
+  std::string georeference_source_crs{"EPSG:4326"};
+  std::string georeference_companion_file;
+  std::size_t georeference_sample_count{0U};
+  std::array<double, 3> longitude_coefficients{0.0, 0.0, 0.0};
+  std::array<double, 3> latitude_coefficients{0.0, 0.0, 0.0};
 };
 
 class Vda5050CostmapLayer : public nav2_costmap_2d::CostmapLayer
@@ -129,6 +138,7 @@ private:
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
+  void persistRuntimeCostmapArtifact();
   void tickMissionExecution();
   void tryRequestMissionEnd();
   void publishMapAlignmentTransform();
@@ -152,6 +162,9 @@ private:
   [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> buildPoseSequence(
     const std::vector<MissionCoordinate> & coordinates) const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(const nav_msgs::msg::OccupancyGrid & message);
+  void loadSavedCostmapIfConfigured();
+  void initializeMapFromArtifact(const LoadedCostmapArtifact & artifact);
+  [[nodiscard]] nav_msgs::msg::OccupancyGrid buildStaticRuntimeCostmapArtifact() const;
   void initializeGlobalMap(const geometry_msgs::msg::Point & center);
   void expandGlobalMapToFit(
     double min_x,
@@ -182,6 +195,7 @@ private:
   std::string mission_output_directory_;
   std::string actual_path_output_file_;
   std::string actual_path_navsat_output_file_;
+  std::string saved_costmap_yaml_;
   std::string mission_window_start_;
   std::string mission_window_end_;
   std::string frame_id_;
@@ -194,6 +208,9 @@ private:
   std::string fromll_service_name_;
   std::string end_mission_service_name_;
   std::string waypoint_follower_state_service_name_;
+  double runtime_costmap_save_period_seconds_{10.0};
+  int static_obstacle_min_observations_{6};
+  double static_obstacle_min_occupied_fraction_{0.75};
   bool auto_start_mission_{true};
   bool repeat_mission_{false};
   bool publish_seeded_map_to_odom_{false};
@@ -235,8 +252,12 @@ private:
   double padded_live_map_max_y_{0.0};
   std::vector<int16_t> global_map_scores_;
   std::vector<uint16_t> global_map_observations_;
+  std::vector<uint16_t> global_map_occupied_observations_;
+  std::vector<uint16_t> global_map_free_observations_;
   nav_msgs::msg::OccupancyGrid latest_live_map_;
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
+  nav_msgs::msg::OccupancyGrid seeded_runtime_map_;
+  bool seeded_runtime_map_ready_{false};
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
   mutable std::mutex synchronized_path_mutex_;
   std::optional<RawNavSatSample> latest_raw_navsat_sample_;
@@ -246,20 +267,20 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr live_map_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_publisher_;
   rclcpp::Publisher<nav_msgs::msg::MapMetaData>::SharedPtr live_map_metadata_publisher_;
-  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr route_marker_publisher_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr waypoint_path_publisher_;
   rclcpp::CallbackGroup::SharedPtr mission_callback_group_;
   rclcpp::CallbackGroup::SharedPtr status_callback_group_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr mission_timer_;
-  rclcpp::TimerBase::SharedPtr map_alignment_timer_;
+  rclcpp::TimerBase::SharedPtr runtime_costmap_save_timer_;
   rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;
   rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedPtr end_mission_client_;
   rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr waypoint_follower_state_client_;
   rclcpp_action::Client<nav2_msgs::action::FollowWaypoints>::SharedPtr follow_waypoints_client_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };
 
 }  // namespace amr_sweeper_mapping

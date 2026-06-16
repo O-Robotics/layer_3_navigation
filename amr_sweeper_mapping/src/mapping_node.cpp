@@ -75,6 +75,18 @@ std::string to_lower(std::string value)
   return value;
 }
 
+std::string stripQuotes(const std::string & value)
+{
+  if (value.size() >= 2U) {
+    const char first = value.front();
+    const char last = value.back();
+    if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+      return value.substr(1U, value.size() - 2U);
+    }
+  }
+  return value;
+}
+
 std::string formatTimestamp(const rclcpp::Time & stamp)
 {
   std::ostringstream stream;
@@ -483,6 +495,236 @@ void writeJsonDocumentAtomic(
   std::filesystem::rename(temp_path, path);
 }
 
+std::string resolveArtifactPathString(const std::string & configured_path)
+{
+  namespace fs = std::filesystem;
+  const fs::path configured(configured_path);
+  if (configured.is_absolute()) {
+    return configured.string();
+  }
+
+  const fs::path workspace_relative = fs::current_path() / configured;
+  if (fs::exists(workspace_relative)) {
+    return workspace_relative.string();
+  }
+  return configured.string();
+}
+
+LoadedCostmapArtifact loadCostmapArtifactFromYaml(const std::string & yaml_path)
+{
+  std::ifstream yaml_stream(yaml_path);
+  if (!yaml_stream.is_open()) {
+    throw std::runtime_error("Failed to open costmap YAML artifact: " + yaml_path);
+  }
+
+  std::string image_name;
+  double resolution = 0.0;
+  double origin_x = 0.0;
+  double origin_y = 0.0;
+  double occupied_thresh = 0.65;
+  double free_thresh = 0.196;
+  bool georeference_valid = false;
+  std::string georeference_type;
+  std::string georeference_source_crs = "EPSG:4326";
+  std::string georeference_companion_file;
+  std::size_t georeference_sample_count = 0U;
+  std::array<double, 3> longitude_coefficients{0.0, 0.0, 0.0};
+  std::array<double, 3> latitude_coefficients{0.0, 0.0, 0.0};
+  bool negate = false;
+  std::string line;
+  while (std::getline(yaml_stream, line)) {
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) {
+      continue;
+    }
+    const std::string key = trim(line.substr(0, colon));
+    const std::string value = trim(line.substr(colon + 1U));
+    if (key == "image") {
+      image_name = stripQuotes(value);
+    } else if (key == "resolution") {
+      resolution = std::stod(value);
+    } else if (key == "origin") {
+      const auto open = value.find('[');
+      const auto comma = value.find(',', open + 1U);
+      const auto second_comma = value.find(',', comma + 1U);
+      origin_x = std::stod(trim(value.substr(open + 1U, comma - open - 1U)));
+      origin_y = std::stod(trim(value.substr(comma + 1U, second_comma - comma - 1U)));
+    } else if (key == "occupied_thresh") {
+      occupied_thresh = std::stod(value);
+    } else if (key == "free_thresh") {
+      free_thresh = std::stod(value);
+    } else if (key == "georeference_type") {
+      georeference_type = stripQuotes(value);
+      georeference_valid = !georeference_type.empty();
+    } else if (key == "georeference_source_crs") {
+      georeference_source_crs = stripQuotes(value);
+    } else if (key == "georeference_companion_file") {
+      georeference_companion_file = stripQuotes(value);
+    } else if (key == "georeference_sample_count") {
+      georeference_sample_count = static_cast<std::size_t>(std::stoul(value));
+    } else if (key == "georeference_longitude_coefficients") {
+      const auto open = value.find('[');
+      const auto first_comma = value.find(',', open + 1U);
+      const auto second_comma = value.find(',', first_comma + 1U);
+      const auto close = value.find(']', second_comma + 1U);
+      longitude_coefficients = {
+        std::stod(trim(value.substr(open + 1U, first_comma - open - 1U))),
+        std::stod(trim(value.substr(first_comma + 1U, second_comma - first_comma - 1U))),
+        std::stod(trim(value.substr(second_comma + 1U, close - second_comma - 1U)))};
+      georeference_valid = true;
+    } else if (key == "georeference_latitude_coefficients") {
+      const auto open = value.find('[');
+      const auto first_comma = value.find(',', open + 1U);
+      const auto second_comma = value.find(',', first_comma + 1U);
+      const auto close = value.find(']', second_comma + 1U);
+      latitude_coefficients = {
+        std::stod(trim(value.substr(open + 1U, first_comma - open - 1U))),
+        std::stod(trim(value.substr(first_comma + 1U, second_comma - first_comma - 1U))),
+        std::stod(trim(value.substr(second_comma + 1U, close - second_comma - 1U)))};
+      georeference_valid = true;
+    } else if (key == "negate") {
+      negate = std::stoi(value) != 0;
+    }
+  }
+
+  const std::filesystem::path image_path = std::filesystem::path(yaml_path).parent_path() / image_name;
+  std::ifstream image_stream(image_path, std::ios::binary);
+  if (!image_stream.is_open()) {
+    throw std::runtime_error("Failed to open costmap image artifact: " + image_path.string());
+  }
+
+  std::string magic;
+  image_stream >> magic;
+  if (magic != "P5" && magic != "P2") {
+    throw std::runtime_error("Unsupported costmap image format: " + magic);
+  }
+
+  unsigned int width = 0U;
+  unsigned int height = 0U;
+  int max_value = 0;
+  image_stream >> width >> height >> max_value;
+
+  LoadedCostmapArtifact artifact;
+  artifact.width_cells = width;
+  artifact.height_cells = height;
+  artifact.resolution = resolution;
+  artifact.origin_x = origin_x;
+  artifact.origin_y = origin_y;
+  artifact.occupied_thresh = occupied_thresh;
+  artifact.free_thresh = free_thresh;
+  artifact.georeference_valid = georeference_valid;
+  artifact.georeference_type = georeference_type;
+  artifact.georeference_source_crs = georeference_source_crs;
+  artifact.georeference_companion_file = georeference_companion_file;
+  artifact.georeference_sample_count = georeference_sample_count;
+  artifact.longitude_coefficients = longitude_coefficients;
+  artifact.latitude_coefficients = latitude_coefficients;
+  artifact.costs.resize(static_cast<std::size_t>(width) * height);
+
+  auto to_occupancy_byte = [max_value, negate](const int pixel_value) -> unsigned char {
+    const int bounded = std::clamp(pixel_value, 0, std::max(1, max_value));
+    const double normalized = static_cast<double>(bounded) / static_cast<double>(std::max(1, max_value));
+    const double occupied = negate ? normalized : (1.0 - normalized);
+    return static_cast<unsigned char>(std::lround(std::clamp(occupied, 0.0, 1.0) * 255.0));
+  };
+
+  if (magic == "P5") {
+    image_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
+      for (unsigned int col = 0; col < width; ++col) {
+        unsigned char pixel = 0U;
+        image_stream.read(reinterpret_cast<char *>(&pixel), 1);
+        const std::size_t index = static_cast<std::size_t>(row) * width + col;
+        artifact.costs[index] = to_occupancy_byte(static_cast<int>(pixel));
+      }
+    }
+    return artifact;
+  }
+
+  for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
+    for (unsigned int col = 0; col < width; ++col) {
+      int pixel_value = 0;
+      image_stream >> pixel_value;
+      const std::size_t index = static_cast<std::size_t>(row) * width + col;
+      artifact.costs[index] = to_occupancy_byte(pixel_value);
+    }
+  }
+
+  return artifact;
+}
+
+void saveOccupancyGridArtifact(
+  const nav_msgs::msg::OccupancyGrid & map,
+  const std::filesystem::path & yaml_path,
+  const std::optional<nlohmann::json> & georeference = std::nullopt)
+{
+  if (map.info.width == 0U || map.info.height == 0U || map.data.empty()) {
+    throw std::runtime_error("Cannot save an empty occupancy grid artifact");
+  }
+
+  namespace fs = std::filesystem;
+  const fs::path image_path = yaml_path.parent_path() / (yaml_path.stem().string() + ".pgm");
+  fs::create_directories(yaml_path.parent_path());
+
+  std::ofstream image_stream(image_path, std::ios::binary);
+  if (!image_stream.is_open()) {
+    throw std::runtime_error("Failed to write costmap image artifact: " + image_path.string());
+  }
+  image_stream << "P5\n" << map.info.width << " " << map.info.height << "\n255\n";
+  for (int row = static_cast<int>(map.info.height) - 1; row >= 0; --row) {
+    for (uint32_t col = 0U; col < map.info.width; ++col) {
+      const std::size_t index = static_cast<std::size_t>(row) * map.info.width + col;
+      const int8_t cell = map.data.at(index);
+      const double occupied_ratio = cell < 0 ? 0.5 : std::clamp(static_cast<double>(cell) / 100.0, 0.0, 1.0);
+      const unsigned char pixel = static_cast<unsigned char>(
+        std::lround((1.0 - occupied_ratio) * 255.0));
+      image_stream.write(reinterpret_cast<const char *>(&pixel), 1);
+    }
+  }
+
+  std::ofstream yaml_stream(yaml_path, std::ios::trunc);
+  if (!yaml_stream.is_open()) {
+    throw std::runtime_error("Failed to write costmap yaml artifact: " + yaml_path.string());
+  }
+  yaml_stream
+    << "image: " << image_path.filename().string() << "\n"
+    << "mode: trinary\n"
+    << "resolution: " << map.info.resolution << "\n"
+    << "origin: [" << map.info.origin.position.x << ", " << map.info.origin.position.y << ", 0.0]\n"
+    << "negate: 0\n"
+    << "occupied_thresh: 0.65\n"
+    << "free_thresh: 0.196\n";
+  if (georeference.has_value()) {
+    const auto & metadata = *georeference;
+    yaml_stream << "georeference_type: " <<
+      metadata.value("type", std::string("affine_xy_to_wgs84")) << "\n";
+    yaml_stream << "georeference_source_crs: " <<
+      metadata.value("source_crs", std::string("EPSG:4326")) << "\n";
+    if (metadata.contains("companion_file")) {
+      yaml_stream << "georeference_companion_file: " <<
+        metadata.at("companion_file").get<std::string>() << "\n";
+    }
+    if (metadata.contains("sample_count")) {
+      yaml_stream << "georeference_sample_count: " <<
+        metadata.at("sample_count").get<std::size_t>() << "\n";
+    }
+    if (metadata.contains("longitude_coefficients")) {
+      const auto & coefficients = metadata.at("longitude_coefficients");
+      yaml_stream << "georeference_longitude_coefficients: [" <<
+        coefficients.at(0).get<double>() << ", " <<
+        coefficients.at(1).get<double>() << ", " <<
+        coefficients.at(2).get<double>() << "]\n";
+    }
+    if (metadata.contains("latitude_coefficients")) {
+      const auto & coefficients = metadata.at("latitude_coefficients");
+      yaml_stream << "georeference_latitude_coefficients: [" <<
+        coefficients.at(0).get<double>() << ", " <<
+        coefficients.at(1).get<double>() << ", " <<
+        coefficients.at(2).get<double>() << "]\n";
+    }
+  }
+}
+
 }  // namespace
 
 Vda5050CostmapLayer::Vda5050CostmapLayer() = default;
@@ -595,7 +837,7 @@ void Vda5050CostmapLayer::loadArtifact()
     return;
   }
 
-  const std::string resolved_path = resolveArtifactPath(yaml_path);
+  const std::string resolved_path = resolveArtifactPathString(yaml_path);
   std::error_code filesystem_error;
   if (!std::filesystem::is_regular_file(resolved_path, filesystem_error)) {
     artifact_ = LoadedCostmapArtifact{};
@@ -609,106 +851,18 @@ void Vda5050CostmapLayer::loadArtifact()
     return;
   }
 
-  artifact_ = parseCostmapArtifact(resolved_path);
+  artifact_ = loadCostmapArtifactFromYaml(resolved_path);
   artifact_loaded_ = true;
 }
 
 LoadedCostmapArtifact Vda5050CostmapLayer::parseCostmapArtifact(const std::string & yaml_path) const
 {
-  std::ifstream yaml_stream(yaml_path);
-  if (!yaml_stream.is_open()) {
-    throw std::runtime_error("Failed to open costmap YAML artifact: " + yaml_path);
-  }
-
-  std::string image_name;
-  double resolution = 0.0;
-  double origin_x = 0.0;
-  double origin_y = 0.0;
-  std::string line;
-  while (std::getline(yaml_stream, line)) {
-    const auto colon = line.find(':');
-    if (colon == std::string::npos) {
-      continue;
-    }
-    const std::string key = trim(line.substr(0, colon));
-    const std::string value = trim(line.substr(colon + 1U));
-    if (key == "image") {
-      image_name = value;
-    } else if (key == "resolution") {
-      resolution = std::stod(value);
-    } else if (key == "origin") {
-      const auto open = value.find('[');
-      const auto comma = value.find(',', open + 1U);
-      const auto second_comma = value.find(',', comma + 1U);
-      origin_x = std::stod(trim(value.substr(open + 1U, comma - open - 1U)));
-      origin_y = std::stod(trim(value.substr(comma + 1U, second_comma - comma - 1U)));
-    }
-  }
-
-  const std::filesystem::path image_path = std::filesystem::path(yaml_path).parent_path() / image_name;
-  std::ifstream image_stream(image_path, std::ios::binary);
-  if (!image_stream.is_open()) {
-    throw std::runtime_error("Failed to open costmap image artifact: " + image_path.string());
-  }
-
-  std::string magic;
-  image_stream >> magic;
-  if (magic != "P5" && magic != "P2") {
-    throw std::runtime_error("Unsupported costmap image format: " + magic);
-  }
-
-  unsigned int width = 0U;
-  unsigned int height = 0U;
-  int max_value = 0;
-  image_stream >> width >> height >> max_value;
-  LoadedCostmapArtifact artifact;
-  artifact.width_cells = width;
-  artifact.height_cells = height;
-  artifact.resolution = resolution;
-  artifact.origin_x = origin_x;
-  artifact.origin_y = origin_y;
-  artifact.costs.resize(static_cast<std::size_t>(width) * height);
-
-  if (magic == "P5") {
-    image_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-    for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
-      for (unsigned int col = 0; col < width; ++col) {
-        unsigned char pixel = 0U;
-        image_stream.read(reinterpret_cast<char *>(&pixel), 1);
-        const std::size_t index = static_cast<std::size_t>(row) * width + col;
-        artifact.costs[index] = static_cast<unsigned char>(255U - pixel);
-      }
-    }
-    return artifact;
-  }
-
-  for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
-    for (unsigned int col = 0; col < width; ++col) {
-      int pixel_value = 0;
-      image_stream >> pixel_value;
-      const auto clamped_value = static_cast<unsigned char>(
-        std::clamp(pixel_value, 0, max_value) * 255 / std::max(1, max_value));
-      const std::size_t index = static_cast<std::size_t>(row) * width + col;
-      artifact.costs[index] = static_cast<unsigned char>(255U - clamped_value);
-    }
-  }
-
-  return artifact;
+  return loadCostmapArtifactFromYaml(yaml_path);
 }
 
 std::string Vda5050CostmapLayer::resolveArtifactPath(const std::string & configured_path) const
 {
-  namespace fs = std::filesystem;
-  const fs::path configured(configured_path);
-  if (configured.is_absolute()) {
-    return configured.string();
-  }
-
-  const fs::path workspace_relative = fs::current_path() / configured;
-  if (fs::exists(workspace_relative)) {
-    return workspace_relative.string();
-  }
-  return configured.string();
+  return resolveArtifactPathString(configured_path);
 }
 
 geometry_msgs::msg::PointStamped Vda5050CostmapLayer::transformPoint(
@@ -773,6 +927,7 @@ MappingNode::MappingNode()
   declare_parameter("mission_output_directory", std::string(""));
   declare_parameter("actual_path_output_file", std::string(""));
   declare_parameter("actual_path_navsat_output_file", std::string(""));
+  declare_parameter("saved_costmap_yaml", std::string(""));
   declare_parameter("mission_costmap_yaml", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
   declare_parameter("mission_window_end", std::string(""));
@@ -792,6 +947,9 @@ MappingNode::MappingNode()
   declare_parameter("map_alignment_publish_period_seconds", 0.5);
   declare_parameter("global_map_resolution_m", 0.05);
   declare_parameter("local_map_size_m", 10.0);
+  declare_parameter("runtime_costmap_save_period_seconds", 10.0);
+  declare_parameter("static_obstacle_min_observations", 6);
+  declare_parameter("static_obstacle_min_occupied_fraction", 0.75);
   declare_parameter("max_segments_per_goal", 4);
   declare_parameter("max_waypoint_spacing_m", 0.5);
   declare_parameter("pad_live_map_to_minimum_size", true);
@@ -811,6 +969,7 @@ MappingNode::MappingNode()
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
   actual_path_output_file_ = get_parameter("actual_path_output_file").as_string();
   actual_path_navsat_output_file_ = get_parameter("actual_path_navsat_output_file").as_string();
+  saved_costmap_yaml_ = get_parameter("saved_costmap_yaml").as_string();
   mission_costmap_yaml_ = get_parameter("mission_costmap_yaml").as_string();
   mission_window_start_ = get_parameter("mission_window_start").as_string();
   mission_window_end_ = get_parameter("mission_window_end").as_string();
@@ -832,6 +991,11 @@ MappingNode::MappingNode()
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
   global_map_resolution_m_ = get_parameter("global_map_resolution_m").as_double();
   local_map_size_m_ = get_parameter("local_map_size_m").as_double();
+  runtime_costmap_save_period_seconds_ = get_parameter("runtime_costmap_save_period_seconds").as_double();
+  static_obstacle_min_observations_ =
+    static_cast<int>(get_parameter("static_obstacle_min_observations").as_int());
+  static_obstacle_min_occupied_fraction_ =
+    get_parameter("static_obstacle_min_occupied_fraction").as_double();
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
   max_waypoint_spacing_m_ = get_parameter("max_waypoint_spacing_m").as_double();
   pad_live_map_to_minimum_size_ = get_parameter("pad_live_map_to_minimum_size").as_bool();
@@ -874,18 +1038,20 @@ MappingNode::MappingNode()
   live_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
     "mapping/occupancy_grid",
     rclcpp::QoS(1).reliable().transient_local());
+  global_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+    "mapping/global_costmap",
+    rclcpp::QoS(1).reliable().transient_local());
   live_map_metadata_publisher_ = create_publisher<nav_msgs::msg::MapMetaData>(
     "mapping/occupancy_grid_metadata",
     rclcpp::QoS(1).reliable().transient_local());
-  route_marker_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
-    "mapping/route_marker",
+  waypoint_path_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
+    "mapping/waypoint_path",
     rclcpp::QoS(1).reliable().transient_local());
 
   mission_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   status_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, true);
-  tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(
     fromll_service_name_,
@@ -914,11 +1080,14 @@ MappingNode::MappingNode()
     std::chrono::duration<double>(get_parameter("mission_tick_period_seconds").as_double()),
     std::bind(&MappingNode::tickMissionExecution, this),
     mission_callback_group_);
-  map_alignment_timer_ = create_wall_timer(
-    std::chrono::duration<double>(get_parameter("map_alignment_publish_period_seconds").as_double()),
-    std::bind(&MappingNode::publishMapAlignmentTransform, this),
-    status_callback_group_);
+  if (runtime_costmap_save_period_seconds_ > 0.0) {
+    runtime_costmap_save_timer_ = create_wall_timer(
+      std::chrono::duration<double>(runtime_costmap_save_period_seconds_),
+      std::bind(&MappingNode::persistRuntimeCostmapArtifact, this),
+      status_callback_group_);
+  }
 
+  loadSavedCostmapIfConfigured();
   writeMissionSessionMetadata();
 
   RCLCPP_INFO(
@@ -1006,6 +1175,204 @@ void MappingNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
   latest_raw_navsat_sample_ = sample;
 }
 
+void MappingNode::loadSavedCostmapIfConfigured()
+{
+  if (saved_costmap_yaml_.empty()) {
+    return;
+  }
+
+  const std::string resolved_path = resolveRuntimePath(saved_costmap_yaml_);
+  std::error_code filesystem_error;
+  if (!std::filesystem::is_regular_file(resolved_path, filesystem_error)) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Saved costmap yaml was configured as '%s' but no file was found there.",
+      resolved_path.c_str());
+    return;
+  }
+
+  try {
+    initializeMapFromArtifact(loadCostmapArtifactFromYaml(resolved_path));
+    publishGlobalMaps();
+    RCLCPP_INFO(
+      get_logger(),
+      "Loaded saved costmap artifact from %s into %s.",
+      resolved_path.c_str(),
+      map_frame_id_.c_str());
+  } catch (const std::exception & exception) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to load saved costmap artifact from %s: %s",
+      resolved_path.c_str(),
+      exception.what());
+  }
+}
+
+void MappingNode::initializeMapFromArtifact(const LoadedCostmapArtifact & artifact)
+{
+  if (
+    artifact.width_cells == 0U || artifact.height_cells == 0U ||
+    artifact.resolution <= 0.0 || artifact.costs.empty())
+  {
+    return;
+  }
+
+  latest_live_map_.header.stamp = now();
+  latest_live_map_.header.frame_id = map_frame_id_;
+  latest_live_map_.info.map_load_time = latest_live_map_.header.stamp;
+  latest_live_map_.info.resolution = static_cast<float>(artifact.resolution);
+  latest_live_map_.info.width = artifact.width_cells;
+  latest_live_map_.info.height = artifact.height_cells;
+  latest_live_map_.info.origin.position.x = artifact.origin_x;
+  latest_live_map_.info.origin.position.y = artifact.origin_y;
+  latest_live_map_.info.origin.position.z = 0.0;
+  latest_live_map_.info.origin.orientation.w = 1.0;
+  latest_live_map_.data.assign(artifact.costs.size(), -1);
+
+  global_map_resolution_m_ = artifact.resolution;
+  global_map_scores_.assign(artifact.costs.size(), 0);
+  global_map_observations_.assign(artifact.costs.size(), 0U);
+  global_map_occupied_observations_.assign(artifact.costs.size(), 0U);
+  global_map_free_observations_.assign(artifact.costs.size(), 0U);
+
+  for (std::size_t index = 0U; index < artifact.costs.size(); ++index) {
+    const double occupied_ratio = static_cast<double>(artifact.costs.at(index)) / 255.0;
+    if (occupied_ratio >= artifact.occupied_thresh) {
+      latest_live_map_.data.at(index) = 100;
+      global_map_scores_.at(index) = 20;
+      global_map_observations_.at(index) = 1U;
+      global_map_occupied_observations_.at(index) = 1U;
+    } else if (occupied_ratio <= artifact.free_thresh) {
+      latest_live_map_.data.at(index) = 0;
+      global_map_scores_.at(index) = -20;
+      global_map_observations_.at(index) = 1U;
+      global_map_free_observations_.at(index) = 1U;
+    }
+  }
+
+  seeded_runtime_map_ = latest_live_map_;
+  seeded_runtime_map_ready_ = true;
+  have_scan_ = false;
+  live_map_ready_ = true;
+}
+
+nav_msgs::msg::OccupancyGrid MappingNode::buildStaticRuntimeCostmapArtifact() const
+{
+  nav_msgs::msg::OccupancyGrid artifact_map;
+  if (latest_live_map_.info.width > 0U && latest_live_map_.info.height > 0U) {
+    artifact_map = latest_live_map_;
+  } else if (latest_padded_live_map_.info.width > 0U && latest_padded_live_map_.info.height > 0U) {
+    artifact_map = latest_padded_live_map_;
+  } else {
+    return artifact_map;
+  }
+
+  artifact_map.header.stamp = now();
+  artifact_map.info.map_load_time = artifact_map.header.stamp;
+  artifact_map.data.assign(
+    static_cast<std::size_t>(artifact_map.info.width) * artifact_map.info.height,
+    -1);
+
+  if (seeded_runtime_map_ready_) {
+    for (uint32_t row = 0U; row < seeded_runtime_map_.info.height; ++row) {
+      for (uint32_t col = 0U; col < seeded_runtime_map_.info.width; ++col) {
+        const std::size_t source_index =
+          static_cast<std::size_t>(row) * seeded_runtime_map_.info.width + col;
+        const int8_t seeded_value = seeded_runtime_map_.data.at(source_index);
+        if (seeded_value < 0) {
+          continue;
+        }
+
+        const double world_x = seeded_runtime_map_.info.origin.position.x +
+          (static_cast<double>(col) + 0.5) * seeded_runtime_map_.info.resolution;
+        const double world_y = seeded_runtime_map_.info.origin.position.y +
+          (static_cast<double>(row) + 0.5) * seeded_runtime_map_.info.resolution;
+        int destination_x = 0;
+        int destination_y = 0;
+        if (!worldToGrid(artifact_map, world_x, world_y, destination_x, destination_y)) {
+          continue;
+        }
+
+        const std::size_t destination_index =
+          static_cast<std::size_t>(destination_y) * artifact_map.info.width +
+          static_cast<std::size_t>(destination_x);
+        artifact_map.data.at(destination_index) = seeded_value;
+      }
+    }
+  }
+
+  if (
+    artifact_map.data.size() != latest_live_map_.data.size() ||
+    latest_live_map_.data.size() != global_map_observations_.size() ||
+    latest_live_map_.data.size() != global_map_occupied_observations_.size())
+  {
+    return artifact_map;
+  }
+
+  for (std::size_t index = 0U; index < latest_live_map_.data.size(); ++index) {
+    const uint16_t total_observations = global_map_observations_.at(index);
+    if (total_observations < static_cast<uint16_t>(std::max(1, static_obstacle_min_observations_))) {
+      continue;
+    }
+
+    const uint16_t occupied_observations = global_map_occupied_observations_.at(index);
+    const double occupied_fraction =
+      static_cast<double>(occupied_observations) / static_cast<double>(total_observations);
+    if (
+      occupied_fraction < static_obstacle_min_occupied_fraction_ ||
+      latest_live_map_.data.at(index) < 65)
+    {
+      continue;
+    }
+
+    artifact_map.data.at(index) = 100;
+  }
+
+  return artifact_map;
+}
+
+void MappingNode::persistRuntimeCostmapArtifact()
+{
+  if (saved_costmap_yaml_.empty()) {
+    return;
+  }
+
+  const nav_msgs::msg::OccupancyGrid map_to_save = buildStaticRuntimeCostmapArtifact();
+  if (map_to_save.info.width == 0U || map_to_save.info.height == 0U) {
+    return;
+  }
+
+  const std::filesystem::path yaml_path(resolveRuntimePath(saved_costmap_yaml_));
+  try {
+    std::optional<nlohmann::json> georeference_metadata;
+    if (!manual_mapping_mode_ && !synchronized_path_samples_.empty()) {
+      std::vector<MapPoint> local_trace;
+      std::vector<GeoPoint> geo_trace;
+      local_trace.reserve(synchronized_path_samples_.size());
+      geo_trace.reserve(synchronized_path_samples_.size());
+      for (const auto & sample : synchronized_path_samples_) {
+        local_trace.push_back({sample.odom_position.x, sample.odom_position.y});
+        geo_trace.push_back({sample.raw_navsat.latitude, sample.raw_navsat.longitude});
+      }
+      const std::string companion_file = actual_path_navsat_output_file_.empty() ? std::string{} :
+        std::filesystem::path(actual_path_navsat_output_file_).filename().string();
+      georeference_metadata = buildGeoReferenceMetadata(local_trace, geo_trace, companion_file);
+      if (georeference_metadata.has_value()) {
+        (*georeference_metadata)["source_crs"] = "EPSG:4326";
+      }
+    }
+    saveOccupancyGridArtifact(map_to_save, yaml_path, georeference_metadata);
+  } catch (const std::exception & exception) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Failed to persist runtime costmap artifact to %s: %s",
+      yaml_path.string().c_str(),
+      exception.what());
+  }
+}
+
 std::string MappingNode::composeMapBuilderStatus() const
 {
   const bool ready = have_scan_ && latest_odometry_pose_ready_;
@@ -1064,6 +1431,7 @@ void MappingNode::publishCoordinatorStatus()
     "; route=" + mission_route_file_ +
     "; mission_id=" + mission_id_ +
     "; mission_output_directory=" + mission_output_directory_ +
+    "; saved_costmap_yaml=" + saved_costmap_yaml_ +
     "; mission_costmap_yaml=" + mission_costmap_yaml_ +
     "; mission_window_start=" + mission_window_start_ +
     "; mission_window_end=" + mission_window_end_ +
@@ -1095,6 +1463,7 @@ void MappingNode::writeMissionSessionMetadata() const
     {"mission_type", mission_type_},
     {"execution_mode", execution_mode_},
     {"mission_route_file", mission_route_file_},
+    {"saved_costmap_yaml", saved_costmap_yaml_},
     {"mission_costmap_yaml", mission_costmap_yaml_},
     {"mission_window_start", mission_window_start_},
     {"mission_window_end", mission_window_end_},
@@ -1120,22 +1489,7 @@ void MappingNode::writeMissionSessionMetadata() const
 
 void MappingNode::publishMapAlignmentTransform()
 {
-  if (map_frame_id_ != odom_frame_id_ || publish_seeded_map_to_odom_) {
-    tf2::Quaternion identity_quaternion;
-    identity_quaternion.setRPY(0.0, 0.0, 0.0);
-    identity_quaternion.normalize();
-
-    const tf2::Transform identity_map_to_odom(
-      identity_quaternion,
-      tf2::Vector3(0.0, 0.0, 0.0));
-
-    tf_broadcaster_->sendTransform(
-      stampedFromTransform(
-        identity_map_to_odom,
-        now(),
-        map_frame_id_,
-        odom_frame_id_));
-  }
+  // map -> odom is published by map_pose_node so mapping_node only builds and publishes maps.
 }
 
 void MappingNode::integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan & message)
@@ -1868,7 +2222,7 @@ void MappingNode::publishRouteMarker() const
   visualization_msgs::msg::Marker marker;
   marker.header.frame_id = frame_id_;
   marker.header.stamp = now();
-  marker.ns = "mapping_route";
+  marker.ns = "mapping_waypoint_path";
   marker.id = 0;
   marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
   marker.action = visualization_msgs::msg::Marker::ADD;
@@ -1881,7 +2235,7 @@ void MappingNode::publishRouteMarker() const
   for (const auto & pose : mission_route_) {
     marker.points.push_back(pose.pose.position);
   }
-  route_marker_publisher_->publish(marker);
+  waypoint_path_publisher_->publish(marker);
 }
 
 std::string MappingNode::routeGeoJsonPath() const
@@ -2128,6 +2482,8 @@ void MappingNode::initializeGlobalMap(const geometry_msgs::msg::Point & center)
   latest_live_map_.data.assign(static_cast<std::size_t>(width) * height, -1);
   global_map_scores_.assign(latest_live_map_.data.size(), 0);
   global_map_observations_.assign(latest_live_map_.data.size(), 0);
+  global_map_occupied_observations_.assign(latest_live_map_.data.size(), 0U);
+  global_map_free_observations_.assign(latest_live_map_.data.size(), 0U);
 }
 
 void MappingNode::expandGlobalMapToFit(
@@ -2173,6 +2529,8 @@ void MappingNode::expandGlobalMapToFit(
   std::vector<int8_t> expanded_data(static_cast<std::size_t>(new_width) * new_height, -1);
   std::vector<int16_t> expanded_scores(expanded_data.size(), 0);
   std::vector<uint16_t> expanded_observations(expanded_data.size(), 0);
+  std::vector<uint16_t> expanded_occupied_observations(expanded_data.size(), 0);
+  std::vector<uint16_t> expanded_free_observations(expanded_data.size(), 0);
 
   for (uint32_t row = 0U; row < latest_live_map_.info.height; ++row) {
     for (uint32_t col = 0U; col < latest_live_map_.info.width; ++col) {
@@ -2183,6 +2541,10 @@ void MappingNode::expandGlobalMapToFit(
       expanded_data.at(destination_index) = latest_live_map_.data.at(source_index);
       expanded_scores.at(destination_index) = global_map_scores_.at(source_index);
       expanded_observations.at(destination_index) = global_map_observations_.at(source_index);
+      expanded_occupied_observations.at(destination_index) =
+        global_map_occupied_observations_.at(source_index);
+      expanded_free_observations.at(destination_index) =
+        global_map_free_observations_.at(source_index);
     }
   }
 
@@ -2193,6 +2555,8 @@ void MappingNode::expandGlobalMapToFit(
   latest_live_map_.data = std::move(expanded_data);
   global_map_scores_ = std::move(expanded_scores);
   global_map_observations_ = std::move(expanded_observations);
+  global_map_occupied_observations_ = std::move(expanded_occupied_observations);
+  global_map_free_observations_ = std::move(expanded_free_observations);
 }
 
 bool MappingNode::worldToGrid(
@@ -2225,6 +2589,7 @@ void MappingNode::markCellFree(const int grid_x, const int grid_y)
   const std::size_t index =
     static_cast<std::size_t>(grid_y) * latest_live_map_.info.width + static_cast<std::size_t>(grid_x);
   ++global_map_observations_.at(index);
+  ++global_map_free_observations_.at(index);
   global_map_scores_.at(index) = static_cast<int16_t>(std::max<int>(-20, global_map_scores_.at(index) - 1));
 }
 
@@ -2241,6 +2606,7 @@ void MappingNode::markCellOccupied(const int grid_x, const int grid_y)
   const std::size_t index =
     static_cast<std::size_t>(grid_y) * latest_live_map_.info.width + static_cast<std::size_t>(grid_x);
   ++global_map_observations_.at(index);
+  ++global_map_occupied_observations_.at(index);
   global_map_scores_.at(index) = static_cast<int16_t>(std::min<int>(20, global_map_scores_.at(index) + 3));
 }
 
@@ -2273,8 +2639,10 @@ void MappingNode::publishGlobalMaps()
   }
   latest_padded_live_map_ready_ = true;
   live_map_publisher_->publish(latest_padded_live_map_);
+  global_costmap_publisher_->publish(latest_padded_live_map_);
   live_map_metadata_publisher_->publish(latest_padded_live_map_.info);
   live_map_ready_ = true;
+  persistRuntimeCostmapArtifact();
 }
 
 std::vector<std::vector<geometry_msgs::msg::PoseStamped>> MappingNode::chunkRoute(

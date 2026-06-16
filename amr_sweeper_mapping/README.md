@@ -27,11 +27,15 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 
 ## Runtime Structure
 - `mapping_node.cpp/.hpp` contains the Nav2 costmap plugin, the `mapping_node` coordinator, and the in-package occupancy-grid map builder.
+- `map_pose_node.cpp/.hpp` publishes `map -> odom` from georeferenced sensor inputs so Nav2 can consume the global map in the `map` frame.
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
-- REP-105 ownership in this workspace is now: FusionCore publishes `odom -> base_footprint`, and `amr_sweeper_mapping` publishes the `map -> odom` alignment used by the in-package map builder.
-- The mapping coordinator republishes the live occupancy grid on `mapping/occupancy_grid` in `map` and publishes matching metadata on `mapping/occupancy_grid_metadata`.
+- REP-105 ownership in this workspace is now: FusionCore publishes `odom -> base_footprint`, and `map_pose_node` inside `amr_sweeper_mapping` publishes the `map -> odom` alignment.
+- The mapping coordinator republishes the live occupancy grid on `mapping/occupancy_grid`, publishes the Nav2-facing runtime global map on `mapping/global_costmap`, and publishes matching metadata on `mapping/occupancy_grid_metadata`.
+- The planned mission waypoints loaded from the active run folder's copied `<mission>_path.geojson` are visualized on `mapping/waypoint_path`.
+- When `saved_costmap_yaml` is configured, the coordinator seeds that published map from the saved YAML/PGM artifact before live scans extend or overwrite it.
+- Runtime costmap artifacts now embed georeference metadata in the YAML file so the exported YAML/PGM pair can be related back to the real world outside the robot.
 - The required runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
 - The mission route and mission costmap must come from that execution folder's `execution_context.json`, not from shared top-level alias files.
 - `auto_start_mission` defaults to `false`; FSM `RUNNING` profiles are expected to enable it explicitly when mission execution is intended.

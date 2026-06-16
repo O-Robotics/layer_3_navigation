@@ -1,0 +1,112 @@
+#ifndef AMR_SWEEPER_MAPPING__MAP_POSE_NODE_HPP_
+#define AMR_SWEEPER_MAPPING__MAP_POSE_NODE_HPP_
+
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <array>
+#include <string>
+
+#include <fusioncore_ros/srv/from_ll.hpp>
+#include <geometry_msgs/msg/point.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
+#include <tf2/LinearMath/Transform.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/transform_broadcaster.h>
+
+namespace amr_sweeper_mapping
+{
+
+class MapPoseNode : public rclcpp::Node
+{
+public:
+  MapPoseNode();
+
+private:
+  void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
+  void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
+  void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
+  void handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message);
+  void handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
+  void publishMapToOdomTransform();
+  void loadCostmapGeoreference();
+  [[nodiscard]] std::optional<geometry_msgs::msg::Point> latestMapPositionFromNavSat() const;
+  [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPositionFromArtifactGeoreference() const;
+  [[nodiscard]] std::optional<tf2::Transform> estimateMapToBaseFromPrior(
+    const geometry_msgs::msg::Point & map_position_prior,
+    double heading_prior_yaw) const;
+
+  std::string map_frame_id_;
+  std::string odom_frame_id_;
+  std::string base_frame_id_;
+  std::string odometry_topic_;
+  std::string navsat_topic_;
+  std::string heading_topic_;
+  std::string scan_topic_;
+  std::string global_costmap_topic_;
+  std::string fromll_service_name_;
+  std::string costmap_yaml_path_;
+  bool publish_identity_when_pose_missing_{true};
+  bool latest_odometry_ready_{false};
+  bool latest_navsat_ready_{false};
+  bool latest_heading_ready_{false};
+  bool latest_scan_ready_{false};
+  bool latest_global_costmap_ready_{false};
+  bool last_map_to_odom_ready_{false};
+  bool artifact_georeference_ready_{false};
+  int occupied_threshold_{65};
+  int scan_subsample_step_{4};
+  int min_valid_scan_points_{20};
+  int endpoint_search_radius_cells_{1};
+  double search_translation_window_m_{2.0};
+  double search_translation_step_m_{0.25};
+  double search_yaw_window_rad_{0.35};
+  double search_yaw_step_rad_{0.0872664626};
+  double translation_penalty_per_meter_{0.5};
+  double yaw_penalty_per_rad_{0.25};
+  double free_space_penalty_{0.35};
+  double free_space_reward_{0.02};
+  double occupied_reward_{1.0};
+  double occupied_penalty_{0.3};
+  double prior_blend_weight_{0.7};
+  double scan_timeout_seconds_{1.0};
+  double costmap_timeout_seconds_{2.0};
+  double max_translation_jump_m_{0.75};
+  double max_yaw_jump_rad_{0.35};
+  double transform_smoothing_alpha_{0.35};
+  geometry_msgs::msg::Point latest_odometry_position_;
+  geometry_msgs::msg::Quaternion latest_odometry_orientation_;
+  sensor_msgs::msg::NavSatFix latest_navsat_;
+  sensor_msgs::msg::Imu latest_heading_;
+  sensor_msgs::msg::LaserScan latest_scan_;
+  nav_msgs::msg::OccupancyGrid latest_global_costmap_;
+  rclcpp::Time latest_odometry_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_heading_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_scan_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_map_pose_stamp_{0, 0, RCL_ROS_TIME};
+  std::array<double, 3> artifact_longitude_coefficients_{0.0, 0.0, 0.0};
+  std::array<double, 3> artifact_latitude_coefficients_{0.0, 0.0, 0.0};
+  tf2::Transform last_map_to_odom_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_subscription_;
+  rclcpp::TimerBase::SharedPtr publish_timer_;
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;
+};
+
+}  // namespace amr_sweeper_mapping
+
+#endif  // AMR_SWEEPER_MAPPING__MAP_POSE_NODE_HPP_

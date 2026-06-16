@@ -45,6 +45,7 @@ def _build_nodes(context):
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
     params_file = LaunchConfiguration("mapping_params_file").perform(context)
+    map_pose_params_file = LaunchConfiguration("map_pose_params_file").perform(context)
     mission_execution_directory = LaunchConfiguration("mission_execution_directory").perform(context)
     configured_mission_file = LaunchConfiguration("mission_file").perform(context)
     configured_mission_id = LaunchConfiguration("mission_id").perform(context)
@@ -72,6 +73,7 @@ def _build_nodes(context):
     mission_costmap_yaml = configured_mission_costmap_yaml or mission_context.get(
         "mission_costmap_yaml", ""
     )
+    saved_costmap_yaml = mission_context.get("saved_costmap_yaml", "") or mission_costmap_yaml
     gaussian_output_directory = mission_context.get("gaussian_output_directory", "")
     if not gaussian_output_directory and mission_run_directory:
         gaussian_output_directory = str(Path(mission_run_directory) / "gaussian")
@@ -115,12 +117,34 @@ def _build_nodes(context):
         common_runtime_parameters["actual_path_navsat_output_file"] = actual_path_navsat_output_file
     if mission_costmap_yaml:
         common_runtime_parameters["mission_costmap_yaml"] = mission_costmap_yaml
+    if saved_costmap_yaml:
+        common_runtime_parameters["saved_costmap_yaml"] = saved_costmap_yaml
     if mission_window_start:
         common_runtime_parameters["mission_window_start"] = mission_window_start
     if mission_window_end:
         common_runtime_parameters["mission_window_end"] = mission_window_end
 
     actions = []
+    map_pose_runtime_parameters = {
+        "use_sim_time": use_sim_time,
+    }
+    if saved_costmap_yaml:
+        map_pose_runtime_parameters["costmap_yaml_path"] = saved_costmap_yaml
+    if builtin_local_pattern_mode:
+        map_pose_runtime_parameters["map_frame"] = "odom"
+        map_pose_runtime_parameters["odom_frame"] = "odom"
+
+    actions.append(
+        Node(
+            package="amr_sweeper_mapping",
+            executable="map_pose_node",
+            name="map_pose_node",
+            namespace=namespace,
+            output="screen",
+            parameters=[map_pose_params_file, map_pose_runtime_parameters],
+        )
+    )
+
     if not builtin_local_pattern_mode:
         actions.extend([
             Node(
@@ -173,6 +197,13 @@ def generate_launch_description():
                     [FindPackageShare("amr_sweeper_mapping"), "config", "mapping_params.yaml"]
                 ),
                 description="Shared parameter file for mapping package nodes.",
+            ),
+            DeclareLaunchArgument(
+                "map_pose_params_file",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("amr_sweeper_mapping"), "config", "map_pose.yaml"]
+                ),
+                description="Parameter file for the map_pose_node TF publisher.",
             ),
             DeclareLaunchArgument(
                 "mission_execution_directory",

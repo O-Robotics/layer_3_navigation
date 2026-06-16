@@ -1,0 +1,34 @@
+/**/:
+  ros__parameters:
+    map_frame:                           map                              # Georeferenced global planning frame used by the global costmap and Nav2 long-horizon planning.
+    odom_frame:                          odom                             # Smooth local metric frame from FusionCore that anchors short-term motion and the local costmap.
+    base_frame:                          base_footprint                   # Robot body frame that closes the map -> odom -> base_footprint TF chain and anchors scan matching.
+    odometry_topic:                      localization/odometry_fused      # FusionCore pose in odom used as the local half of the map -> odom -> base_footprint chain.
+    navsat_topic:                        gnss/navsat                      # Georeferenced GNSS fix used to derive the robot position in the global map frame.
+    heading_topic:                       imu/data_heading                 # Yaw-only heading input used to orient the georeferenced map pose before back-calculating map -> odom.
+    scan_topic:                          depth_camera/scan                # LaserScan used to settle the georeferenced prior against the known global costmap instead of trusting GNSS alone.
+    global_costmap_topic:                mapping/global_costmap           # Runtime global costmap that acts as the known map for scan-to-map pose correction.
+    fromll_service:                      /fromLL                          # Coordinate-conversion service that projects lon/lat fixes into the metric map frame.
+    costmap_yaml_path:                   ""                               # Optional saved/runtime costmap YAML whose embedded georeference metadata should be treated as the first-choice world mapping.
+    publish_period_seconds:              0.5                              # Refresh period for the published map -> odom transform.
+    publish_identity_when_pose_missing:  true                             # Publish identity map -> odom until GNSS/heading inputs are ready instead of leaving the TF missing.
+    occupied_threshold:                  65                               # Occupancy value that counts as a map hit when correlating scan endpoints against the global costmap.
+    scan_subsample_step:                 4                                # Use every Nth beam during correlation to keep the bounded search light enough for startup and recovery.
+    min_valid_scan_points:               20                               # Require at least this many usable scan endpoints before scan matching is allowed to override the GNSS and IMU prior.
+    endpoint_search_radius_cells:        1                                # Accept occupied cells within this neighborhood radius so minor raster offsets do not destabilize the score.
+    search_translation_window_m:         2.0                              # Search this far around the georeferenced prior in X and Y when refining the robot pose against the map.
+    search_translation_step_m:           0.25                             # Translation step for the bounded map-correlation search.
+    search_yaw_window_rad:               0.35                             # Search this far around the heading prior in yaw, in radians.
+    search_yaw_step_rad:                 0.0872664626                     # Yaw search step in radians, here roughly 5 degrees.
+    translation_penalty_per_meter:       0.5                              # Penalize candidates that drift too far from the GNSS prior so the matcher stays conservative at startup.
+    yaw_penalty_per_rad:                 0.25                             # Penalize candidates that drift too far from the IMU heading prior.
+    free_space_penalty:                  0.35                             # Penalize candidates whose beams pass through occupied cells before reaching the measured endpoint.
+    free_space_reward:                   0.02                             # Small reward for beams that traverse cells already known to be free.
+    occupied_reward:                     1.0                              # Reward given when a beam endpoint lands on an occupied structure in the global costmap.
+    occupied_penalty:                    0.3                              # Penalty applied when a beam endpoint lands in a place that does not agree with the map.
+    prior_blend_weight:                  0.7                              # Blend between the fresh GNSS and IMU prior and the previously published map pose to stabilize continuous tracking.
+    scan_timeout_seconds:                1.0                              # Ignore stale scans so the matcher does not back-calculate map -> odom from old sensor data.
+    costmap_timeout_seconds:             2.0                              # Ignore stale global costmaps during scan correlation.
+    max_translation_jump_m:              0.75                             # Clamp one update of map -> odom so a single bad correlation cannot teleport the robot in the map frame.
+    max_yaw_jump_rad:                    0.35                             # Clamp one update of map -> odom in yaw so a single bad scan match cannot spin the robot pose.
+    transform_smoothing_alpha:           0.35                             # Low-pass factor applied after clamping so the published transform behaves like a continuous localizer instead of a frame-to-frame jump detector.

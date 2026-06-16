@@ -45,6 +45,7 @@
     mission_output_directory:      ""                               # Leave empty until a mission execution folder is injected; mapping_session.json should only land inside per-run folders.
     actual_path_output_file:       ""                               # Leave empty until execution_context.json provides the per-run actual-path destination.
     mission_costmap_yaml:          ""                               # Exact mission costmap yaml from execution_context.json when launched by layer 0.
+    saved_costmap_yaml:            ""                               # Optional Nav2-style saved costmap YAML/PGM artifact to seed the published map-frame occupancy grid at startup.
     mission_window_start:          ""
     mission_window_end:            ""
 
@@ -57,9 +58,11 @@
     base_frame:                    base_footprint                   # Robot body frame used by the in-package scan map builder readiness checks.
     scan_topic:                    depth_camera/scan                # Depth-camera laserscan topic relative to the robot namespace.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
-    map_alignment_publish_period_seconds: 0.5                        # When odom-only runtime mode is enabled, keep the optional identity map -> odom alignment refreshed.
     global_map_resolution_m:       0.05                             # Resolution of the in-package global occupancy-grid map builder.
     local_map_size_m:              10.0                             # Publish a rolling 10x10 m local occupancy map in odom, centered on /localization/odometry_fused.
+    runtime_costmap_save_period_seconds: 10.0                       # Periodically write the runtime mission costmap artifact back into the active run folder while scans refine it.
+    static_obstacle_min_observations: 6                             # Minimum number of occupied observations before a scanned obstacle is considered static enough to persist into the runtime costmap artifact.
+    static_obstacle_min_occupied_fraction: 0.75                     # Minimum occupied-observation fraction required before a cell is treated as static structure instead of a transient obstacle.
     follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
     pad_live_map_to_minimum_size:  true                             # Republish the live global occupancy grid with a minimum square footprint so short default missions are plan-able immediately.
     min_global_map_size_m:         10.0                             # Minimum width/height of the republished live map in meters before Nav2 sees it.
