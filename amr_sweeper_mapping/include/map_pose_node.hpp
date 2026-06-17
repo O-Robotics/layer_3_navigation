@@ -10,6 +10,7 @@
 
 #include <fusioncore_ros/srv/from_ll.hpp>
 #include <geometry_msgs/msg/point.hpp>
+#include <geographic_msgs/msg/geo_point.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -30,6 +31,13 @@ public:
   MapPoseNode();
 
 private:
+  struct MapMatchEstimate
+  {
+    tf2::Transform map_to_base;
+    double score{0.0};
+    double confidence{0.0};
+  };
+
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
@@ -37,11 +45,19 @@ private:
   void handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishMapToOdomTransform();
   void loadCostmapGeoreference();
+  void initializeMapToOdomFilter();
+  void predictMapToOdomFilter();
+  void updateMapToOdomFilter(const tf2::Transform & measurement, double confidence);
+  void decayMapToOdomFilterTowardsIdentity();
+  [[nodiscard]] tf2::Transform filteredMapToOdomTransform() const;
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> latestMapPositionFromNavSat() const;
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPositionFromArtifactGeoreference() const;
-  [[nodiscard]] std::optional<tf2::Transform> estimateMapToBaseFromPrior(
-    const geometry_msgs::msg::Point & map_position_prior,
-    double heading_prior_yaw) const;
+  [[nodiscard]] std::optional<geographic_msgs::msg::GeoPoint> artifactGeoPointFromMapPoint(
+    const geometry_msgs::msg::Point & map_point) const;
+  [[nodiscard]] double georeferenceConsistencyConfidence(
+    const tf2::Transform & candidate_map_to_base) const;
+  [[nodiscard]] std::optional<MapMatchEstimate> estimateMapToBaseFromPrior(
+    const tf2::Transform & map_to_base_prior) const;
 
   std::string map_frame_id_;
   std::string odom_frame_id_;
@@ -60,6 +76,7 @@ private:
   bool latest_scan_ready_{false};
   bool latest_global_costmap_ready_{false};
   bool last_map_to_odom_ready_{false};
+  bool map_to_odom_filter_ready_{false};
   bool artifact_georeference_ready_{false};
   int occupied_threshold_{65};
   int scan_subsample_step_{4};
@@ -81,6 +98,15 @@ private:
   double max_translation_jump_m_{0.75};
   double max_yaw_jump_rad_{0.35};
   double transform_smoothing_alpha_{0.35};
+  double minimum_match_score_{0.15};
+  double high_confidence_match_score_{0.75};
+  double minimum_confidence_for_filter_update_{0.45};
+  double low_confidence_identity_pull_alpha_{0.15};
+  double georef_consistency_max_error_m_{5.0};
+  double georef_consistency_min_confidence_{0.2};
+  std::array<double, 3> process_noise_diagonal_{0.01, 0.01, 0.005};
+  std::array<double, 3> measurement_noise_diagonal_min_{0.05, 0.05, 0.02};
+  std::array<double, 3> measurement_noise_diagonal_max_{0.6, 0.6, 0.3};
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   sensor_msgs::msg::NavSatFix latest_navsat_;
@@ -94,6 +120,8 @@ private:
   rclcpp::Time latest_map_pose_stamp_{0, 0, RCL_ROS_TIME};
   std::array<double, 3> artifact_longitude_coefficients_{0.0, 0.0, 0.0};
   std::array<double, 3> artifact_latitude_coefficients_{0.0, 0.0, 0.0};
+  std::array<double, 3> map_to_odom_filter_state_{0.0, 0.0, 0.0};
+  std::array<double, 3> map_to_odom_filter_covariance_{1.0, 1.0, 0.5};
   tf2::Transform last_map_to_odom_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;

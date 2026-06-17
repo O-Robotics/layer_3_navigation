@@ -93,25 +93,13 @@ local_costmap:
       height:                        10                                  # Height of the rolling local costmap in meters. This gives 5 m reach in each direction from the start area.
       resolution:                    0.05                                # Costmap cell size in meters. Common local costmap example value is 0.05 m.
       footprint:                     "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]"  # Robot footprint polygon in meters in base_footprint. Replaces robot_radius=0.22 to include the front tool width.
-      plugins:                       ["obstacle_layer", "inflation_layer"]  # Local costmap layers to load. This setup uses obstacle marking plus inflation.
+      plugins:                       ["static_layer", "inflation_layer"]  # Local planning consumes the mapping-owned rolling odom-frame local costmap plus inflation.
 
-      # -- Obstacle layer ------------------------------------------------------
-      obstacle_layer:
-        plugin:                      "nav2_costmap_2d::ObstacleLayer"    # Obstacle marking/clearing layer implementation. This is Nav2's standard obstacle plugin.
-        enabled:                     true                                # Enable this layer. Default is effectively true when the layer is loaded.
-        observation_sources:         scan                                # Named sensor source list this layer should subscribe to. No single hardcoded default.
-
-        scan:
-          topic:                     depth_camera/scan                   # LaserScan topic resolved under the selected robot namespace.
-          max_obstacle_height:       2.0                                 # Depth-camera-derived scans can originate from an elevated, tilted sensor; keep the default Nav2-style height gate permissive.
-          clearing:                  true                                # Use this sensor source to clear free space via raytracing. Common default/example is true.
-          marking:                   true                                # Use this sensor source to mark obstacles. Common default/example is true.
-          data_type:                 "LaserScan"                         # ROS message type expected from the source. Common options are LaserScan or PointCloud2.
-          raytrace_max_range:        8.0                                 # Match the configured depth-camera laserscan max range so free-space clearing is not prematurely truncated.
-          raytrace_min_range:        0.0                                 # Minimum range in meters used to clear free space. Common examples use 0.0 m.
-          obstacle_max_range:        8.0                                 # Keep obstacle marking bounded to the same nearby workspace as the local sweep patterns.
-          obstacle_min_range:        0.0                                 # Minimum range in meters used to insert obstacle cells. Common examples use 0.0 m.
-          inf_is_valid:              true                                # Treat infinite LaserScan ranges as valid free-space readings for clearing.
+      static_layer:
+        plugin:                      "nav2_costmap_2d::StaticLayer"
+        map_topic:                   mapping/local_costmap
+        map_subscribe_transient_local: false
+        subscribe_to_updates:        false
 
       # -- Inflation layer -----------------------------------------------------
       inflation_layer:
@@ -136,25 +124,13 @@ global_costmap:
       height:                        10                                  # Height of the rolling global costmap in meters. This gives 5 m reach in each direction from the start area.
       resolution:                    0.05                                # Costmap cell size in meters. Matches the local costmap resolution so planner and controller stay aligned.
       track_unknown_space:           false                               # Odom-based builtin local missions do not rely on unknown-space reasoning from SLAM.
-      plugins:                       ["obstacle_layer", "inflation_layer"]  # Builtin local missions plan directly against live obstacles in odom.
+      plugins:                       ["static_layer", "inflation_layer"]  # Builtin local missions still plan in odom, but they now consume mapping-published costmaps instead of raw scans.
 
-      # -- Obstacle layer ------------------------------------------------------
-      obstacle_layer:
-        plugin:                      "nav2_costmap_2d::ObstacleLayer"    # Obstacle marking/clearing layer implementation. This is Nav2's standard obstacle plugin.
-        enabled:                     true                                # Enable this layer. Default is effectively true when the layer is loaded.
-        observation_sources:         scan                                # Named sensor source list this layer should subscribe to. No single hardcoded default.
-
-        scan:
-          topic:                     depth_camera/scan                   # LaserScan topic resolved under the selected robot namespace.
-          max_obstacle_height:       2.0                                 # Depth-camera-derived scans can originate from an elevated, tilted sensor; keep the default Nav2-style height gate permissive.
-          clearing:                  true                                # Use this sensor source to clear free space via raytracing. Common default/example is true.
-          marking:                   true                                # Use this sensor source to mark obstacles. Common default/example is true.
-          data_type:                 "LaserScan"                         # ROS message type expected from the source. Common options are LaserScan or PointCloud2.
-          raytrace_max_range:        5.0                                 # Match the configured depth-camera laserscan max range so free-space clearing is not prematurely truncated.
-          raytrace_min_range:        0.0                                 # Minimum range in meters used to clear free space. Common examples use 0.0 m.
-          obstacle_max_range:        5.0                                 # Keep global obstacle marking bounded to the compact builtin mission workspace.
-          obstacle_min_range:        0.0                                 # Minimum range in meters used to insert obstacle cells. Common examples use 0.0 m.
-          inf_is_valid:              true                                # Treat infinite LaserScan ranges as valid free-space readings for clearing.
+      static_layer:
+        plugin:                      "nav2_costmap_2d::StaticLayer"
+        map_topic:                   mapping/global_costmap
+        map_subscribe_transient_local: false
+        subscribe_to_updates:        false
 
       # -- Inflation layer -----------------------------------------------------
       inflation_layer:

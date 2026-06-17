@@ -49,7 +49,6 @@ def _rewrite_nav2_params(context) -> dict:
         'use_sim_time': use_sim_time,
         'autostart': autostart,
         'costmap_yaml_path': mission_costmap_yaml,
-        'map_topic': _qualify_topic(namespace_value, 'mapping/global_costmap'),
     }
 
     rewritten_params_path = RewrittenYaml(
@@ -76,7 +75,6 @@ def _build_configured_params(context):
         'use_sim_time': use_sim_time,
         'autostart': autostart,
         'costmap_yaml_path': mission_costmap_yaml,
-        'map_topic': _qualify_topic(namespace_value, 'mapping/global_costmap'),
     }
 
     return ParameterFile(

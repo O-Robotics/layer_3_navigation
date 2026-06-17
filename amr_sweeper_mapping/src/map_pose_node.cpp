@@ -4,6 +4,7 @@
 #include <cmath>
 #include <fstream>
 #include <future>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <string>
@@ -33,17 +34,6 @@ geometry_msgs::msg::TransformStamped stampedFromTransform(
   message.child_frame_id = child_frame;
   message.transform = tf2::toMsg(transform);
   return message;
-}
-
-double yawFromQuaternion(const geometry_msgs::msg::Quaternion & quaternion_message)
-{
-  tf2::Quaternion quaternion;
-  tf2::fromMsg(quaternion_message, quaternion);
-  double roll = 0.0;
-  double pitch = 0.0;
-  double yaw = 0.0;
-  tf2::Matrix3x3(quaternion).getRPY(roll, pitch, yaw);
-  return yaw;
 }
 
 double yawFromTransform(const tf2::Transform & transform)
@@ -162,6 +152,22 @@ tf2::Transform blendTransforms(
     blended_yaw);
 }
 
+double geographicDistanceMeters(
+  const geographic_msgs::msg::GeoPoint & first,
+  const geographic_msgs::msg::GeoPoint & second)
+{
+  constexpr double earth_radius_m = 6378137.0;
+  constexpr double degrees_to_radians = M_PI / 180.0;
+  const double mean_latitude_rad =
+    ((first.latitude + second.latitude) * 0.5) * degrees_to_radians;
+  const double delta_latitude_m =
+    (second.latitude - first.latitude) * degrees_to_radians * earth_radius_m;
+  const double delta_longitude_m =
+    (second.longitude - first.longitude) * degrees_to_radians * earth_radius_m *
+    std::cos(mean_latitude_rad);
+  return std::hypot(delta_latitude_m, delta_longitude_m);
+}
+
 }  // namespace
 
 MapPoseNode::MapPoseNode()
@@ -199,6 +205,15 @@ MapPoseNode::MapPoseNode()
   declare_parameter("max_translation_jump_m", 0.75);
   declare_parameter("max_yaw_jump_rad", 0.35);
   declare_parameter("transform_smoothing_alpha", 0.35);
+  declare_parameter("minimum_match_score", 0.15);
+  declare_parameter("high_confidence_match_score", 0.75);
+  declare_parameter("minimum_confidence_for_filter_update", 0.45);
+  declare_parameter("low_confidence_identity_pull_alpha", 0.15);
+  declare_parameter("georef_consistency_max_error_m", 5.0);
+  declare_parameter("georef_consistency_min_confidence", 0.2);
+  declare_parameter("process_noise_diagonal", std::vector<double>{0.01, 0.01, 0.005});
+  declare_parameter("measurement_noise_diagonal_min", std::vector<double>{0.05, 0.05, 0.02});
+  declare_parameter("measurement_noise_diagonal_max", std::vector<double>{0.6, 0.6, 0.3});
 
   map_frame_id_ = get_parameter("map_frame").as_string();
   odom_frame_id_ = get_parameter("odom_frame").as_string();
@@ -243,6 +258,48 @@ MapPoseNode::MapPoseNode()
     get_parameter("transform_smoothing_alpha").as_double(),
     0.0,
     1.0);
+  minimum_match_score_ = get_parameter("minimum_match_score").as_double();
+  high_confidence_match_score_ = std::max(
+    minimum_match_score_ + 1.0e-6,
+    get_parameter("high_confidence_match_score").as_double());
+  minimum_confidence_for_filter_update_ = std::clamp(
+    get_parameter("minimum_confidence_for_filter_update").as_double(),
+    0.0,
+    1.0);
+  low_confidence_identity_pull_alpha_ = std::clamp(
+    get_parameter("low_confidence_identity_pull_alpha").as_double(),
+    0.0,
+    1.0);
+  georef_consistency_max_error_m_ = std::max(
+    0.1,
+    get_parameter("georef_consistency_max_error_m").as_double());
+  georef_consistency_min_confidence_ = std::clamp(
+    get_parameter("georef_consistency_min_confidence").as_double(),
+    0.0,
+    1.0);
+  const auto process_noise_values = get_parameter("process_noise_diagonal").as_double_array();
+  const auto measurement_noise_min_values =
+    get_parameter("measurement_noise_diagonal_min").as_double_array();
+  const auto measurement_noise_max_values =
+    get_parameter("measurement_noise_diagonal_max").as_double_array();
+  if (process_noise_values.size() == 3U) {
+    process_noise_diagonal_ = {
+      process_noise_values[0],
+      process_noise_values[1],
+      process_noise_values[2]};
+  }
+  if (measurement_noise_min_values.size() == 3U) {
+    measurement_noise_diagonal_min_ = {
+      measurement_noise_min_values[0],
+      measurement_noise_min_values[1],
+      measurement_noise_min_values[2]};
+  }
+  if (measurement_noise_max_values.size() == 3U) {
+    measurement_noise_diagonal_max_ = {
+      measurement_noise_max_values[0],
+      measurement_noise_max_values[1],
+      measurement_noise_max_values[2]};
+  }
   loadCostmapGeoreference();
 
   odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -272,6 +329,90 @@ MapPoseNode::MapPoseNode()
   publish_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("publish_period_seconds").as_double()),
     std::bind(&MapPoseNode::publishMapToOdomTransform, this));
+}
+
+void MapPoseNode::initializeMapToOdomFilter()
+{
+  map_to_odom_filter_state_ = {0.0, 0.0, 0.0};
+  map_to_odom_filter_covariance_ = {
+    measurement_noise_diagonal_max_[0],
+    measurement_noise_diagonal_max_[1],
+    measurement_noise_diagonal_max_[2]};
+  last_map_to_odom_ = transformFromXYYaw(0.0, 0.0, 0.0, 0.0);
+  last_map_to_odom_ready_ = true;
+  map_to_odom_filter_ready_ = true;
+}
+
+void MapPoseNode::predictMapToOdomFilter()
+{
+  if (!map_to_odom_filter_ready_) {
+    initializeMapToOdomFilter();
+  }
+
+  for (std::size_t index = 0U; index < map_to_odom_filter_covariance_.size(); ++index) {
+    map_to_odom_filter_covariance_[index] += std::max(1.0e-6, process_noise_diagonal_[index]);
+  }
+}
+
+void MapPoseNode::updateMapToOdomFilter(const tf2::Transform & measurement, const double confidence)
+{
+  if (!map_to_odom_filter_ready_) {
+    initializeMapToOdomFilter();
+  }
+
+  const double clamped_confidence = std::clamp(confidence, 0.0, 1.0);
+  const std::array<double, 3> measurement_state{
+    measurement.getOrigin().x(),
+    measurement.getOrigin().y(),
+    yawFromTransform(measurement)};
+
+  for (std::size_t index = 0U; index < 3U; ++index) {
+    const double measurement_noise =
+      measurement_noise_diagonal_max_[index] -
+      (measurement_noise_diagonal_max_[index] - measurement_noise_diagonal_min_[index]) *
+      clamped_confidence;
+    const double kalman_gain =
+      map_to_odom_filter_covariance_[index] /
+      (map_to_odom_filter_covariance_[index] + std::max(1.0e-6, measurement_noise));
+
+    double innovation = measurement_state[index] - map_to_odom_filter_state_[index];
+    if (index == 2U) {
+      innovation = normalizeAngle(innovation);
+    }
+
+    map_to_odom_filter_state_[index] += kalman_gain * innovation;
+    if (index == 2U) {
+      map_to_odom_filter_state_[index] = normalizeAngle(map_to_odom_filter_state_[index]);
+    }
+    map_to_odom_filter_covariance_[index] *= (1.0 - kalman_gain);
+  }
+}
+
+void MapPoseNode::decayMapToOdomFilterTowardsIdentity()
+{
+  if (!map_to_odom_filter_ready_) {
+    initializeMapToOdomFilter();
+  }
+
+  const double keep_weight = 1.0 - low_confidence_identity_pull_alpha_;
+  map_to_odom_filter_state_[0] *= keep_weight;
+  map_to_odom_filter_state_[1] *= keep_weight;
+  map_to_odom_filter_state_[2] = normalizeAngle(map_to_odom_filter_state_[2] * keep_weight);
+
+  for (std::size_t index = 0U; index < 3U; ++index) {
+    map_to_odom_filter_covariance_[index] = std::min(
+      measurement_noise_diagonal_max_[index],
+      map_to_odom_filter_covariance_[index] + process_noise_diagonal_[index]);
+  }
+}
+
+tf2::Transform MapPoseNode::filteredMapToOdomTransform() const
+{
+  return transformFromXYYaw(
+    map_to_odom_filter_state_[0],
+    map_to_odom_filter_state_[1],
+    0.0,
+    map_to_odom_filter_state_[2]);
 }
 
 void MapPoseNode::loadCostmapGeoreference()
@@ -444,9 +585,71 @@ std::optional<geometry_msgs::msg::Point> MapPoseNode::mapPositionFromArtifactGeo
   return map_point;
 }
 
-std::optional<tf2::Transform> MapPoseNode::estimateMapToBaseFromPrior(
-  const geometry_msgs::msg::Point & map_position_prior,
-  const double heading_prior_yaw) const
+std::optional<geographic_msgs::msg::GeoPoint> MapPoseNode::artifactGeoPointFromMapPoint(
+  const geometry_msgs::msg::Point & map_point) const
+{
+  if (!artifact_georeference_ready_) {
+    return std::nullopt;
+  }
+
+  geographic_msgs::msg::GeoPoint geo_point;
+  geo_point.longitude =
+    artifact_longitude_coefficients_[0] * map_point.x +
+    artifact_longitude_coefficients_[1] * map_point.y +
+    artifact_longitude_coefficients_[2];
+  geo_point.latitude =
+    artifact_latitude_coefficients_[0] * map_point.x +
+    artifact_latitude_coefficients_[1] * map_point.y +
+    artifact_latitude_coefficients_[2];
+  geo_point.altitude = map_point.z;
+  return geo_point;
+}
+
+double MapPoseNode::georeferenceConsistencyConfidence(const tf2::Transform & candidate_map_to_base) const
+{
+  if (!latest_navsat_ready_ || !latest_heading_ready_ || !artifact_georeference_ready_) {
+    return 1.0;
+  }
+
+  geometry_msgs::msg::Point mapped_pose_point;
+  mapped_pose_point.x = candidate_map_to_base.getOrigin().x();
+  mapped_pose_point.y = candidate_map_to_base.getOrigin().y();
+  mapped_pose_point.z = candidate_map_to_base.getOrigin().z();
+
+  const auto derived_geo_point = artifactGeoPointFromMapPoint(mapped_pose_point);
+  if (!derived_geo_point.has_value()) {
+    return 1.0;
+  }
+
+  geographic_msgs::msg::GeoPoint gnss_geo_point;
+  gnss_geo_point.latitude = latest_navsat_.latitude;
+  gnss_geo_point.longitude = latest_navsat_.longitude;
+  gnss_geo_point.altitude = latest_navsat_.altitude;
+
+  const double position_confidence = std::clamp(
+    1.0 - (geographicDistanceMeters(gnss_geo_point, *derived_geo_point) / georef_consistency_max_error_m_),
+    georef_consistency_min_confidence_,
+    1.0);
+
+  tf2::Quaternion heading_quaternion;
+  tf2::fromMsg(latest_heading_.orientation, heading_quaternion);
+  heading_quaternion.normalize();
+  double roll = 0.0;
+  double pitch = 0.0;
+  double heading_yaw = 0.0;
+  tf2::Matrix3x3(heading_quaternion).getRPY(roll, pitch, heading_yaw);
+  const double heading_error = std::abs(normalizeAngle(
+    yawFromTransform(candidate_map_to_base) - heading_yaw));
+  const double heading_confidence = std::clamp(
+    1.0 - (heading_error / std::max(0.1, search_yaw_window_rad_)),
+    georef_consistency_min_confidence_,
+    1.0);
+
+  return position_confidence * heading_confidence;
+}
+
+std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromPrior(
+  const tf2::Transform & map_to_base_prior) const
 {
   if (!latest_scan_ready_ || !latest_global_costmap_ready_) {
     return std::nullopt;
@@ -537,24 +740,7 @@ std::optional<tf2::Transform> MapPoseNode::estimateMapToBaseFromPrior(
   double best_score = -std::numeric_limits<double>::infinity();
   tf2::Transform best_transform;
   bool best_transform_ready = false;
-  tf2::Transform search_center = transformFromXYYaw(
-    map_position_prior.x,
-    map_position_prior.y,
-    map_position_prior.z,
-    heading_prior_yaw);
-  if (last_map_to_odom_ready_ && latest_odometry_ready_) {
-    tf2::Quaternion odom_base_quaternion;
-    tf2::fromMsg(latest_odometry_orientation_, odom_base_quaternion);
-    odom_base_quaternion.normalize();
-    const tf2::Transform odom_to_base(
-      odom_base_quaternion,
-      tf2::Vector3(
-        latest_odometry_position_.x,
-        latest_odometry_position_.y,
-        latest_odometry_position_.z));
-    const tf2::Transform previous_map_to_base = last_map_to_odom_ * odom_to_base;
-    search_center = blendTransforms(search_center, previous_map_to_base, 1.0 - prior_blend_weight_);
-  }
+  const tf2::Transform search_center = map_to_base_prior;
 
   auto scoreCandidate = [&](const double candidate_x, const double candidate_y, const double candidate_yaw) {
       const double cos_yaw = std::cos(candidate_yaw);
@@ -648,7 +834,7 @@ std::optional<tf2::Transform> MapPoseNode::estimateMapToBaseFromPrior(
             best_transform = transformFromXYYaw(
               candidate_x,
               candidate_y,
-              map_position_prior.z,
+              map_to_base_prior.getOrigin().z(),
               candidate_yaw);
             best_transform_ready = true;
           }
@@ -687,7 +873,7 @@ std::optional<tf2::Transform> MapPoseNode::estimateMapToBaseFromPrior(
           best_transform = transformFromXYYaw(
             candidate_x,
             candidate_y,
-            map_position_prior.z,
+            map_to_base_prior.getOrigin().z(),
             candidate_yaw);
         }
       }
@@ -698,7 +884,16 @@ std::optional<tf2::Transform> MapPoseNode::estimateMapToBaseFromPrior(
     return std::nullopt;
   }
 
-  return best_transform;
+  const double normalized_confidence = std::clamp(
+    (best_score - minimum_match_score_) /
+    std::max(1.0e-6, high_confidence_match_score_ - minimum_match_score_),
+    0.0,
+    1.0);
+  const double georef_confidence = georeferenceConsistencyConfidence(best_transform);
+  return MapMatchEstimate{
+    best_transform,
+    best_score,
+    normalized_confidence * georef_confidence};
 }
 
 void MapPoseNode::publishMapToOdomTransform()
@@ -711,87 +906,67 @@ void MapPoseNode::publishMapToOdomTransform()
     return;
   }
 
-  tf2::Transform map_to_odom;
-  bool have_backcalculated_transform = false;
-  const std::optional<geometry_msgs::msg::Point> map_position = latestMapPositionFromNavSat();
-
-  if (map_position.has_value() && latest_heading_ready_) {
-    const double heading_prior_yaw = yawFromQuaternion(latest_heading_.orientation);
-    std::optional<tf2::Transform> map_to_base =
-      estimateMapToBaseFromPrior(*map_position, heading_prior_yaw);
-    if (!map_to_base.has_value()) {
-      tf2::Quaternion map_base_quaternion;
-      map_base_quaternion.setRPY(0.0, 0.0, heading_prior_yaw);
-      map_base_quaternion.normalize();
-      map_to_base = tf2::Transform(
-        map_base_quaternion,
-        tf2::Vector3(
-          map_position->x,
-          map_position->y,
-          map_position->z));
-    }
-
-    tf2::Quaternion odom_base_quaternion;
-    tf2::fromMsg(latest_odometry_orientation_, odom_base_quaternion);
-    odom_base_quaternion.normalize();
-    const tf2::Transform odom_to_base(
-      odom_base_quaternion,
-      tf2::Vector3(
-        latest_odometry_position_.x,
-        latest_odometry_position_.y,
-        latest_odometry_position_.z));
-
-    map_to_odom = *map_to_base * odom_to_base.inverse();
-    have_backcalculated_transform = true;
+  if (!map_to_odom_filter_ready_) {
+    initializeMapToOdomFilter();
   }
 
-  if (!have_backcalculated_transform) {
-    if (!publish_identity_when_pose_missing_) {
-      return;
-    }
-    tf2::Quaternion identity_quaternion;
-    identity_quaternion.setRPY(0.0, 0.0, 0.0);
-    identity_quaternion.normalize();
-    map_to_odom = tf2::Transform(identity_quaternion, tf2::Vector3(0.0, 0.0, 0.0));
+  tf2::Quaternion odom_base_quaternion;
+  tf2::fromMsg(latest_odometry_orientation_, odom_base_quaternion);
+  odom_base_quaternion.normalize();
+  const tf2::Transform odom_to_base(
+    odom_base_quaternion,
+    tf2::Vector3(
+      latest_odometry_position_.x,
+      latest_odometry_position_.y,
+      latest_odometry_position_.z));
 
-    RCLCPP_WARN_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      5000,
-      "Falling back to identity %s -> %s because georeferenced map pose inputs are incomplete. navsat=%s heading=%s",
-      map_frame_id_.c_str(),
-      odom_frame_id_.c_str(),
-      latest_navsat_ready_ ? "true" : "false",
-      latest_heading_ready_ ? "true" : "false");
+  // Layer 3 starts with map and odom intentionally co-located so the correction state begins at zero.
+  tf2::Transform map_to_odom = filteredMapToOdomTransform();
+  tf2::Transform map_to_base_prior = map_to_odom * odom_to_base;
+
+  predictMapToOdomFilter();
+
+  const std::optional<MapMatchEstimate> map_match = estimateMapToBaseFromPrior(map_to_base_prior);
+  if (
+    map_match.has_value() &&
+    map_match->confidence >= minimum_confidence_for_filter_update_ &&
+    map_match->score >= minimum_match_score_)
+  {
+    tf2::Transform measured_map_to_odom = map_match->map_to_base * odom_to_base.inverse();
+
+    if (last_map_to_odom_ready_) {
+      const tf2::Vector3 previous_origin = last_map_to_odom_.getOrigin();
+      const tf2::Vector3 candidate_origin = measured_map_to_odom.getOrigin();
+      tf2::Vector3 delta = candidate_origin - previous_origin;
+      const double delta_distance = delta.length();
+      if (max_translation_jump_m_ > 0.0 && delta_distance > max_translation_jump_m_) {
+        delta *= max_translation_jump_m_ / delta_distance;
+      }
+
+      const double previous_yaw = yawFromTransform(last_map_to_odom_);
+      const double candidate_yaw = yawFromTransform(measured_map_to_odom);
+      const double yaw_delta = normalizeAngle(candidate_yaw - previous_yaw);
+      const double clamped_yaw_delta =
+        max_yaw_jump_rad_ > 0.0 ?
+        std::clamp(yaw_delta, -max_yaw_jump_rad_, max_yaw_jump_rad_) :
+        yaw_delta;
+
+      measured_map_to_odom = transformFromXYYaw(
+        previous_origin.x() + delta.x(),
+        previous_origin.y() + delta.y(),
+        candidate_origin.z(),
+        normalizeAngle(previous_yaw + clamped_yaw_delta));
+    }
+
+    updateMapToOdomFilter(measured_map_to_odom, map_match->confidence);
+  } else {
+    decayMapToOdomFilterTowardsIdentity();
   }
 
-  if (last_map_to_odom_ready_) {
-    const tf2::Vector3 previous_origin = last_map_to_odom_.getOrigin();
-    const tf2::Vector3 candidate_origin = map_to_odom.getOrigin();
-    tf2::Vector3 delta = candidate_origin - previous_origin;
-    const double delta_distance = delta.length();
-    if (max_translation_jump_m_ > 0.0 && delta_distance > max_translation_jump_m_) {
-      delta *= max_translation_jump_m_ / delta_distance;
-    }
-
-    const double previous_yaw = yawFromTransform(last_map_to_odom_);
-    const double candidate_yaw = yawFromTransform(map_to_odom);
-    const double yaw_delta = normalizeAngle(candidate_yaw - previous_yaw);
-    const double clamped_yaw_delta =
-      max_yaw_jump_rad_ > 0.0 ?
-      std::clamp(yaw_delta, -max_yaw_jump_rad_, max_yaw_jump_rad_) :
-      yaw_delta;
-
-    const tf2::Transform limited_candidate = transformFromXYYaw(
-      previous_origin.x() + delta.x(),
-      previous_origin.y() + delta.y(),
-      candidate_origin.z(),
-      normalizeAngle(previous_yaw + clamped_yaw_delta));
-    map_to_odom = blendTransforms(
-      last_map_to_odom_,
-      limited_candidate,
-      transform_smoothing_alpha_);
-  }
+  map_to_odom = blendTransforms(
+    last_map_to_odom_ready_ ? last_map_to_odom_ : transformFromXYYaw(0.0, 0.0, 0.0, 0.0),
+    filteredMapToOdomTransform(),
+    transform_smoothing_alpha_);
 
   last_map_to_odom_ = map_to_odom;
   last_map_to_odom_ready_ = true;

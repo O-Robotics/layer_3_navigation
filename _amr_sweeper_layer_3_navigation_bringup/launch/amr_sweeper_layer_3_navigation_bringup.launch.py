@@ -273,7 +273,7 @@ def _build_launches(context):
             remappings=[
                 ("/gnss/fix", "gnss/navsat" if use_gnss else "_gnss_disabled"),
                 ("/fusion/odom", "localization/odometry_fused"),
-                ("/fusion/pose", "localization/pose"),
+                ("/fusion/pose", "_unused_pose"),
             ],
         )
 

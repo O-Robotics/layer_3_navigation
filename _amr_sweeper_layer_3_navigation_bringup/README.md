@@ -35,7 +35,7 @@ This package is the main entrypoint for the AMR Sweeper navigation layer.
 ## Notes
 - Use this package after the required layer 1 and layer 2 packages are already available.
 - The navigation commands produced here flow down through layer 2 and into the layer 1 drive interfaces.
-- With the default namespace, localization and Nav2 consume `/amr_sweeper/gnss/navsat`, `/amr_sweeper/drive_controller/odom`, and `/amr_sweeper/depth_camera/scan`; the localization IMU source is configured via `imu.topic` in `amr_sweeper_localization/config/amr_sweeper_localization.yaml` and defaults to `imu/data_raw`, which resolves to `/amr_sweeper/imu/data_raw`.
+- With the default namespace, localization consumes `/amr_sweeper/gnss/navsat` and `/amr_sweeper/drive_controller/odom`, `amr_sweeper_mapping` consumes `/amr_sweeper/depth_camera/scan`, and Nav2 consumes the mapping-published `/amr_sweeper/mapping/global_costmap` and `/amr_sweeper/mapping/local_costmap`; the localization IMU source is configured via `imu.topic` in `amr_sweeper_localization/config/amr_sweeper_localization.yaml` and defaults to `imu/data_raw`, which resolves to `/amr_sweeper/imu/data_raw`.
 - The localization stack consumes `/amr_sweeper/gnss/navsat` directly from the local GNSS node.
 - `amr_sweeper_navigation` selects `default_missions_navigation.launch.py`, `manual_missions_navigation.launch.py`, or `programmed_missions_navigation.launch.py` from the active mission context. Built-in local pattern missions are forced onto the odom-only default stack and skip SLAM/mapping bringup even if an older caller still requests mapping.
 - Mission auto-start is off by default here and should only be enabled by FSM `RUNNING` profiles that hand in a mission-specific execution directory.

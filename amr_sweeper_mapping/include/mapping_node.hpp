@@ -20,6 +20,7 @@
 #include <nav2_msgs/action/follow_waypoints.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -56,6 +57,12 @@ struct RawNavSatSample
   double longitude{0.0};
   double latitude{0.0};
   double altitude{0.0};
+  rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+};
+
+struct HeadingSample
+{
+  double yaw{0.0};
   rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
 };
 
@@ -136,8 +143,10 @@ private:
   void handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message);
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
+  void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
+  void publishLocalCostmap();
   void persistRuntimeCostmapArtifact();
   void tickMissionExecution();
   void tryRequestMissionEnd();
@@ -162,8 +171,15 @@ private:
   [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> buildPoseSequence(
     const std::vector<MissionCoordinate> & coordinates) const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(const nav_msgs::msg::OccupancyGrid & message);
+  [[nodiscard]] nav_msgs::msg::OccupancyGrid buildLocalCostmap() const;
   void loadSavedCostmapIfConfigured();
   void initializeMapFromArtifact(const LoadedCostmapArtifact & artifact);
+  [[nodiscard]] std::optional<LoadedCostmapArtifact> projectArtifactIntoCurrentMap(
+    const LoadedCostmapArtifact & artifact) const;
+  void tryInitializeSavedCostmapFromSensors();
+  void pruneGeoreferenceSamples();
+  [[nodiscard]] std::optional<RawNavSatSample> stabilizedNavSatSample() const;
+  [[nodiscard]] std::optional<double> stabilizedHeadingYaw() const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid buildStaticRuntimeCostmapArtifact() const;
   void initializeGlobalMap(const geometry_msgs::msg::Point & center);
   void expandGlobalMapToFit(
@@ -203,6 +219,7 @@ private:
   std::string odom_frame_id_;
   std::string base_frame_;
   std::string navsat_topic_;
+  std::string heading_topic_;
   std::string scan_topic_;
   std::string seeded_map_frame_id_;
   std::string fromll_service_name_;
@@ -227,6 +244,8 @@ private:
   double global_map_resolution_m_{0.05};
   double local_map_size_m_{10.0};
   double max_waypoint_spacing_m_{0.5};
+  double georef_lock_window_seconds_{3.0};
+  int georef_lock_min_samples_{10};
   std::string pending_end_outcome_{"completed"};
   std::string pending_end_reason_;
   std::vector<geometry_msgs::msg::PoseStamped> mission_route_;
@@ -238,11 +257,15 @@ private:
   bool live_map_ready_{false};
   bool latest_padded_live_map_ready_{false};
   bool latest_odometry_pose_ready_{false};
+  bool latest_heading_ready_{false};
+  bool georeferenced_costmap_locked_{false};
   bool mission_anchor_pose_ready_{false};
   bool padded_live_map_bounds_ready_{false};
   bool have_scan_{false};
+  sensor_msgs::msg::LaserScan latest_scan_;
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
+  sensor_msgs::msg::Imu latest_heading_;
   geometry_msgs::msg::Point mission_anchor_position_;
   geometry_msgs::msg::Quaternion mission_anchor_orientation_;
   std::string last_scan_frame_id_;
@@ -256,19 +279,25 @@ private:
   std::vector<uint16_t> global_map_free_observations_;
   nav_msgs::msg::OccupancyGrid latest_live_map_;
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
+  nav_msgs::msg::OccupancyGrid latest_local_costmap_;
   nav_msgs::msg::OccupancyGrid seeded_runtime_map_;
   bool seeded_runtime_map_ready_{false};
+  bool saved_costmap_initialized_{false};
+  std::optional<LoadedCostmapArtifact> pending_saved_costmap_artifact_;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
   mutable std::mutex synchronized_path_mutex_;
   std::optional<RawNavSatSample> latest_raw_navsat_sample_;
+  std::vector<RawNavSatSample> navsat_history_;
+  std::vector<HeadingSample> heading_history_;
   std::vector<SynchronizedPathSample> synchronized_path_samples_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr live_map_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_costmap_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::MapMetaData>::SharedPtr live_map_metadata_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::MapMetaData>::SharedPtr local_costmap_metadata_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr waypoint_path_publisher_;
   rclcpp::CallbackGroup::SharedPtr mission_callback_group_;
   rclcpp::CallbackGroup::SharedPtr status_callback_group_;

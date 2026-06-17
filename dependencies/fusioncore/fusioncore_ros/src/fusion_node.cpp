@@ -614,7 +614,8 @@ public:
     }
 
     odom_pub_  = create_publisher<nav_msgs::msg::Odometry>("/fusion/odom", 100);
-    pose_pub_  = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/fusion/pose", 100);
+    // pose_pub_ intentionally disabled in AMR Sweeper; layer 3 uses /fusion/odom only.
+    // pose_pub_  = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/fusion/pose", 100);
     diag_pub_  = create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
 
     auto period = std::chrono::duration<double>(1.0 / publish_rate_);
@@ -2376,10 +2377,10 @@ private:
 
     // Also publish PoseWithCovarianceStamped: expected by AMCL, slam_toolbox,
     // Nav2 pose initializer, and many visualization tools.
-    geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
-    pose_msg.header = odom.header;
-    pose_msg.pose   = odom.pose;
-    pose_pub_->publish(pose_msg);
+    // geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
+    // pose_msg.header = odom.header;
+    // pose_msg.pose   = odom.pose;
+    // pose_pub_->publish(pose_msg);
 
     geometry_msgs::msg::TransformStamped tf;
     tf.header.stamp    = stamp;
