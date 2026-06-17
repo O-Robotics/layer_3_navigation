@@ -75,7 +75,7 @@ controller_server:
       sim_time:                      0.8                                 # Seconds to forward-simulate each candidate trajectory. Common examples use 1.7 s.
       linear_granularity:            0.05                                # Distance step in meters when discretizing trajectories. Common examples use 0.05 m.
       angular_granularity:           0.025                               # Angular step in radians when discretizing trajectories. Common examples use 0.025 rad.
-      transform_tolerance:           1.0                                 # TF lookup tolerance in seconds for controller transforms. Common examples use 0.2 s.
+      transform_tolerance:           0.2                                 # TF lookup tolerance in seconds for controller transforms. Tightened for programmed missions so the controller rejects stale TF instead of chasing old poses.
 
       xy_goal_tolerance:                   0.25                          # Position tolerance in meters used internally by DWB near the goal. Common examples use 0.25 m.
       trans_stopped_velocity:              0.05                          # Translational speed below which the robot is considered stopped. Common examples use 0.25 m/s.
@@ -244,7 +244,7 @@ velocity_smoother:
     use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
     smoothing_frequency:             10.0                                # Output smoothing rate in Hz. Was 15.0; common examples often use 20.0 Hz.
     scale_velocities:                false                               # Uniformly scale velocity components when one axis would violate limits. Common examples often use false.
-    feedback:                        "OPEN_LOOP"                         # Use commanded velocity instead of odometry feedback for smoothing. Common default/example is OPEN_LOOP.
+    feedback:                        "CLOSED_LOOP"                       # When the smoother is enabled, use odometry feedback so commanded velocity tracks the real robot state more closely during map-frame missions.
 
     max_velocity:                    [0.26, 0.0, 0.3]                    # Maximum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was 0.25; common examples are often [0.5, 0.0, 2.5].
     min_velocity:                    [-0.26, 0.0, -0.3]                  # Minimum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was -0.25; common examples mirror max limits.
