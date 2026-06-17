@@ -9,7 +9,7 @@ import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, TimerAction
+from launch.actions import DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -18,6 +18,8 @@ from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
 from lifecycle_msgs.msg import Transition
+import rclpy
+from rclpy.node import Node as RclpyNode
 
 def _launch_file(package_name: str, launch_file_name: str):
     return PathJoinSubstitution(
@@ -31,6 +33,18 @@ def _launch_file(package_name: str, launch_file_name: str):
 
 def _topic_if_enabled(enabled: bool, topic: str) -> str:
     return topic if enabled else ""
+
+
+def _normalize_namespace(namespace: str) -> str:
+    return namespace.strip().strip('/')
+
+
+def _qualify_name(namespace: str, relative_name: str) -> str:
+    cleaned_namespace = _normalize_namespace(namespace)
+    cleaned_name = relative_name.strip().strip('/')
+    if not cleaned_namespace:
+        return f'/{cleaned_name}'
+    return f'/{cleaned_namespace}/{cleaned_name}'
 
 
 def _load_localization_parameters() -> dict:
@@ -120,12 +134,86 @@ def _mission_requires_mapping(
     return False
 
 
+def _wait_for_mapping_and_localization_ready(context, navigation_launch):
+    namespace_value = LaunchConfiguration('namespace').perform(context)
+    poll_period_sec = float(
+        LaunchConfiguration('navigation_readiness_poll_period_sec').perform(context)
+    )
+    required_topics = {
+        _qualify_name(namespace_value, 'localization/odometry_fused'),
+        _qualify_name(namespace_value, 'mapping/global_costmap'),
+        _qualify_name(namespace_value, 'mapping/local_costmap'),
+    }
+    required_services = {
+        _qualify_name(namespace_value, 'mapping_node/get_parameters'),
+    }
+
+    did_init_rclpy = False
+    if not rclpy.ok():
+        rclpy.init(args=None)
+        did_init_rclpy = True
+
+    probe_node = RclpyNode('layer_3_navigation_readiness_probe')
+    try:
+        available_topics = {name for name, _types in probe_node.get_topic_names_and_types()}
+        available_services = {name for name, _types in probe_node.get_service_names_and_types()}
+    finally:
+        probe_node.destroy_node()
+        if did_init_rclpy:
+            rclpy.shutdown()
+
+    missing_topics = sorted(required_topics - available_topics)
+    missing_services = sorted(required_services - available_services)
+    if not missing_topics and not missing_services:
+        return [
+            LogInfo(
+                msg=(
+                    '[layer_3_navigation_bringup] Launching navigation after localization and '
+                    'mapping reported ready on the ROS graph.'
+                )
+            ),
+            navigation_launch,
+        ]
+
+    missing_parts = []
+    if missing_topics:
+        missing_parts.append(f'topics={missing_topics}')
+    if missing_services:
+        missing_parts.append(f'services={missing_services}')
+    return [
+        LogInfo(
+            msg=(
+                '[layer_3_navigation_bringup] Waiting for localization and mapping readiness '
+                f'before launching navigation: {", ".join(missing_parts)}'
+            )
+        ),
+        TimerAction(
+            period=poll_period_sec,
+            actions=[
+                OpaqueFunction(
+                    function=lambda next_context: _wait_for_mapping_and_localization_ready(
+                        next_context, navigation_launch
+                    )
+                )
+            ],
+        ),
+    ]
+
+
 def _build_launches(context):
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
-    waypoint_follower_startup_delay_sec = float(
+    legacy_navigation_startup_delay_sec = float(
         LaunchConfiguration('waypoint_follower_startup_delay_sec').perform(context)
     )
+    mapping_startup_delay_sec = float(
+        LaunchConfiguration('mapping_startup_delay_sec').perform(context)
+    )
+    navigation_startup_delay_sec = float(
+        LaunchConfiguration('navigation_startup_delay_sec').perform(context)
+    )
+    if navigation_startup_delay_sec == 3.0 and legacy_navigation_startup_delay_sec != 3.0:
+        navigation_startup_delay_sec = legacy_navigation_startup_delay_sec
     use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization').perform(context).lower() == 'true'
     use_amr_sweeper_visual_odometry = LaunchConfiguration('use_amr_sweeper_visual_odometry')
     use_amr_sweeper_visual_odometry_bool = (
@@ -232,9 +320,19 @@ def _build_launches(context):
         }.items(),
     )
 
+    delayed_mapping_launch = TimerAction(
+        period=mapping_startup_delay_sec,
+        actions=[mapping_launch],
+    )
+
+    gated_navigation_launch = OpaqueFunction(
+        function=lambda next_context: _wait_for_mapping_and_localization_ready(
+            next_context, navigation_launch
+        )
+    )
     delayed_navigation_launch = TimerAction(
-        period=waypoint_follower_startup_delay_sec,
-        actions=[navigation_launch],
+        period=navigation_startup_delay_sec,
+        actions=[gated_navigation_launch],
     )
 
     if use_amr_sweeper_localization:
@@ -304,7 +402,7 @@ def _build_launches(context):
 
         gated_entities = []
         if effective_use_amr_sweeper_mapping:
-            gated_entities.append(mapping_launch)
+            gated_entities.append(delayed_mapping_launch)
             if use_amr_sweeper_navigation:
                 gated_entities.append(delayed_navigation_launch)
         elif use_amr_sweeper_navigation:
@@ -323,7 +421,7 @@ def _build_launches(context):
             )
     else:
         if effective_use_amr_sweeper_mapping:
-            actions.append(mapping_launch)
+            actions.append(delayed_mapping_launch)
             if use_amr_sweeper_navigation:
                 actions.append(delayed_navigation_launch)
         elif use_amr_sweeper_navigation:
@@ -355,7 +453,22 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'waypoint_follower_startup_delay_sec',
             default_value='3.0',
-            description='Seconds to wait after mapping launch starts before bringing up the navigation stack.',
+            description='Deprecated compatibility alias for navigation_startup_delay_sec.',
+        ),
+        DeclareLaunchArgument(
+            'mapping_startup_delay_sec',
+            default_value='0.0',
+            description='Seconds to wait after localization becomes active before starting mapping.',
+        ),
+        DeclareLaunchArgument(
+            'navigation_startup_delay_sec',
+            default_value='3.0',
+            description='Seconds to wait after localization becomes active before starting navigation.',
+        ),
+        DeclareLaunchArgument(
+            'navigation_readiness_poll_period_sec',
+            default_value='1.0',
+            description='Polling period used while waiting for localization and mapping readiness before starting navigation.',
         ),
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
         DeclareLaunchArgument('mission_file', default_value=''),

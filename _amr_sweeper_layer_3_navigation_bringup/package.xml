@@ -12,6 +12,7 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rclpy</exec_depend>
   <exec_depend>amr_sweeper_localization</exec_depend>
   <exec_depend>amr_sweeper_mapping</exec_depend>
   <exec_depend>amr_sweeper_navigation</exec_depend>
