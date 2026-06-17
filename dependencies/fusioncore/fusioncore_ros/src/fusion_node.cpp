@@ -1129,7 +1129,11 @@ private:
         tf_stamped.transform.rotation.y,
         tf_stamped.transform.rotation.z,
         tf_stamped.transform.rotation.w);
-      *q_base = (imu_to_base * q_imu).normalized();
+      // lookupTransform(target=base, source=imu) gives the IMU pose expressed
+      // in the base frame. To rotate a world->imu orientation into world->base,
+      // we need the inverse mount rotation.
+      const tf2::Quaternion base_to_imu = imu_to_base.inverse();
+      *q_base = (q_imu * base_to_imu).normalized();
       return true;
     } catch (const tf2::TransformException & ex) {
       if (error_message != nullptr) {
@@ -1702,10 +1706,11 @@ private:
       msg->orientation.z,
       msg->orientation.w);
 
-    // Fix 11: rotate orientation from IMU frame to base_frame.
-    // q_base = q_imu_to_base * q_imu  (apply mount rotation first)
+    // Rotate orientation from IMU frame to base_frame.
+    // lookupTransform(base, imu) gives the IMU pose expressed in base, so the
+    // world->base orientation is q_world_imu * q_base_to_imu.
     tf2::Quaternion q_base = imu_to_base.has_value()
-      ? (imu_to_base.value() * q_imu).normalized()
+      ? (q_imu * imu_to_base.value().inverse()).normalized()
       : q_imu;
 
     double roll, pitch, yaw;
