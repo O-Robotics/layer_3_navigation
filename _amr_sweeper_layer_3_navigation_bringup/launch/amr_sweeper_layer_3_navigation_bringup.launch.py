@@ -150,7 +150,7 @@ def _wait_for_mapping_and_localization_ready(context, navigation_launch):
 
     did_init_rclpy = False
     if not rclpy.ok():
-        rclpy.init(args=None)
+        rclpy.init(args=[])
         did_init_rclpy = True
 
     probe_node = RclpyNode('layer_3_navigation_readiness_probe')
