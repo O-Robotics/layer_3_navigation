@@ -1,5 +1,6 @@
 /**:
   ros__parameters:
+    # -- Frames and topics ----------------------------------------------------
     map_frame:                           map                              # Global metric planning frame used by the global costmap and Nav2; georeferenced mission data is locked into this Cartesian frame during startup.
     odom_frame:                          odom                             # Smooth local metric frame from FusionCore that anchors short-term motion and the local costmap.
     base_frame:                          base_footprint                   # Robot body frame that closes the map -> odom -> base_footprint TF chain and anchors scan matching.
@@ -10,8 +11,12 @@
     global_costmap_topic:                mapping/global_costmap           # Runtime global costmap that acts as the known map for scan-to-map pose correction.
     fromll_service:                      /fromLL                          # Coordinate-conversion service that projects lon/lat fixes into the metric map frame.
     costmap_yaml_path:                   ""                               # Optional saved/runtime costmap YAML whose embedded georeference metadata is used only to score pose consistency, not to move the costmap itself at runtime.
+
+    # -- Publish behavior -----------------------------------------------------
     publish_period_seconds:              0.5                              # Refresh period for the published map -> odom transform.
     publish_identity_when_pose_missing:  true                             # Keep map and odom co-located at startup until the runtime pose estimator has enough evidence to stretch map -> odom.
+
+    # -- Scan matching --------------------------------------------------------
     occupied_threshold:                  65                               # Occupancy value that counts as a map hit when correlating scan endpoints against the global costmap.
     scan_subsample_step:                 4                                # Use every Nth beam during correlation to keep the bounded search light enough for startup and recovery.
     min_valid_scan_points:               20                               # Require at least this many usable scan endpoints before a scan match can correct map -> odom.
@@ -29,6 +34,8 @@
     prior_blend_weight:                  0.7                              # Reserved compatibility knob from the earlier prior-based matcher; the runtime filter now starts identity and tracks scan corrections.
     scan_timeout_seconds:                1.0                              # Ignore stale scans so the matcher does not back-calculate map -> odom from old sensor data.
     costmap_timeout_seconds:             2.0                              # Ignore stale global costmaps during scan correlation.
+
+    # -- Runtime correction filter -------------------------------------------
     max_translation_jump_m:              0.75                             # Clamp one update of map -> odom so a single bad correlation cannot teleport the robot in the map frame.
     max_yaw_jump_rad:                    0.35                             # Clamp one update of map -> odom in yaw so a single bad scan match cannot spin the robot pose.
     transform_smoothing_alpha:           0.35                             # Low-pass factor applied after filtering so the published transform behaves like a continuous localizer instead of a frame-to-frame jump detector.
@@ -36,8 +43,12 @@
     high_confidence_match_score:         0.75                             # Matches at or above this score are treated as strong corrections in the map -> odom filter.
     minimum_confidence_for_filter_update: 0.45                            # Required confidence before the scan match is allowed to update the runtime map -> odom filter.
     low_confidence_identity_pull_alpha:  0.15                             # When confidence is low, pull the runtime filter back toward identity so map and odom re-align.
+
+    # -- Georeference consistency --------------------------------------------
     georef_consistency_max_error_m:      5.0                              # Maximum acceptable difference in meters between the candidate map-matched pose and the GNSS/heading georeference prior before confidence collapses.
     georef_consistency_min_confidence:   0.2                              # Lower bound applied to the GNSS-and-heading consistency multiplier so it influences the runtime pose estimate without fully overriding scan matching.
+
+    # -- EKF tuning -----------------------------------------------------------
     process_noise_diagonal:              [0.01, 0.01, 0.005]             # Random-walk process noise for the runtime map -> odom EKF state [x, y, yaw].
     measurement_noise_diagonal_min:      [0.05, 0.05, 0.02]              # Best-case scan-match measurement noise for the runtime map -> odom EKF state [x, y, yaw].
     measurement_noise_diagonal_max:      [0.6, 0.6, 0.3]                 # Worst-case scan-match measurement noise for the runtime map -> odom EKF state [x, y, yaw].
