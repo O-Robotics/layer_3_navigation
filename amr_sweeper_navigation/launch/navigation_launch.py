@@ -127,21 +127,44 @@ def _build_nav2_group(context):
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     use_respawn = LaunchConfiguration('use_respawn')
+    enable_controller_server = (
+        LaunchConfiguration('enable_controller_server').perform(context).lower() == 'true')
+    enable_smoother_server = (
+        LaunchConfiguration('enable_smoother_server').perform(context).lower() == 'true')
+    enable_planner_server = (
+        LaunchConfiguration('enable_planner_server').perform(context).lower() == 'true')
+    enable_behavior_server = (
+        LaunchConfiguration('enable_behavior_server').perform(context).lower() == 'true')
+    enable_bt_navigator = (
+        LaunchConfiguration('enable_bt_navigator').perform(context).lower() == 'true')
+    enable_waypoint_follower = (
+        LaunchConfiguration('enable_waypoint_follower').perform(context).lower() == 'true')
+    enable_velocity_smoother = (
+        LaunchConfiguration('enable_velocity_smoother').perform(context).lower() == 'true')
 
-    lifecycle_nodes = ['controller_server',
-                       'smoother_server',
-                       'planner_server',
-                       'behavior_server',
-                       'bt_navigator',
-                       'waypoint_follower',
-                       'velocity_smoother']
+    lifecycle_nodes = []
+    if enable_controller_server:
+        lifecycle_nodes.append('controller_server')
+    if enable_smoother_server:
+        lifecycle_nodes.append('smoother_server')
+    if enable_planner_server:
+        lifecycle_nodes.append('planner_server')
+    if enable_behavior_server:
+        lifecycle_nodes.append('behavior_server')
+    if enable_bt_navigator:
+        lifecycle_nodes.append('bt_navigator')
+    if enable_waypoint_follower:
+        lifecycle_nodes.append('waypoint_follower')
+    if enable_velocity_smoother:
+        lifecycle_nodes.append('velocity_smoother')
 
     _validate_nav2_params(context)
     configured_params = _build_configured_params(context)
 
-    return [GroupAction(
-        actions=[
-            Node(
+    actions = []
+
+    if enable_controller_server:
+        actions.append(Node(
                 namespace=namespace_value,
                 package='nav2_controller',
                 executable='controller_server',
@@ -154,8 +177,9 @@ def _build_nav2_group(context):
                             ('odom', 'localization/odometry_fused'),
                             ('local_plan', 'navigation/controller_server/local_plan'),
                             ('cost_cloud', 'navigation/controller_server/cost_cloud'),
-                            ('transition_event', 'navigation/controller_server/transition_event')]),
-            Node(
+                            ('transition_event', 'navigation/controller_server/transition_event')]))
+    if enable_smoother_server:
+        actions.append(Node(
                 namespace=namespace_value,
                 package='nav2_smoother',
                 executable='smoother_server',
@@ -163,8 +187,9 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
-            Node(
+                parameters=[configured_params],))
+    if enable_planner_server:
+        actions.append(Node(
                 namespace=namespace_value,
                 package='nav2_planner',
                 executable='planner_server',
@@ -174,8 +199,9 @@ def _build_nav2_group(context):
                 respawn_delay=2.0,
                 parameters=[configured_params],
                 remappings=[('plan', 'navigation/planner_server/plan'),
-                            ('transition_event', 'navigation/planner_server/transition_event')],),
-            Node(
+                            ('transition_event', 'navigation/planner_server/transition_event')],))
+    if enable_behavior_server:
+        actions.append(Node(
                 namespace=namespace_value,
                 package='nav2_behaviors',
                 executable='behavior_server',
@@ -183,8 +209,9 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
-                parameters=[configured_params],),
-            Node(
+                parameters=[configured_params],))
+    if enable_bt_navigator:
+        actions.append(Node(
                 namespace=namespace_value,
                 package='nav2_bt_navigator',
                 executable='bt_navigator',
@@ -194,8 +221,9 @@ def _build_nav2_group(context):
                 respawn_delay=2.0,
                 parameters=[configured_params],
                 remappings=[('goal_pose', 'navigation/bt_navigator/goal_pose'),
-                            ('transition_event', 'navigation/bt_navigator/transition_event')],),
-            Node(
+                            ('transition_event', 'navigation/bt_navigator/transition_event')],))
+    if enable_waypoint_follower:
+        actions.append(Node(
                 namespace=namespace_value,
                 package='nav2_waypoint_follower',
                 executable='waypoint_follower',
@@ -204,8 +232,9 @@ def _build_nav2_group(context):
                 respawn=use_respawn,
                 respawn_delay=2.0,
                 parameters=[configured_params],
-                remappings=[('transition_event', 'navigation/waypoint_follower/transition_event')],),
-            Node(
+                remappings=[('transition_event', 'navigation/waypoint_follower/transition_event')],))
+    if enable_velocity_smoother:
+        actions.append(Node(
                 namespace=namespace_value,
                 package='nav2_velocity_smoother',
                 executable='velocity_smoother',
@@ -216,18 +245,19 @@ def _build_nav2_group(context):
                 parameters=[configured_params],
                 remappings=[('cmd_vel', 'navigation/cmd_vel_raw'),
                             ('cmd_vel_smoothed', 'navigation/cmd_vel'),
-                            ('odom', 'localization/odometry_fused')]),
-            Node(
-                namespace=namespace_value,
-                package='nav2_lifecycle_manager',
-                executable='lifecycle_manager',
-                name='lifecycle_manager_navigation',
-                output='screen',
-                parameters=[{'use_sim_time': use_sim_time},
-                            {'autostart': autostart},
-                            {'node_names': lifecycle_nodes}]),
-        ]
-    )]
+                            ('odom', 'localization/odometry_fused')]))
+
+    actions.append(Node(
+        namespace=namespace_value,
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_navigation',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time},
+                    {'autostart': autostart},
+                    {'node_names': lifecycle_nodes}]))
+
+    return [GroupAction(actions=actions)]
 
 
 def generate_launch_description():
@@ -261,6 +291,41 @@ def generate_launch_description():
         default_value='',
         description='Exact mission run costmap YAML from execution_context.json. Leave empty outside mission execution.')
 
+    declare_enable_controller_server_cmd = DeclareLaunchArgument(
+        'enable_controller_server',
+        default_value='true',
+        description='Launch the Nav2 controller server')
+
+    declare_enable_smoother_server_cmd = DeclareLaunchArgument(
+        'enable_smoother_server',
+        default_value='true',
+        description='Launch the Nav2 smoother server')
+
+    declare_enable_planner_server_cmd = DeclareLaunchArgument(
+        'enable_planner_server',
+        default_value='true',
+        description='Launch the Nav2 planner server')
+
+    declare_enable_behavior_server_cmd = DeclareLaunchArgument(
+        'enable_behavior_server',
+        default_value='true',
+        description='Launch the Nav2 behavior server')
+
+    declare_enable_bt_navigator_cmd = DeclareLaunchArgument(
+        'enable_bt_navigator',
+        default_value='true',
+        description='Launch the Nav2 behavior-tree navigator')
+
+    declare_enable_waypoint_follower_cmd = DeclareLaunchArgument(
+        'enable_waypoint_follower',
+        default_value='true',
+        description='Launch the Nav2 waypoint follower')
+
+    declare_enable_velocity_smoother_cmd = DeclareLaunchArgument(
+        'enable_velocity_smoother',
+        default_value='true',
+        description='Launch the Nav2 velocity smoother')
+
     declare_autostart_cmd = DeclareLaunchArgument(
         'autostart', default_value='true',
         description='Automatically startup the nav2 stack')
@@ -280,6 +345,13 @@ def generate_launch_description():
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_mission_costmap_yaml_cmd)
+    ld.add_action(declare_enable_controller_server_cmd)
+    ld.add_action(declare_enable_smoother_server_cmd)
+    ld.add_action(declare_enable_planner_server_cmd)
+    ld.add_action(declare_enable_behavior_server_cmd)
+    ld.add_action(declare_enable_bt_navigator_cmd)
+    ld.add_action(declare_enable_waypoint_follower_cmd)
+    ld.add_action(declare_enable_velocity_smoother_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
