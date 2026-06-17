@@ -1787,12 +1787,10 @@ void MappingNode::integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan &
 
   geometry_msgs::msg::TransformStamped map_from_scan;
   try {
-    const rclcpp::Time transform_stamp = message.header.stamp.sec == 0 &&
-      message.header.stamp.nanosec == 0 ? now() : rclcpp::Time(message.header.stamp);
     map_from_scan = tf_buffer_->lookupTransform(
       map_frame_id_,
       message.header.frame_id,
-      transform_stamp,
+      tf2::TimePointZero,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException & exception) {
     RCLCPP_WARN_THROTTLE(
@@ -2849,12 +2847,10 @@ void MappingNode::integrateLatestScanIntoLocalCostmap()
 
   geometry_msgs::msg::TransformStamped odom_from_scan;
   try {
-    const rclcpp::Time transform_stamp = latest_scan_.header.stamp.sec == 0 &&
-      latest_scan_.header.stamp.nanosec == 0 ? now() : rclcpp::Time(latest_scan_.header.stamp);
     odom_from_scan = tf_buffer_->lookupTransform(
       odom_frame_id_,
       latest_scan_.header.frame_id,
-      transform_stamp,
+      tf2::TimePointZero,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException & exception) {
     RCLCPP_WARN_THROTTLE(
