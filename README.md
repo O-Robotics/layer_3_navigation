@@ -27,7 +27,7 @@ This repository is the navigation layer for the AMR Sweeper. It contains localiz
 - `auto_start_mission`: default `false`
 
 ## Overview
-Layer 3 consumes wheel odometry, GNSS, IMU, transforms, and controller topics from the lower layers. It is responsible for estimating robot pose, hosting the Nav2 stack, and publishing navigation commands that flow down into the layer 2 controller chain. Under the default namespace, it consumes `/amr_sweeper/gnss/navsat`, `/amr_sweeper/drive_controller/odom`, and `/amr_sweeper/depth_camera/scan`; the localization IMU source is configured via `imu.topic` in `amr_sweeper_localization/config/amr_sweeper_localization.yaml` and defaults to `imu/data_raw`, which resolves to `/amr_sweeper/imu/data_raw`.
+Layer 3 consumes wheel odometry, GNSS, IMU, transforms, and controller topics from the lower layers. `amr_sweeper_localization` fuses IMU, GNSS, and encoder data into `/localization/odometry_fused` and owns `odom -> base_footprint`. `amr_sweeper_mapping` consumes `/localization/odometry_fused`, `/gnss/navsat`, `/imu/data_heading`, and `/depth_camera/scan`, publishes `map -> odom`, publishes the georeferenced `mapping/global_costmap`, and publishes the rolling odom-frame `mapping/local_costmap`. `amr_sweeper_navigation` then consumes `/localization/odometry_fused` plus those mapping-produced costmaps and outputs `/navigation/cmd_vel`.
 
 The repository also ships built-in mission assets inside `amr_sweeper_navigation/missions`, so `/missions/database` can stay dedicated to synced mission inputs and `/missions/logs` can stay dedicated to runtime outputs.
 
@@ -39,5 +39,5 @@ The repository also ships built-in mission assets inside `amr_sweeper_navigation
 - The localization launch now consumes `/amr_sweeper/gnss/navsat` directly because the local GNSS node publishes a compatible `NavSatFix` stream without the old bridge workaround.
 - The old `compass_msgs` / `gnss.azimuth_topic` path has been removed; optional heading aid now comes only from `gnss.heading_topic` when configured.
 - `amr_sweeper_visual_odometry` now publishes only `/amr_sweeper/visual_odometry/odom`; `amr_sweeper_localization` is the only package that launches FusionCore and it consumes that VO topic as `encoder2.topic`.
-- Nav2 runtime parameters now live in mission-class-specific files under `amr_sweeper_navigation/config/`, and the shared launcher keeps package-owned sensor topics relative so the same files work under custom robot namespaces.
+- Nav2 runtime parameters now live in mission-class-specific files under `amr_sweeper_navigation/config/`, and Nav2 consumes only mapping-published `mapping/global_costmap` and `mapping/local_costmap` rather than raw scan topics.
 - Mission execution is disabled by default at the layer 3 entrypoints and should only be enabled by FSM `RUNNING` profiles.

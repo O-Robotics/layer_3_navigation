@@ -1,4 +1,4 @@
-/**/:
+/**:
   ros__parameters:
     map_frame:                           map                              # Global metric planning frame used by the global costmap and Nav2; georeferenced mission data is locked into this Cartesian frame during startup.
     odom_frame:                          odom                             # Smooth local metric frame from FusionCore that anchors short-term motion and the local costmap.

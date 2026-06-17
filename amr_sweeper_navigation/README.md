@@ -53,10 +53,11 @@ The package also owns the built-in mission files directly:
 - `missions/default_missions/`: local sweep templates such as `3x3Sweep` and `SpotSweep`
 - `missions/manual_missions/`: operator-driven workflows such as `RecordMap` and `Teleop`
 
-`default_missions_navigation.yaml` is intentionally odom-only and does not depend on SLAM or map-frame planning. It is tuned for the short built-in sweep patterns that start from the robot's current pose.
+`default_missions_navigation.yaml` is intentionally odom-only and does not depend on map-frame planning. It is tuned for the short built-in sweep patterns that start from the robot's current pose, while still consuming mapping-published costmaps when mapping is enabled.
 
 ## Notes
 - Depends on `amr_sweeper_localization` for robot pose estimation.
 - Publishes navigation wheel commands that are expected by the layer 2 command chain.
 - Nav2 now consumes `mapping/global_costmap` for global planning and `mapping/local_costmap` for local planning, so raw scan ingestion stays inside `amr_sweeper_mapping`.
+- `mapping/waypoint_path` is visualization-only; routed mission execution reaches Nav2 through the `follow_waypoints` action server.
 - The old package name `amr_sweeper_waypoint_follower` has been retired in favor of `amr_sweeper_navigation`, since this package owns the full Nav2 bringup rather than just the Nav2 waypoint follower node.

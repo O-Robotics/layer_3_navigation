@@ -147,6 +147,9 @@ private:
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
   void publishLocalCostmap();
+  void ensureLocalCostmapCentered();
+  void decayLocalCostmap();
+  void integrateLatestScanIntoLocalCostmap();
   void persistRuntimeCostmapArtifact();
   void tickMissionExecution();
   void tryRequestMissionEnd();
@@ -171,7 +174,6 @@ private:
   [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> buildPoseSequence(
     const std::vector<MissionCoordinate> & coordinates) const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid padLiveMap(const nav_msgs::msg::OccupancyGrid & message);
-  [[nodiscard]] nav_msgs::msg::OccupancyGrid buildLocalCostmap() const;
   void loadSavedCostmapIfConfigured();
   void initializeMapFromArtifact(const LoadedCostmapArtifact & artifact);
   [[nodiscard]] std::optional<LoadedCostmapArtifact> projectArtifactIntoCurrentMap(
@@ -243,6 +245,9 @@ private:
   int max_segments_per_goal_{4};
   double global_map_resolution_m_{0.05};
   double local_map_size_m_{10.0};
+  double local_map_decay_per_update_{2.0};
+  double local_map_free_score_delta_{2.0};
+  double local_map_occupied_score_delta_{6.0};
   double max_waypoint_spacing_m_{0.5};
   double georef_lock_window_seconds_{3.0};
   int georef_lock_min_samples_{10};
@@ -277,6 +282,7 @@ private:
   std::vector<uint16_t> global_map_observations_;
   std::vector<uint16_t> global_map_occupied_observations_;
   std::vector<uint16_t> global_map_free_observations_;
+  std::vector<int16_t> local_map_scores_;
   nav_msgs::msg::OccupancyGrid latest_live_map_;
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
   nav_msgs::msg::OccupancyGrid latest_local_costmap_;

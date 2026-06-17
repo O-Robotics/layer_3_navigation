@@ -33,6 +33,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 ## Notes
 - REP-105 ownership in this workspace is now: FusionCore publishes `odom -> base_footprint`, and `map_pose_node` inside `amr_sweeper_mapping` publishes the `map -> odom` alignment.
 - The mapping coordinator publishes the Nav2-facing runtime global map on `mapping/global_costmap`, publishes the rolling odom-frame local map on `mapping/local_costmap`, and publishes matching local metadata on `mapping/local_costmap_metadata`.
+- `mapping/local_costmap` is built directly from the latest laser scan in `odom` and is intentionally independent of both `mapping/global_costmap` and the runtime `map -> odom` correction.
 - The planned mission waypoints loaded from the active run folder's copied `<mission>_path.geojson` are visualized on `mapping/waypoint_path`.
 - When `saved_costmap_yaml` is configured, the coordinator waits for a short GNSS/IMU stabilization window and then locks that georeferenced YAML/PGM artifact once into the metric `map` frame before live scans extend or overwrite it.
 - Runtime costmap artifacts now embed georeference metadata in the YAML file so the exported YAML/PGM pair can be related back to the real world outside the robot.

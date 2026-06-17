@@ -971,6 +971,9 @@ MappingNode::MappingNode()
   declare_parameter("map_alignment_publish_period_seconds", 0.5);
   declare_parameter("global_map_resolution_m", 0.05);
   declare_parameter("local_map_size_m", 10.0);
+  declare_parameter("local_map_decay_per_update", 2.0);
+  declare_parameter("local_map_free_score_delta", 2.0);
+  declare_parameter("local_map_occupied_score_delta", 6.0);
   declare_parameter("runtime_costmap_save_period_seconds", 10.0);
   declare_parameter("static_obstacle_min_observations", 6);
   declare_parameter("static_obstacle_min_occupied_fraction", 0.75);
@@ -1018,6 +1021,10 @@ MappingNode::MappingNode()
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
   global_map_resolution_m_ = get_parameter("global_map_resolution_m").as_double();
   local_map_size_m_ = get_parameter("local_map_size_m").as_double();
+  local_map_decay_per_update_ = std::max(0.0, get_parameter("local_map_decay_per_update").as_double());
+  local_map_free_score_delta_ = std::max(0.0, get_parameter("local_map_free_score_delta").as_double());
+  local_map_occupied_score_delta_ =
+    std::max(0.0, get_parameter("local_map_occupied_score_delta").as_double());
   runtime_costmap_save_period_seconds_ = get_parameter("runtime_costmap_save_period_seconds").as_double();
   static_obstacle_min_observations_ =
     static_cast<int>(get_parameter("static_obstacle_min_observations").as_int());
@@ -2742,18 +2749,16 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
   return padded;
 }
 
-nav_msgs::msg::OccupancyGrid MappingNode::buildLocalCostmap() const
+void MappingNode::ensureLocalCostmapCentered()
 {
-  nav_msgs::msg::OccupancyGrid local_costmap;
-  if (!latest_odometry_pose_ready_ || !have_scan_)
-  {
-    return local_costmap;
+  if (!latest_odometry_pose_ready_) {
+    return;
   }
 
   const double resolution = global_map_resolution_m_ > 0.0 ?
     global_map_resolution_m_ : 0.05;
   if (resolution <= 0.0 || local_map_size_m_ <= 0.0) {
-    return local_costmap;
+    return;
   }
 
   const uint32_t width = static_cast<uint32_t>(
@@ -2762,18 +2767,85 @@ nav_msgs::msg::OccupancyGrid MappingNode::buildLocalCostmap() const
     std::max(1.0, std::ceil(local_map_size_m_ / resolution)));
   const double half_width_m = static_cast<double>(width) * resolution * 0.5;
   const double half_height_m = static_cast<double>(height) * resolution * 0.5;
+  const double new_origin_x = latest_odometry_position_.x - half_width_m;
+  const double new_origin_y = latest_odometry_position_.y - half_height_m;
 
-  local_costmap.header.stamp = now();
-  local_costmap.header.frame_id = odom_frame_id_;
-  local_costmap.info.map_load_time = local_costmap.header.stamp;
-  local_costmap.info.resolution = static_cast<float>(resolution);
-  local_costmap.info.width = width;
-  local_costmap.info.height = height;
-  local_costmap.info.origin.position.x = latest_odometry_position_.x - half_width_m;
-  local_costmap.info.origin.position.y = latest_odometry_position_.y - half_height_m;
-  local_costmap.info.origin.position.z = 0.0;
-  local_costmap.info.origin.orientation.w = 1.0;
-  local_costmap.data.assign(static_cast<std::size_t>(width) * height, -1);
+  if (
+    latest_local_costmap_.info.width == 0U ||
+    latest_local_costmap_.info.height == 0U ||
+    latest_local_costmap_.info.width != width ||
+    latest_local_costmap_.info.height != height ||
+    std::abs(static_cast<double>(latest_local_costmap_.info.resolution) - resolution) > 1.0e-6 ||
+    local_map_scores_.size() != static_cast<std::size_t>(width) * height)
+  {
+    latest_local_costmap_.header.frame_id = odom_frame_id_;
+    latest_local_costmap_.info.resolution = static_cast<float>(resolution);
+    latest_local_costmap_.info.width = width;
+    latest_local_costmap_.info.height = height;
+    latest_local_costmap_.info.origin.position.x = new_origin_x;
+    latest_local_costmap_.info.origin.position.y = new_origin_y;
+    latest_local_costmap_.info.origin.position.z = 0.0;
+    latest_local_costmap_.info.origin.orientation.w = 1.0;
+    latest_local_costmap_.data.assign(static_cast<std::size_t>(width) * height, -1);
+    local_map_scores_.assign(latest_local_costmap_.data.size(), 0);
+    return;
+  }
+
+  const int x_offset = static_cast<int>(std::round(
+    (latest_local_costmap_.info.origin.position.x - new_origin_x) / resolution));
+  const int y_offset = static_cast<int>(std::round(
+    (latest_local_costmap_.info.origin.position.y - new_origin_y) / resolution));
+  if (x_offset == 0 && y_offset == 0) {
+    latest_local_costmap_.info.origin.position.x = new_origin_x;
+    latest_local_costmap_.info.origin.position.y = new_origin_y;
+    return;
+  }
+
+  std::vector<int16_t> shifted_scores(static_cast<std::size_t>(width) * height, 0);
+  for (uint32_t row = 0U; row < height; ++row) {
+    for (uint32_t col = 0U; col < width; ++col) {
+      const int source_x = static_cast<int>(col) + x_offset;
+      const int source_y = static_cast<int>(row) + y_offset;
+      if (
+        source_x < 0 || source_y < 0 ||
+        source_x >= static_cast<int>(width) ||
+        source_y >= static_cast<int>(height))
+      {
+        continue;
+      }
+      const std::size_t destination_index = static_cast<std::size_t>(row) * width + col;
+      const std::size_t source_index =
+        static_cast<std::size_t>(source_y) * width + static_cast<std::size_t>(source_x);
+      shifted_scores.at(destination_index) = local_map_scores_.at(source_index);
+    }
+  }
+
+  local_map_scores_ = std::move(shifted_scores);
+  latest_local_costmap_.info.origin.position.x = new_origin_x;
+  latest_local_costmap_.info.origin.position.y = new_origin_y;
+}
+
+void MappingNode::decayLocalCostmap()
+{
+  if (local_map_scores_.empty()) {
+    return;
+  }
+
+  const int decay_step = std::max(0, static_cast<int>(std::round(local_map_decay_per_update_)));
+  for (auto & score : local_map_scores_) {
+    if (score > 0 && decay_step > 0) {
+      score = static_cast<int16_t>(std::max<int>(0, score - decay_step));
+    } else if (score < 0) {
+      score = static_cast<int16_t>(std::min<int>(0, score + 1));
+    }
+  }
+}
+
+void MappingNode::integrateLatestScanIntoLocalCostmap()
+{
+  if (!have_scan_ || latest_local_costmap_.info.width == 0U || latest_local_costmap_.info.height == 0U) {
+    return;
+  }
 
   geometry_msgs::msg::TransformStamped odom_from_scan;
   try {
@@ -2793,49 +2865,55 @@ nav_msgs::msg::OccupancyGrid MappingNode::buildLocalCostmap() const
       latest_scan_.header.frame_id.c_str(),
       odom_frame_id_.c_str(),
       exception.what());
-    return nav_msgs::msg::OccupancyGrid{};
+    return;
   }
 
-  auto localWorldToGrid = [&local_costmap](const double world_x, const double world_y, int & grid_x, int & grid_y) {
-      const double local_resolution = static_cast<double>(local_costmap.info.resolution);
+  auto localWorldToGrid = [this](const double world_x, const double world_y, int & grid_x, int & grid_y) {
+      const double local_resolution = static_cast<double>(latest_local_costmap_.info.resolution);
       if (local_resolution <= 0.0) {
         return false;
       }
       grid_x = static_cast<int>(std::floor(
-        (world_x - local_costmap.info.origin.position.x) / local_resolution));
+        (world_x - latest_local_costmap_.info.origin.position.x) / local_resolution));
       grid_y = static_cast<int>(std::floor(
-        (world_y - local_costmap.info.origin.position.y) / local_resolution));
+        (world_y - latest_local_costmap_.info.origin.position.y) / local_resolution));
       return grid_x >= 0 && grid_y >= 0 &&
-        grid_x < static_cast<int>(local_costmap.info.width) &&
-        grid_y < static_cast<int>(local_costmap.info.height);
+        grid_x < static_cast<int>(latest_local_costmap_.info.width) &&
+        grid_y < static_cast<int>(latest_local_costmap_.info.height);
     };
 
-  auto markLocalFree = [&local_costmap](const int grid_x, const int grid_y) {
+  auto markLocalFree = [this](const int grid_x, const int grid_y) {
       if (
         grid_x < 0 || grid_y < 0 ||
-        grid_x >= static_cast<int>(local_costmap.info.width) ||
-        grid_y >= static_cast<int>(local_costmap.info.height))
+        grid_x >= static_cast<int>(latest_local_costmap_.info.width) ||
+        grid_y >= static_cast<int>(latest_local_costmap_.info.height))
       {
         return;
       }
       const std::size_t index =
-        static_cast<std::size_t>(grid_y) * local_costmap.info.width + static_cast<std::size_t>(grid_x);
-      if (local_costmap.data.at(index) != 100) {
-        local_costmap.data.at(index) = 0;
-      }
+        static_cast<std::size_t>(grid_y) * latest_local_costmap_.info.width +
+        static_cast<std::size_t>(grid_x);
+      const int free_delta = std::max(0, static_cast<int>(std::round(local_map_free_score_delta_)));
+      local_map_scores_.at(index) = static_cast<int16_t>(
+        std::max<int>(-20, local_map_scores_.at(index) - free_delta));
     };
 
-  auto markLocalOccupied = [&local_costmap](const int grid_x, const int grid_y) {
+  auto markLocalOccupied = [this](const int grid_x, const int grid_y) {
       if (
         grid_x < 0 || grid_y < 0 ||
-        grid_x >= static_cast<int>(local_costmap.info.width) ||
-        grid_y >= static_cast<int>(local_costmap.info.height))
+        grid_x >= static_cast<int>(latest_local_costmap_.info.width) ||
+        grid_y >= static_cast<int>(latest_local_costmap_.info.height))
       {
         return;
       }
       const std::size_t index =
-        static_cast<std::size_t>(grid_y) * local_costmap.info.width + static_cast<std::size_t>(grid_x);
-      local_costmap.data.at(index) = 100;
+        static_cast<std::size_t>(grid_y) * latest_local_costmap_.info.width +
+        static_cast<std::size_t>(grid_x);
+      const int occupied_delta = std::max(
+        0,
+        static_cast<int>(std::round(local_map_occupied_score_delta_)));
+      local_map_scores_.at(index) = static_cast<int16_t>(
+        std::min<int>(20, local_map_scores_.at(index) + occupied_delta));
     };
 
   tf2::Transform scan_to_odom;
@@ -2844,7 +2922,7 @@ nav_msgs::msg::OccupancyGrid MappingNode::buildLocalCostmap() const
   int start_x = 0;
   int start_y = 0;
   if (!localWorldToGrid(sensor_origin.x(), sensor_origin.y(), start_x, start_y)) {
-    return local_costmap;
+    return;
   }
 
   double angle = latest_scan_.angle_min;
@@ -2895,15 +2973,34 @@ nav_msgs::msg::OccupancyGrid MappingNode::buildLocalCostmap() const
     }
     markLocalOccupied(end_x, end_y);
   }
-
-  return local_costmap;
 }
 
 void MappingNode::publishLocalCostmap()
 {
-  latest_local_costmap_ = buildLocalCostmap();
+  ensureLocalCostmapCentered();
   if (latest_local_costmap_.info.width == 0U || latest_local_costmap_.info.height == 0U) {
     return;
+  }
+  decayLocalCostmap();
+  integrateLatestScanIntoLocalCostmap();
+  if (latest_local_costmap_.info.width == 0U || latest_local_costmap_.info.height == 0U) {
+    return;
+  }
+  latest_local_costmap_.header.stamp = now();
+  latest_local_costmap_.header.frame_id = odom_frame_id_;
+  latest_local_costmap_.info.map_load_time = latest_local_costmap_.header.stamp;
+  latest_local_costmap_.info.origin.position.z = 0.0;
+  latest_local_costmap_.info.origin.orientation.w = 1.0;
+  latest_local_costmap_.data.assign(local_map_scores_.size(), -1);
+  for (std::size_t index = 0U; index < local_map_scores_.size(); ++index) {
+    const int score = std::clamp<int>(local_map_scores_.at(index), -20, 20);
+    if (score > 0) {
+      latest_local_costmap_.data.at(index) = static_cast<int8_t>(std::min(100, 50 + score * 2));
+    } else if (score < 0) {
+      latest_local_costmap_.data.at(index) = 0;
+    } else {
+      latest_local_costmap_.data.at(index) = -1;
+    }
   }
   local_costmap_publisher_->publish(latest_local_costmap_);
   local_costmap_metadata_publisher_->publish(latest_local_costmap_.info);

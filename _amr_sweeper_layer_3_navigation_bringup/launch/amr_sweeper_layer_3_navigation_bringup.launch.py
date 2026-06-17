@@ -103,12 +103,12 @@ def _mission_requires_mapping(
 ) -> bool:
     del mission_context
 
-    if _uses_odom_only_runtime(mission_type, execution_mode):
-        return False
-    if str(execution_mode).lower() == "manual_mapping":
-        return True
     if mapping_requested:
         return True
+    if str(execution_mode).lower() == "manual_mapping":
+        return True
+    if _uses_odom_only_runtime(mission_type, execution_mode):
+        return False
 
     # Programmed scheduled missions navigate in the map frame, and profile 201
     # expects the mapping package to own map construction and map -> odom.
@@ -273,7 +273,6 @@ def _build_launches(context):
             remappings=[
                 ("/gnss/fix", "gnss/navsat" if use_gnss else "_gnss_disabled"),
                 ("/fusion/odom", "localization/odometry_fused"),
-                ("/fusion/pose", "_unused_pose"),
             ],
         )
 
