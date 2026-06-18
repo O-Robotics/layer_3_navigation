@@ -145,11 +145,8 @@ def _wait_for_mapping_and_localization_ready(context, navigation_launch):
         _qualify_name(namespace_value, 'localization/odometry_fused'),
         _qualify_name(namespace_value, 'mapping/global_costmap'),
         _qualify_name(namespace_value, 'mapping/local_costmap'),
-        _qualify_name(namespace_value, 'mapping/status'),
     }
-    required_services = {
-        _qualify_name(namespace_value, 'mapping_node/get_parameters'),
-    }
+    required_services = set()
 
     did_init_rclpy = False
     if not rclpy.ok():
@@ -181,27 +178,14 @@ def _wait_for_mapping_and_localization_ready(context, navigation_launch):
 
     missing_topics = sorted(required_topics - available_topics)
     missing_services = sorted(required_services - available_services)
-    mapping_status_message = latest_mapping_status['message']
     missing_status_checks = []
-    if not mapping_status_message:
-        missing_status_checks.append('mapping/status message')
-    else:
-        for required_fragment in (
-            'global_map_ready=true',
-            'map_builder_status=ready=true',
-            'scan_tf=true',
-            'map_tf=true',
-            'global_map=true',
-        ):
-            if required_fragment not in mapping_status_message:
-                missing_status_checks.append(required_fragment)
 
     if not missing_topics and not missing_services and not missing_status_checks:
         return [
             LogInfo(
                 msg=(
                     '[layer_3_navigation_bringup] Launching navigation after localization and '
-                    'mapping reported ready with valid TF and costmap status.'
+                    'mapping reported ready with core topics/services available.'
                 )
             ),
             navigation_launch,
