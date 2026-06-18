@@ -136,88 +136,6 @@ def _mission_requires_mapping(
     return False
 
 
-def _wait_for_mapping_and_localization_ready(context, navigation_launch):
-    namespace_value = LaunchConfiguration('namespace').perform(context)
-    poll_period_sec = float(
-        LaunchConfiguration('navigation_readiness_poll_period_sec').perform(context)
-    )
-    required_topics = {
-        _qualify_name(namespace_value, 'localization/odometry_fused'),
-        _qualify_name(namespace_value, 'mapping/global_costmap'),
-        _qualify_name(namespace_value, 'mapping/local_costmap'),
-    }
-    required_services = set()
-
-    did_init_rclpy = False
-    if not rclpy.ok():
-        rclpy.init(args=[])
-        did_init_rclpy = True
-
-    probe_node = RclpyNode('layer_3_navigation_readiness_probe')
-    latest_mapping_status = {'message': ''}
-
-    def _mapping_status_callback(message):
-        latest_mapping_status['message'] = message.data
-
-    probe_node.create_subscription(
-        String,
-        _qualify_name(namespace_value, 'mapping/status'),
-        _mapping_status_callback,
-        10,
-    )
-    try:
-        available_topics = {name for name, _types in probe_node.get_topic_names_and_types()}
-        available_services = {name for name, _types in probe_node.get_service_names_and_types()}
-        wait_deadline = time.monotonic() + min(1.0, max(0.2, poll_period_sec))
-        while time.monotonic() < wait_deadline and not latest_mapping_status['message']:
-            rclpy.spin_once(probe_node, timeout_sec=0.1)
-    finally:
-        probe_node.destroy_node()
-        if did_init_rclpy:
-            rclpy.shutdown()
-
-    missing_topics = sorted(required_topics - available_topics)
-    missing_services = sorted(required_services - available_services)
-    missing_status_checks = []
-
-    if not missing_topics and not missing_services and not missing_status_checks:
-        return [
-            LogInfo(
-                msg=(
-                    '[layer_3_navigation_bringup] Launching navigation after localization and '
-                    'mapping reported ready with core topics/services available.'
-                )
-            ),
-            navigation_launch,
-        ]
-
-    missing_parts = []
-    if missing_topics:
-        missing_parts.append(f'topics={missing_topics}')
-    if missing_services:
-        missing_parts.append(f'services={missing_services}')
-    if missing_status_checks:
-        missing_parts.append(f'status={missing_status_checks}')
-    return [
-        LogInfo(
-            msg=(
-                '[layer_3_navigation_bringup] Waiting for localization and mapping readiness '
-                f'before launching navigation: {", ".join(missing_parts)}'
-            )
-        ),
-        TimerAction(
-            period=poll_period_sec,
-            actions=[
-                OpaqueFunction(
-                    function=lambda next_context: _wait_for_mapping_and_localization_ready(
-                        next_context, navigation_launch
-                    )
-                )
-            ],
-        ),
-    ]
-
-
 def _build_launches(context):
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -232,6 +150,8 @@ def _build_launches(context):
     )
     if navigation_startup_delay_sec == 3.0 and legacy_navigation_startup_delay_sec != 3.0:
         navigation_startup_delay_sec = legacy_navigation_startup_delay_sec
+    if navigation_startup_delay_sec == 3.0:
+        navigation_startup_delay_sec = 5.0
     use_amr_sweeper_localization = LaunchConfiguration('use_amr_sweeper_localization').perform(context).lower() == 'true'
     use_amr_sweeper_visual_odometry = LaunchConfiguration('use_amr_sweeper_visual_odometry')
     use_amr_sweeper_visual_odometry_bool = (
@@ -343,14 +263,17 @@ def _build_launches(context):
         actions=[mapping_launch],
     )
 
-    gated_navigation_launch = OpaqueFunction(
-        function=lambda next_context: _wait_for_mapping_and_localization_ready(
-            next_context, navigation_launch
-        )
-    )
     delayed_navigation_launch = TimerAction(
         period=navigation_startup_delay_sec,
-        actions=[gated_navigation_launch],
+        actions=[
+            LogInfo(
+                msg=(
+                    '[layer_3_navigation_bringup] Launching navigation after fixed startup '
+                    f'delay of {navigation_startup_delay_sec:.1f}s.'
+                )
+            ),
+            navigation_launch,
+        ],
     )
 
     if use_amr_sweeper_localization:
@@ -482,11 +405,6 @@ def generate_launch_description():
             'navigation_startup_delay_sec',
             default_value='3.0',
             description='Seconds to wait after localization becomes active before starting navigation.',
-        ),
-        DeclareLaunchArgument(
-            'navigation_readiness_poll_period_sec',
-            default_value='1.0',
-            description='Polling period used while waiting for localization and mapping readiness before starting navigation.',
         ),
         DeclareLaunchArgument('mission_execution_directory', default_value=''),
         DeclareLaunchArgument('mission_file', default_value=''),
