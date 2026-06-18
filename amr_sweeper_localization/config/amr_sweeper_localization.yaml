@@ -43,7 +43,7 @@
     gnss.max_hdop:                         4.0             # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
     gnss.max_vdop:                         6.0             # Vertical dilution threshold used by FusionCore's GNSS quality gate.
     gnss.min_satellites:                   4               # Minimum satellite count required before fusing GNSS.
-    gnss.suppress_position_while_stationary: true          # Keep accepted GNSS jitter from nudging odom while the wheel encoder still reports standstill.
+    gnss.suppress_position_while_stationary: false         # Match upstream FusionCore behavior; the current stationary-suppression path is sensitive to encoder/GNSS timestamp skew.
     gnss.stationary_encoder_timeout:       0.5             # Only suppress GNSS when a fresh encoder sample confirms the robot is not moving.
     gnss.startup_delay_seconds:            5.0             # Let IMU + wheel odom settle first; GNSS still establishes the datum immediately but position fusion waits this long after filter init.
     gnss.startup_ramp_seconds:             15.0            # After the delay, taper GNSS position covariance back down over this many seconds instead of letting the first fixes yank odom.
