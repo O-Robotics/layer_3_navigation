@@ -50,6 +50,8 @@ private:
   void updateMapToOdomFilter(const tf2::Transform & measurement, double confidence);
   void decayMapToOdomFilterTowardsIdentity();
   [[nodiscard]] tf2::Transform filteredMapToOdomTransform() const;
+  [[nodiscard]] bool correctionInputsReady() const;
+  [[nodiscard]] bool shouldHoldIdentityAtStartup();
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> latestMapPositionFromNavSat() const;
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPositionFromArtifactGeoreference() const;
   [[nodiscard]] std::optional<geographic_msgs::msg::GeoPoint> artifactGeoPointFromMapPoint(
@@ -78,6 +80,8 @@ private:
   bool last_map_to_odom_ready_{false};
   bool map_to_odom_filter_ready_{false};
   bool artifact_georeference_ready_{false};
+  bool correction_startup_ready_{false};
+  int correction_ready_streak_{0};
   int occupied_threshold_{65};
   int scan_subsample_step_{4};
   int min_valid_scan_points_{20};
@@ -95,6 +99,7 @@ private:
   double prior_blend_weight_{0.7};
   double scan_timeout_seconds_{1.0};
   double costmap_timeout_seconds_{2.0};
+  int startup_ready_streak_required_{3};
   double max_translation_jump_m_{0.75};
   double max_yaw_jump_rad_{0.35};
   double transform_smoothing_alpha_{0.35};

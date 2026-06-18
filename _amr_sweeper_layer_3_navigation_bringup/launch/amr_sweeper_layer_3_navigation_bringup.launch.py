@@ -5,6 +5,7 @@
 import json
 import os
 from pathlib import Path
+import time
 import yaml
 
 from ament_index_python.packages import get_package_share_directory
@@ -20,6 +21,7 @@ from launch_ros.substitutions import FindPackageShare
 from lifecycle_msgs.msg import Transition
 import rclpy
 from rclpy.node import Node as RclpyNode
+from std_msgs.msg import String
 
 def _launch_file(package_name: str, launch_file_name: str):
     return PathJoinSubstitution(
@@ -143,6 +145,7 @@ def _wait_for_mapping_and_localization_ready(context, navigation_launch):
         _qualify_name(namespace_value, 'localization/odometry_fused'),
         _qualify_name(namespace_value, 'mapping/global_costmap'),
         _qualify_name(namespace_value, 'mapping/local_costmap'),
+        _qualify_name(namespace_value, 'mapping/status'),
     }
     required_services = {
         _qualify_name(namespace_value, 'mapping_node/get_parameters'),
@@ -154,9 +157,23 @@ def _wait_for_mapping_and_localization_ready(context, navigation_launch):
         did_init_rclpy = True
 
     probe_node = RclpyNode('layer_3_navigation_readiness_probe')
+    latest_mapping_status = {'message': ''}
+
+    def _mapping_status_callback(message):
+        latest_mapping_status['message'] = message.data
+
+    probe_node.create_subscription(
+        String,
+        _qualify_name(namespace_value, 'mapping/status'),
+        _mapping_status_callback,
+        10,
+    )
     try:
         available_topics = {name for name, _types in probe_node.get_topic_names_and_types()}
         available_services = {name for name, _types in probe_node.get_service_names_and_types()}
+        wait_deadline = time.monotonic() + min(1.0, max(0.2, poll_period_sec))
+        while time.monotonic() < wait_deadline and not latest_mapping_status['message']:
+            rclpy.spin_once(probe_node, timeout_sec=0.1)
     finally:
         probe_node.destroy_node()
         if did_init_rclpy:
@@ -164,12 +181,27 @@ def _wait_for_mapping_and_localization_ready(context, navigation_launch):
 
     missing_topics = sorted(required_topics - available_topics)
     missing_services = sorted(required_services - available_services)
-    if not missing_topics and not missing_services:
+    mapping_status_message = latest_mapping_status['message']
+    missing_status_checks = []
+    if not mapping_status_message:
+        missing_status_checks.append('mapping/status message')
+    else:
+        for required_fragment in (
+            'global_map_ready=true',
+            'map_builder_status=ready=true',
+            'scan_tf=true',
+            'map_tf=true',
+            'global_map=true',
+        ):
+            if required_fragment not in mapping_status_message:
+                missing_status_checks.append(required_fragment)
+
+    if not missing_topics and not missing_services and not missing_status_checks:
         return [
             LogInfo(
                 msg=(
                     '[layer_3_navigation_bringup] Launching navigation after localization and '
-                    'mapping reported ready on the ROS graph.'
+                    'mapping reported ready with valid TF and costmap status.'
                 )
             ),
             navigation_launch,
@@ -180,6 +212,8 @@ def _wait_for_mapping_and_localization_ready(context, navigation_launch):
         missing_parts.append(f'topics={missing_topics}')
     if missing_services:
         missing_parts.append(f'services={missing_services}')
+    if missing_status_checks:
+        missing_parts.append(f'status={missing_status_checks}')
     return [
         LogInfo(
             msg=(

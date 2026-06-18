@@ -202,6 +202,7 @@ MapPoseNode::MapPoseNode()
   declare_parameter("prior_blend_weight", 0.7);
   declare_parameter("scan_timeout_seconds", 1.0);
   declare_parameter("costmap_timeout_seconds", 2.0);
+  declare_parameter("startup_ready_streak_required", 3);
   declare_parameter("max_translation_jump_m", 0.75);
   declare_parameter("max_yaw_jump_rad", 0.35);
   declare_parameter("transform_smoothing_alpha", 0.35);
@@ -252,6 +253,9 @@ MapPoseNode::MapPoseNode()
   prior_blend_weight_ = std::clamp(get_parameter("prior_blend_weight").as_double(), 0.0, 1.0);
   scan_timeout_seconds_ = std::max(0.05, get_parameter("scan_timeout_seconds").as_double());
   costmap_timeout_seconds_ = std::max(0.05, get_parameter("costmap_timeout_seconds").as_double());
+  startup_ready_streak_required_ = std::max(
+    1,
+    static_cast<int>(get_parameter("startup_ready_streak_required").as_int()));
   max_translation_jump_m_ = std::max(0.0, get_parameter("max_translation_jump_m").as_double());
   max_yaw_jump_rad_ = std::max(0.0, get_parameter("max_yaw_jump_rad").as_double());
   transform_smoothing_alpha_ = std::clamp(
@@ -413,6 +417,75 @@ tf2::Transform MapPoseNode::filteredMapToOdomTransform() const
     map_to_odom_filter_state_[1],
     0.0,
     map_to_odom_filter_state_[2]);
+}
+
+bool MapPoseNode::correctionInputsReady() const
+{
+  if (!latest_odometry_ready_ || !latest_scan_ready_ || !latest_global_costmap_ready_) {
+    return false;
+  }
+
+  if ((now() - latest_scan_stamp_).seconds() > scan_timeout_seconds_) {
+    return false;
+  }
+
+  if ((now() - latest_global_costmap_stamp_).seconds() > costmap_timeout_seconds_) {
+    return false;
+  }
+
+  if (latest_scan_.header.frame_id.empty()) {
+    return false;
+  }
+
+  try {
+    const rclcpp::Time transform_stamp =
+      latest_scan_.header.stamp.sec == 0 && latest_scan_.header.stamp.nanosec == 0 ?
+      now() :
+      rclcpp::Time(latest_scan_.header.stamp);
+    tf_buffer_->lookupTransform(
+      base_frame_id_,
+      latest_scan_.header.frame_id,
+      transform_stamp,
+      tf2::durationFromSec(0.05));
+  } catch (const tf2::TransformException &) {
+    return false;
+  }
+
+  return true;
+}
+
+bool MapPoseNode::shouldHoldIdentityAtStartup()
+{
+  if (correction_startup_ready_) {
+    return false;
+  }
+
+  if (correctionInputsReady()) {
+    correction_ready_streak_ = std::min(
+      correction_ready_streak_ + 1,
+      startup_ready_streak_required_);
+  } else {
+    correction_ready_streak_ = 0;
+  }
+
+  if (correction_ready_streak_ >= startup_ready_streak_required_) {
+    correction_startup_ready_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Map pose startup holdoff cleared after %d consecutive ready cycles; enabling runtime map -> odom corrections.",
+      startup_ready_streak_required_);
+    return false;
+  }
+
+  RCLCPP_INFO_THROTTLE(
+    get_logger(),
+    *get_clock(),
+    3000,
+    "Holding map -> odom at identity until scan, TF, and global map inputs stay ready for %d consecutive publish cycles (%d/%d).",
+    startup_ready_streak_required_,
+    correction_ready_streak_,
+    startup_ready_streak_required_);
+  return true;
 }
 
 void MapPoseNode::loadCostmapGeoreference()
@@ -908,6 +981,19 @@ void MapPoseNode::publishMapToOdomTransform()
 
   if (!map_to_odom_filter_ready_) {
     initializeMapToOdomFilter();
+  }
+
+  if (shouldHoldIdentityAtStartup()) {
+    initializeMapToOdomFilter();
+    last_map_to_odom_ = transformFromXYYaw(0.0, 0.0, 0.0, 0.0);
+    last_map_to_odom_ready_ = true;
+    tf_broadcaster_->sendTransform(
+      stampedFromTransform(
+        last_map_to_odom_,
+        latest_map_pose_stamp_.nanoseconds() > 0 ? latest_map_pose_stamp_ : now(),
+        map_frame_id_,
+        odom_frame_id_));
+    return;
   }
 
   tf2::Quaternion odom_base_quaternion;
