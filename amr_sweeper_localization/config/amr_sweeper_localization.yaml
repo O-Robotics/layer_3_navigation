@@ -13,9 +13,9 @@
     imu.topic:                             imu/data_raw    # Primary IMU topic consumed by FusionCore; resolves under the selected robot namespace.
     imu.has_magnetometer:                  true            # The physical IMU includes a magnetometer, and FusionCore now fuses that orientation directly from the configured IMU topic.
     imu.gyro_noise:                        0.005           # Gyro measurement noise in rad/s.
-    imu.accel_noise:                       0.1             # Accelerometer measurement noise in m/s^2.
+    imu.accel_noise:                       0.25            # Slightly looser accelerometer noise to stop small standstill vibration/residual gravity errors from looking like true motion.
     imu.frame_id:                          imu_link        # Override IMU frame when the incoming message frame_id is missing or inconsistent.
-    imu.remove_gravitational_acceleration: true            # Driver publishes raw specific force, so gravity stays in the message.
+    imu.remove_gravitational_acceleration: false           # Driver publishes raw specific force, so gravity stays in the message.
 
     # -- Secondary IMU ---------------------------------------------------------
     use_imu2:                              false           # Default launch-time toggle for the optional secondary IMU input.
@@ -78,9 +78,9 @@
     ukf.q_orientation:                     1.0e-9          # Quaternion regularization / orientation process noise floor.
     ukf.q_velocity:                        0.1
     ukf.q_angular_vel:                     0.1
-    ukf.q_acceleration:                    1.0
+    ukf.q_acceleration:                    0.2             # Reduce how freely the filter lets acceleration states wander when the robot is actually stopped.
     ukf.q_gyro_bias:                       1.0e-5
-    ukf.q_accel_bias:                      1.0e-5
+    ukf.q_accel_bias:                      1.0e-4          # Let accel bias adapt faster so persistent small offsets are absorbed as bias instead of integrated into odom drift.
 
     # -- Coordinate systems ----------------------------------------------------
     input.gnss_crs:                        "EPSG:4326"     # Incoming GNSS messages use WGS84 latitude/longitude.
