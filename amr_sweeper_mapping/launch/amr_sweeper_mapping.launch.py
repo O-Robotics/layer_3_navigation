@@ -74,6 +74,14 @@ def _build_nodes(context):
         "mission_costmap_yaml", ""
     )
     saved_costmap_yaml = mission_context.get("saved_costmap_yaml", "") or mission_costmap_yaml
+    # Keep the runtime map artifact separate from the static localization reference map.
+    # The mapping coordinator should update the run-folder copy, while map_pose_node should
+    # correlate against the mission-folder copy so it does not localize against its own live output.
+    static_reference_costmap_yaml = (
+        mission_context.get("source_mission_costmap_yaml", "")
+        or mission_context.get("persistent_mission_costmap_yaml", "")
+        or saved_costmap_yaml
+    )
     gaussian_output_directory = mission_context.get("gaussian_output_directory", "")
     if not gaussian_output_directory and mission_run_directory:
         gaussian_output_directory = str(Path(mission_run_directory) / "gaussian")
@@ -128,8 +136,8 @@ def _build_nodes(context):
     map_pose_runtime_parameters = {
         "use_sim_time": use_sim_time,
     }
-    if saved_costmap_yaml:
-        map_pose_runtime_parameters["costmap_yaml_path"] = saved_costmap_yaml
+    if static_reference_costmap_yaml:
+        map_pose_runtime_parameters["costmap_yaml_path"] = static_reference_costmap_yaml
     if builtin_local_pattern_mode:
         map_pose_runtime_parameters["map_frame"] = "odom"
         map_pose_runtime_parameters["odom_frame"] = "odom"

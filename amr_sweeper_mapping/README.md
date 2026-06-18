@@ -27,7 +27,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 
 ## Runtime Structure
 - `mapping_node.cpp/.hpp` contains the Nav2 costmap plugin, the `mapping_node` coordinator, and the in-package occupancy-grid map builder.
-- `map_pose_node.cpp/.hpp` publishes `map -> odom` by combining scan-to-map matching with GNSS and IMU consistency terms so Nav2 can consume the global map in the `map` frame without shifting that map at runtime.
+- `map_pose_node.cpp/.hpp` publishes `map -> odom` by combining scan-to-map matching with GNSS and IMU consistency terms so Nav2 can consume the global map in the `map` frame without shifting that map at runtime. In mission runs it should correlate against the static mission-folder costmap artifact, not the run-folder live-updated copy.
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
@@ -36,6 +36,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including artif
 - `mapping/local_costmap` is built directly from the latest laser scan in `odom` and is intentionally independent of both `mapping/global_costmap` and the runtime `map -> odom` correction.
 - The planned mission waypoints loaded from the active run folder's copied `<mission>_path.geojson` are visualized on `mapping/waypoint_path`.
 - When `saved_costmap_yaml` is configured, the coordinator waits for a short GNSS/IMU stabilization window and then locks that georeferenced YAML/PGM artifact once into the metric `map` frame before live scans extend or overwrite it.
+- During mission runs the mapping launch now keeps these roles separate: `map_pose_node` reads the mission-folder reference costmap, while `mapping_node` persists live scan updates into the run-folder costmap copy.
 - Runtime costmap artifacts now embed georeference metadata in the YAML file so the exported YAML/PGM pair can be related back to the real world outside the robot.
 - The required runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
 - The mission route and mission costmap must come from that execution folder's `execution_context.json`, not from shared top-level alias files.

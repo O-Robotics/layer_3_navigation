@@ -10,7 +10,7 @@
     scan_topic:                          depth_camera/scan                # LaserScan used to match the robot against the already locked global costmap so map -> odom can absorb drift without shifting the costmap in map.
     global_costmap_topic:                mapping/global_costmap           # Runtime global costmap that acts as the known map for scan-to-map pose correction.
     fromll_service:                      /fromLL                          # Coordinate-conversion service that projects lon/lat fixes into the metric map frame.
-    costmap_yaml_path:                   ""                               # Optional saved/runtime costmap YAML whose embedded georeference metadata is used only to score pose consistency, not to move the costmap itself at runtime.
+    costmap_yaml_path:                   ""                               # Optional static reference costmap YAML, preferably the mission-folder artifact; its embedded georeference metadata is used only to score pose consistency, not to move the live runtime costmap itself.
 
     # -- Publish behavior -----------------------------------------------------
     publish_period_seconds:              0.5                              # Refresh period for the published map -> odom transform.
