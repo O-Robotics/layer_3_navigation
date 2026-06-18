@@ -843,11 +843,36 @@ bool FusionCore::apply_gnss_update(
     : std::function<sensors::GnssPosMeasurement(const StateVector&)>(
         sensors::gnss_pos_measurement_function);
 
+  auto soft_gnss_covariance_scale = [&](const sensors::GnssPosMeasurement& innovation_pre) {
+    const double start_m = config_.gnss_soft_position_reject_start_m;
+    const double end_m = config_.gnss_soft_position_reject_end_m;
+    const double max_scale = config_.gnss_soft_position_max_covariance_scale;
+    if (max_scale <= 1.0 || end_m <= start_m) {
+      return 1.0;
+    }
+
+    const double xy_error = std::hypot(innovation_pre[0], innovation_pre[1]);
+    if (xy_error <= start_m) {
+      return 1.0;
+    }
+    if (xy_error >= end_m) {
+      return max_scale;
+    }
+
+    const double alpha = (xy_error - start_m) / std::max(1.0e-6, end_m - start_m);
+    return 1.0 + (max_scale - 1.0) * alpha;
+  };
+
   // Mahalanobis outlier rejection for GNSS position
   if (config_.outlier_rejection) {
     sensors::GnssPosMeasurement innovation_pre;
     sensors::GnssPosNoiseMatrix S;
     ukf_.predict_measurement<sensors::GNSS_POS_DIM>(z, h_gnss, R, innovation_pre, S);
+    const double soft_scale = soft_gnss_covariance_scale(innovation_pre);
+    if (soft_scale > 1.0) {
+      R *= soft_scale;
+      ukf_.predict_measurement<sensors::GNSS_POS_DIM>(z, h_gnss, R, innovation_pre, S);
+    }
     last_gnss_mahalanobis_d2_ = innovation_pre.dot(S.ldlt().solve(innovation_pre));
     last_gnss_mahalanobis_valid_ = true;
     if (last_gnss_mahalanobis_d2_ > config_.outlier_threshold_gnss) {

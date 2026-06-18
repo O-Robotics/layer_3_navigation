@@ -48,6 +48,9 @@
     gnss.startup_delay_seconds:            5.0             # Let IMU + wheel odom settle first; GNSS still establishes the datum immediately but position fusion waits this long after filter init.
     gnss.startup_ramp_seconds:             15.0            # After the delay, taper GNSS position covariance back down over this many seconds instead of letting the first fixes yank odom.
     gnss.startup_initial_covariance_scale: 25.0            # Start the GNSS ramp with 25x covariance so the first accepted fixes are very soft corrections.
+    gnss.soft_position_reject_start_m:     0.5             # Once GNSS sits more than 0.5 m from the current fused pose, start distrusting it progressively instead of accepting it at full weight.
+    gnss.soft_position_reject_end_m:       3.0             # By 3 m XY innovation, treat the fix as heavily suspect and inflate its covariance to the configured cap.
+    gnss.soft_position_max_covariance_scale: 20.0          # Maximum extra covariance inflation for large reflected / multipath jumps during runtime.
     gnss.min_fix_type:                     1               # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic:                       ""              # Optional second GNSS receiver topic; leave empty to disable.
     gnss.heading_topic:                    ""              # Disabled because yaw is fused directly from the configured IMU topic.

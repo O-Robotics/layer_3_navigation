@@ -237,6 +237,9 @@ public:
     declare_parameter("gnss.coast_n",                    5);
     declare_parameter("gnss.coast_q_factor",             20.0);
     declare_parameter("gnss.degraded_noise_multiplier",  3.0);
+    declare_parameter("gnss.soft_position_reject_start_m", 0.5);
+    declare_parameter("gnss.soft_position_reject_end_m", 3.0);
+    declare_parameter("gnss.soft_position_max_covariance_scale", 20.0);
 
     declare_parameter("adaptive.imu",     true);
     declare_parameter("adaptive.encoder", true);
@@ -427,6 +430,12 @@ public:
     config.gnss_coast_n                    = get_parameter("gnss.coast_n").as_int();
     config.gnss_coast_q_factor             = get_parameter("gnss.coast_q_factor").as_double();
     config.gnss_degraded_noise_multiplier  = get_parameter("gnss.degraded_noise_multiplier").as_double();
+    config.gnss_soft_position_reject_start_m =
+      get_parameter("gnss.soft_position_reject_start_m").as_double();
+    config.gnss_soft_position_reject_end_m =
+      get_parameter("gnss.soft_position_reject_end_m").as_double();
+    config.gnss_soft_position_max_covariance_scale =
+      get_parameter("gnss.soft_position_max_covariance_scale").as_double();
 
     config.adaptive_imu     = get_parameter("adaptive.imu").as_bool();
     config.adaptive_encoder = get_parameter("adaptive.encoder").as_bool();

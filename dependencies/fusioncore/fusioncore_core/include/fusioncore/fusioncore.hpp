@@ -99,6 +99,14 @@ struct FusionCoreConfig {
   // 3.0 = loosen the gate by ~1.7x in sigma units; keeps spike rejection intact.
   // 0.0 or 1.0 = disabled (no R inflation, only Q inflation from coast mode).
   double gnss_degraded_noise_multiplier = 3.0;
+
+  // Soft GNSS distrust for urban multipath / reflected fixes:
+  // as the XY innovation grows, inflate GNSS covariance before the gate and
+  // update so large jumps pull the filter less aggressively instead of either
+  // being trusted at full weight or only hard-rejected.
+  double gnss_soft_position_reject_start_m = 0.5;
+  double gnss_soft_position_reject_end_m = 3.0;
+  double gnss_soft_position_max_covariance_scale = 20.0;
 };
 
 // How heading was validated: tracked per filter run
