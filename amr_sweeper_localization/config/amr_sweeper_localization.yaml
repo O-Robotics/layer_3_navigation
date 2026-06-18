@@ -79,11 +79,14 @@
     zupt.angular_threshold:                0.05            # Treat the robot as not rotating below this angular speed in rad/s.
     zupt.noise_sigma:                      0.01            # ZUPT pseudo-measurement sigma in m/s.
 
+    # -- Motion model ----------------------------------------------------------
+    motion_model:                          "DifferentialDrive"  # Ground robot: constrain lateral velocity in prediction so GNSS corrections cannot as easily leak into sideways motion.
+
     # -- UKF process noise -----------------------------------------------------
     ukf.q_position:                        0.01
     ukf.q_orientation:                     1.0e-9          # Quaternion regularization / orientation process noise floor.
-    ukf.q_velocity:                        0.1
-    ukf.q_angular_vel:                     0.1
+    ukf.q_velocity:                        0.01            # Much tighter velocity process noise for a sweeper that should remain still unless encoder/IMU evidence says otherwise.
+    ukf.q_angular_vel:                     0.01            # Reduce spurious body-rate growth between real measurements; helps keep stationary yaw stable.
     ukf.q_acceleration:                    0.2             # Reduce how freely the filter lets acceleration states wander when the robot is actually stopped.
     ukf.q_gyro_bias:                       1.0e-5
     ukf.q_accel_bias:                      1.0e-4          # Let accel bias adapt faster so persistent small offsets are absorbed as bias instead of integrated into odom drift.
