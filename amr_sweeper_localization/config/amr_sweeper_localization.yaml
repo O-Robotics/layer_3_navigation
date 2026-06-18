@@ -40,11 +40,15 @@
     gnss.base_noise_xy:                    1.5             # Baseline horizontal GNSS sigma in meters before HDOP/covariance scaling.
     gnss.base_noise_z:                     3.0             # Baseline vertical GNSS sigma in meters.
     gnss.heading_noise:                    0.02            # Heading measurement noise in radians for dual-antenna or azimuth inputs.
+    gnss.position_covariance_scale:        400.0           # Down-weight every GNSS position fix, including full-covariance RTK fixes, so GNSS only nudges the filter instead of steering a stationary robot.
     gnss.max_hdop:                         4.0             # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
     gnss.max_vdop:                         6.0             # Vertical dilution threshold used by FusionCore's GNSS quality gate.
     gnss.min_satellites:                   4               # Minimum satellite count required before fusing GNSS.
-    gnss.suppress_position_while_stationary: false         # Match upstream FusionCore behavior; the current stationary-suppression path is sensitive to encoder/GNSS timestamp skew.
-    gnss.stationary_encoder_timeout:       0.5             # Only suppress GNSS when a fresh encoder sample confirms the robot is not moving.
+    gnss.suppress_position_while_stationary: true          # When encoder + IMU agree the robot is standing still, skip GNSS position fusion so multipath and delayed replay cannot yank odom around.
+    gnss.stationary_encoder_timeout:       0.5             # Treat encoder samples within 0.5 s of the GNSS stamp as valid standstill evidence; delayed GNSS replay is allowed this same skew window.
+    gnss.stationary_imu_timeout:           0.5             # Require a reasonably fresh IMU sample before using IMU motion cues in the standstill gate.
+    gnss.stationary_imu_angular_threshold: 0.05            # rad/s: if IMU body-rate exceeds this, treat the robot as rotating and allow GNSS fusion again.
+    gnss.stationary_imu_accel_threshold:   0.2             # m/s^2 dynamic acceleration after gravity removal; above this, treat the platform as moving/vibrating enough that GNSS can contribute again.
     gnss.startup_delay_seconds:            5.0             # Let IMU + wheel odom settle first; GNSS still establishes the datum immediately but position fusion waits this long after filter init.
     gnss.startup_ramp_seconds:             15.0            # After the delay, taper GNSS position covariance back down over this many seconds instead of letting the first fixes yank odom.
     gnss.startup_initial_covariance_scale: 25.0            # Start the GNSS ramp with 25x covariance so the first accepted fixes are very soft corrections.

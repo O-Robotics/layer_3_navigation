@@ -172,11 +172,15 @@ public:
     declare_parameter("gnss.base_noise_xy",  1.0);
     declare_parameter("gnss.base_noise_z",   2.0);
     declare_parameter("gnss.heading_noise",  0.02);
+    declare_parameter("gnss.position_covariance_scale", 1.0);
     declare_parameter("gnss.max_hdop",       4.0);
     declare_parameter("gnss.max_vdop",       6.0);
     declare_parameter("gnss.min_satellites", 4);
     declare_parameter("gnss.suppress_position_while_stationary", false);
     declare_parameter("gnss.stationary_encoder_timeout", 0.5);
+    declare_parameter("gnss.stationary_imu_timeout", 0.5);
+    declare_parameter("gnss.stationary_imu_angular_threshold", 0.05);
+    declare_parameter("gnss.stationary_imu_accel_threshold", 0.2);
     declare_parameter("gnss.startup_delay_seconds", 5.0);
     declare_parameter("gnss.startup_ramp_seconds", 15.0);
     declare_parameter("gnss.startup_initial_covariance_scale", 25.0);
@@ -343,6 +347,8 @@ public:
     config.gnss.base_noise_xy  = get_parameter("gnss.base_noise_xy").as_double();
     config.gnss.base_noise_z   = get_parameter("gnss.base_noise_z").as_double();
     config.gnss.heading_noise  = get_parameter("gnss.heading_noise").as_double();
+    gnss_position_covariance_scale_ =
+      std::max(1.0, get_parameter("gnss.position_covariance_scale").as_double());
     config.gnss.max_hdop       = get_parameter("gnss.max_hdop").as_double();
     config.gnss.max_vdop       = get_parameter("gnss.max_vdop").as_double();
     config.gnss.min_satellites = get_parameter("gnss.min_satellites").as_int();
@@ -362,6 +368,12 @@ public:
       get_parameter("gnss.suppress_position_while_stationary").as_bool();
     stationary_encoder_timeout_ =
       get_parameter("gnss.stationary_encoder_timeout").as_double();
+    stationary_imu_timeout_ =
+      get_parameter("gnss.stationary_imu_timeout").as_double();
+    stationary_imu_angular_threshold_ =
+      get_parameter("gnss.stationary_imu_angular_threshold").as_double();
+    stationary_imu_accel_threshold_ =
+      get_parameter("gnss.stationary_imu_accel_threshold").as_double();
     RCLCPP_INFO(get_logger(),
                 "GNSS min_fix_type: %d (1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED)",
                 static_cast<int>(min_fix_type_));
@@ -1499,6 +1511,14 @@ private:
         msg->angular_velocity.y,
         msg->angular_velocity.z,
         ax, ay, az);
+      remember_primary_imu_motion_sample(
+        t,
+        msg->angular_velocity.x,
+        msg->angular_velocity.y,
+        msg->angular_velocity.z,
+        ax,
+        ay,
+        az);
       if (!accepted) {
         const auto status = fc_->get_status();
         if (status.last_imu_mahalanobis_valid) {
@@ -1536,6 +1556,14 @@ private:
         msg->angular_velocity.y,
         msg->angular_velocity.z,
         ax, ay, az);
+      remember_primary_imu_motion_sample(
+        t,
+        msg->angular_velocity.x,
+        msg->angular_velocity.y,
+        msg->angular_velocity.z,
+        ax,
+        ay,
+        az);
       if (!accepted) {
         const auto status = fc_->get_status();
         if (status.last_imu_mahalanobis_valid) {
@@ -1573,6 +1601,14 @@ private:
     const bool accepted = fc_->update_imu(t,
       w_base.x(), w_base.y(), w_base.z(),
       a_base.x(), a_base.y(), a_base.z());
+    remember_primary_imu_motion_sample(
+      t,
+      w_base.x(),
+      w_base.y(),
+      w_base.z(),
+      a_base.x(),
+      a_base.y(),
+      a_base.z());
     if (!accepted) {
       const auto status = fc_->get_status();
       if (status.last_imu_mahalanobis_valid) {
@@ -2056,15 +2092,6 @@ private:
 
     double t = rclcpp::Time(msg->header.stamp).seconds();
 
-    if (source_id == 0 && shouldSuppressGnssPositionWhileStationary(t)) {
-      RCLCPP_DEBUG_THROTTLE(
-        get_logger(),
-        *get_clock(),
-        5000,
-        "Suppressing stationary GNSS position fusion while encoder reports standstill.");
-      return;
-    }
-
     fusioncore::sensors::LLAPoint lla;
     lla.lat_rad = msg->latitude  * M_PI / 180.0;
     lla.lon_rad = msg->longitude * M_PI / 180.0;
@@ -2082,6 +2109,15 @@ private:
       RCLCPP_INFO(get_logger(), "GNSS reference set: lat=%.6f lon=%.6f",
         msg->latitude, msg->longitude);
       // Do NOT return: fall through and fuse ENU [0,0,0] as first fix.
+    }
+
+    if (shouldSuppressGnssPositionWhileStationary(t)) {
+      RCLCPP_DEBUG_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Suppressing stationary GNSS position fusion while encoder/IMU report standstill.");
+      return;
     }
 
     // Pre-filter: drop fixes more than 10km from the reference origin.
@@ -2126,6 +2162,7 @@ private:
     }
     fix.source_id = source_id;
     fix.lever_arm = (source_id == 0) ? gnss_lever_arm_ : gnss_lever_arm2_;
+    fix.covariance_scale = gnss_position_covariance_scale_;
 
     // Use message covariance when meaningful (peci1 fix)
     // position_covariance_type:
@@ -2206,7 +2243,7 @@ private:
         const double ramp_elapsed = since_init - gnss_startup_delay_seconds_;
         if (ramp_elapsed < gnss_startup_ramp_seconds_) {
           const double alpha = std::clamp(ramp_elapsed / gnss_startup_ramp_seconds_, 0.0, 1.0);
-          fix.covariance_scale =
+          fix.covariance_scale *=
             gnss_startup_initial_covariance_scale_ +
             (1.0 - gnss_startup_initial_covariance_scale_) * alpha;
           RCLCPP_INFO_THROTTLE(
@@ -2299,14 +2336,47 @@ private:
       return false;
     }
 
-    const double encoder_age = timestamp_seconds - last_primary_encoder_time_;
-    if (encoder_age < 0.0 || encoder_age > stationary_encoder_timeout_) {
+    const double encoder_time_skew = std::abs(timestamp_seconds - last_primary_encoder_time_);
+    if (encoder_time_skew > stationary_encoder_timeout_) {
       return false;
     }
 
-    return
+    const bool encoder_stationary =
       last_primary_encoder_speed_ < zupt_velocity_threshold_ &&
       std::abs(last_primary_encoder_wz_) < zupt_angular_threshold_;
+    if (!encoder_stationary) {
+      return false;
+    }
+
+    if (last_primary_imu_time_ > 0.0 && stationary_imu_timeout_ > 0.0) {
+      const double imu_time_skew = std::abs(timestamp_seconds - last_primary_imu_time_);
+      if (imu_time_skew <= stationary_imu_timeout_) {
+        return
+          last_primary_imu_angular_speed_ < stationary_imu_angular_threshold_ &&
+          last_primary_imu_dynamic_accel_norm_ < stationary_imu_accel_threshold_;
+      }
+    }
+
+    return true;
+  }
+
+  void remember_primary_imu_motion_sample(
+    double timestamp_seconds,
+    double wx,
+    double wy,
+    double wz,
+    double ax,
+    double ay,
+    double az)
+  {
+    last_primary_imu_time_ = timestamp_seconds;
+    last_primary_imu_angular_speed_ = std::sqrt(wx * wx + wy * wy + wz * wz);
+
+    tf2::Vector3 dynamic_accel(ax, ay, az);
+    if (fc_ != nullptr && fc_->is_initialized()) {
+      dynamic_accel -= gravity_in_body_frame();
+    }
+    last_primary_imu_dynamic_accel_norm_ = dynamic_accel.length();
   }
 
   // ─── Dual antenna heading callback ────────────────────────────────────────
@@ -2754,6 +2824,7 @@ private:
   fusioncore::sensors::ECEFPoint gnss_ref_ecef_;
 
   fusioncore::sensors::GnssFixType  min_fix_type_   = fusioncore::sensors::GnssFixType::GPS_FIX;
+  double                            gnss_position_covariance_scale_ = 1.0;
   double                            gnss_max_hdop_ = 4.0;
   double                            gnss_max_vdop_ = 6.0;
   int                               gnss_min_satellites_ = 4;
@@ -2762,11 +2833,17 @@ private:
   double                            gnss_startup_initial_covariance_scale_ = 1.0;
   bool                              suppress_gnss_position_while_stationary_ = false;
   double                            stationary_encoder_timeout_ = 0.5;
+  double                            stationary_imu_timeout_ = 0.5;
+  double                            stationary_imu_angular_threshold_ = 0.05;
+  double                            stationary_imu_accel_threshold_ = 0.2;
   fusioncore::sensors::GnssLeverArm gnss_lever_arm_;    // primary receiver
   fusioncore::sensors::GnssLeverArm gnss_lever_arm2_;   // secondary receiver (fix2_topic)
   double                            last_primary_encoder_time_ = -1.0;
   double                            last_primary_encoder_speed_ = 0.0;
   double                            last_primary_encoder_wz_ = 0.0;
+  double                            last_primary_imu_time_ = -1.0;
+  double                            last_primary_imu_angular_speed_ = 0.0;
+  double                            last_primary_imu_dynamic_accel_norm_ = 0.0;
 
   // ZUPT parameters
   bool   zupt_enabled_            = true;
