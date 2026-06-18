@@ -34,6 +34,7 @@
     prior_blend_weight:                  0.7                              # Reserved compatibility knob from the earlier prior-based matcher; the runtime filter now starts identity and tracks scan corrections.
     scan_timeout_seconds:                1.0                              # Ignore stale scans so the matcher does not back-calculate map -> odom from old sensor data.
     costmap_timeout_seconds:             2.0                              # Ignore stale global costmaps during scan correlation.
+    startup_ready_streak_required:       3                                # Hold map -> odom at identity until scan freshness, TF connectivity, and the static reference map stay healthy for this many consecutive publish cycles.
 
     # -- Runtime correction filter -------------------------------------------
     max_translation_jump_m:              0.75                             # Clamp one update of map -> odom so a single bad correlation cannot teleport the robot in the map frame.

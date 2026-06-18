@@ -15,7 +15,7 @@
     imu.gyro_noise:                        0.005           # Gyro measurement noise in rad/s.
     imu.accel_noise:                       0.1             # Accelerometer measurement noise in m/s^2.
     imu.frame_id:                          imu_link        # Override IMU frame when the incoming message frame_id is missing or inconsistent.
-    imu.remove_gravitational_acceleration: false           # Driver publishes raw specific force, so gravity stays in the message.
+    imu.remove_gravitational_acceleration: true            # Driver publishes raw specific force, so gravity stays in the message.
 
     # -- Secondary IMU ---------------------------------------------------------
     use_imu2:                              false           # Default launch-time toggle for the optional secondary IMU input.
