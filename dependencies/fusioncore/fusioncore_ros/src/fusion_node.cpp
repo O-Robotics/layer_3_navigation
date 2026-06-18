@@ -177,6 +177,9 @@ public:
     declare_parameter("gnss.min_satellites", 4);
     declare_parameter("gnss.suppress_position_while_stationary", false);
     declare_parameter("gnss.stationary_encoder_timeout", 0.5);
+    declare_parameter("gnss.startup_delay_seconds", 5.0);
+    declare_parameter("gnss.startup_ramp_seconds", 15.0);
+    declare_parameter("gnss.startup_initial_covariance_scale", 25.0);
     // Minimum fix type for GNSS fusion: 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
     // Note: NavSatFix status only goes up to 2 (GBAS) which maps to RTK_FIXED.
     // RTK_FLOAT (3) is unreachable via NavSatFix alone.
@@ -346,6 +349,12 @@ public:
     gnss_max_hdop_ = config.gnss.max_hdop;
     gnss_max_vdop_ = config.gnss.max_vdop;
     gnss_min_satellites_ = config.gnss.min_satellites;
+    gnss_startup_delay_seconds_ =
+      std::max(0.0, get_parameter("gnss.startup_delay_seconds").as_double());
+    gnss_startup_ramp_seconds_ =
+      std::max(0.0, get_parameter("gnss.startup_ramp_seconds").as_double());
+    gnss_startup_initial_covariance_scale_ =
+      std::max(1.0, get_parameter("gnss.startup_initial_covariance_scale").as_double());
     suppress_gnss_position_while_stationary_ =
       get_parameter("gnss.suppress_position_while_stationary").as_bool();
     stationary_encoder_timeout_ =
@@ -353,6 +362,12 @@ public:
     RCLCPP_INFO(get_logger(),
                 "GNSS min_fix_type: %d (1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED)",
                 static_cast<int>(min_fix_type_));
+    RCLCPP_INFO(
+      get_logger(),
+      "GNSS startup gating: delay=%.1fs ramp=%.1fs initial_covariance_scale=%.1f",
+      gnss_startup_delay_seconds_,
+      gnss_startup_ramp_seconds_,
+      gnss_startup_initial_covariance_scale_);
     gnss_lever_arm_.x = get_parameter("gnss.lever_arm_x").as_double();
     gnss_lever_arm_.y = get_parameter("gnss.lever_arm_y").as_double();
     gnss_lever_arm_.z = get_parameter("gnss.lever_arm_z").as_double();
@@ -646,6 +661,7 @@ public:
         initial.P(1,1) = 1000.0;
         initial.P(2,2) = 1000.0;
         fc_->init(initial, last_imu_time_);
+        filter_init_time_ = last_imu_time_;
         gnss_ref_set_ = false;  // re-anchor GPS reference on next fix
         response->success = true;
         response->message = "FusionCore filter reset. GPS reference cleared.";
@@ -775,6 +791,7 @@ public:
           }
         }
         fc_->init(restored, t);
+        filter_init_time_ = t;
         response->success = true;
         response->message = "Loaded from " + checkpoint_path_;
         RCLCPP_INFO(get_logger(), "State checkpoint loaded from %s at t=%.3f",
@@ -1309,6 +1326,7 @@ private:
           return;
         }
         fc_->init(initial, t);
+        filter_init_time_ = t;
         pending_init_ = false;
         RCLCPP_INFO(get_logger(), "Filter initialized at t=%.3f (first IMU)", t);
       } else {
@@ -1426,6 +1444,7 @@ private:
           }
 
           fc_->init(initial, t);
+          filter_init_time_     = t;
           pending_init_         = false;
           reset_init_window_collection_state();
           RCLCPP_INFO(get_logger(), "Filter initialized at t=%.3f", t);
@@ -2162,6 +2181,35 @@ private:
       fix.vdop <= gnss_max_vdop_ &&
       fix.satellites >= gnss_min_satellites_;
 
+    if (source_id == 0 && filter_init_time_ > 0.0) {
+      const double since_init = std::max(0.0, t - filter_init_time_);
+      if (since_init < gnss_startup_delay_seconds_) {
+        RCLCPP_INFO_THROTTLE(
+          get_logger(),
+          *get_clock(),
+          5000,
+          "Holding GNSS position fusion for startup delay: %.1fs remaining.",
+          gnss_startup_delay_seconds_ - since_init);
+        return;
+      }
+
+      if (gnss_startup_ramp_seconds_ > 0.0) {
+        const double ramp_elapsed = since_init - gnss_startup_delay_seconds_;
+        if (ramp_elapsed < gnss_startup_ramp_seconds_) {
+          const double alpha = std::clamp(ramp_elapsed / gnss_startup_ramp_seconds_, 0.0, 1.0);
+          fix.covariance_scale =
+            gnss_startup_initial_covariance_scale_ +
+            (1.0 - gnss_startup_initial_covariance_scale_) * alpha;
+          RCLCPP_INFO_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            5000,
+            "Ramping GNSS position fusion in after startup: covariance scale %.1f.",
+            fix.covariance_scale);
+        }
+      }
+    }
+
     bool accepted = fc_->update_gnss(t, fix);
     if (!accepted) {
       if (!quality_valid) {
@@ -2683,6 +2731,7 @@ private:
   bool   latest_heading_valid_   = false;
   double latest_heading_yaw_rad_ = 0.0;
   bool        gnss_ref_set_        = false;
+  double      filter_init_time_    = 0.0;
   bool        imu_remove_gravity_  = false;
   std::string imu_topic_;
   std::string imu_frame_override_;
@@ -2699,6 +2748,9 @@ private:
   double                            gnss_max_hdop_ = 4.0;
   double                            gnss_max_vdop_ = 6.0;
   int                               gnss_min_satellites_ = 4;
+  double                            gnss_startup_delay_seconds_ = 0.0;
+  double                            gnss_startup_ramp_seconds_ = 0.0;
+  double                            gnss_startup_initial_covariance_scale_ = 1.0;
   bool                              suppress_gnss_position_while_stationary_ = false;
   double                            stationary_encoder_timeout_ = 0.5;
   fusioncore::sensors::GnssLeverArm gnss_lever_arm_;    // primary receiver

@@ -45,6 +45,9 @@
     gnss.min_satellites:                   4               # Minimum satellite count required before fusing GNSS.
     gnss.suppress_position_while_stationary: true          # Keep accepted GNSS jitter from nudging odom while the wheel encoder still reports standstill.
     gnss.stationary_encoder_timeout:       0.5             # Only suppress GNSS when a fresh encoder sample confirms the robot is not moving.
+    gnss.startup_delay_seconds:            5.0             # Let IMU + wheel odom settle first; GNSS still establishes the datum immediately but position fusion waits this long after filter init.
+    gnss.startup_ramp_seconds:             15.0            # After the delay, taper GNSS position covariance back down over this many seconds instead of letting the first fixes yank odom.
+    gnss.startup_initial_covariance_scale: 25.0            # Start the GNSS ramp with 25x covariance so the first accepted fixes are very soft corrections.
     gnss.min_fix_type:                     1               # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic:                       ""              # Optional second GNSS receiver topic; leave empty to disable.
     gnss.heading_topic:                    ""              # Disabled because yaw is fused directly from the configured IMU topic.
