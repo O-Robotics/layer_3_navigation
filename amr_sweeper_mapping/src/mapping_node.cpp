@@ -482,6 +482,61 @@ void writeJsonDocumentAtomic(
   std::filesystem::rename(temp_path, path);
 }
 
+std::filesystem::path resolveExecutionContextPath(
+  const std::filesystem::path & mission_output_directory)
+{
+  if (mission_output_directory.empty()) {
+    return {};
+  }
+
+  const std::filesystem::path legacy_path = mission_output_directory / "execution_context.json";
+  if (std::filesystem::exists(legacy_path)) {
+    return legacy_path;
+  }
+
+  std::error_code error;
+  std::vector<std::filesystem::path> candidates;
+  for (std::filesystem::directory_iterator iterator(
+         mission_output_directory,
+         std::filesystem::directory_options::skip_permission_denied,
+         error);
+       iterator != std::filesystem::directory_iterator();
+       iterator.increment(error))
+  {
+    if (error) {
+      error.clear();
+      continue;
+    }
+    if (!iterator->is_regular_file(error)) {
+      error.clear();
+      continue;
+    }
+    const std::string filename = iterator->path().filename().string();
+    if (filename.size() > std::string("_context.json").size() &&
+      filename.compare(filename.size() - 13U, 13U, "_context.json") == 0)
+    {
+      candidates.push_back(iterator->path());
+    }
+  }
+
+  if (candidates.empty()) {
+    return {};
+  }
+  std::sort(candidates.begin(), candidates.end());
+  return candidates.front();
+}
+
+nlohmann::json loadJsonDocument(const std::filesystem::path & path)
+{
+  std::ifstream input_stream(path);
+  if (!input_stream.is_open()) {
+    throw std::runtime_error("Failed to open JSON file: " + path.string());
+  }
+  nlohmann::json document;
+  input_stream >> document;
+  return document;
+}
+
 std::string resolveArtifactPathString(const std::string & configured_path)
 {
   namespace fs = std::filesystem;
@@ -1786,22 +1841,25 @@ void MappingNode::writeMissionSessionMetadata() const
     {"actual_path_output_file", actual_path_output_file_},
     {"actual_path_navsat_output_file", actual_path_navsat_output_file_}};
 
-  std::string metadata_filename = "mapping_session.json";
   const auto mission_output_directory = std::filesystem::path(mission_output_directory_);
-  const std::string run_started_at = mission_output_directory.filename().string();
-  if (!mission_id_.empty() && !run_started_at.empty()) {
-    metadata_filename = mission_id_ + "_" + run_started_at + "_mapping.json";
+  const auto context_path = resolveExecutionContextPath(mission_output_directory);
+  if (context_path.empty()) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to locate execution context for mapping metadata in %s",
+      mission_output_directory_.c_str());
+    return;
   }
 
   try {
-    writeJsonDocumentAtomic(
-      mission_output_directory / metadata_filename,
-      document);
+    auto context_document = loadJsonDocument(context_path);
+    context_document["mapping"] = document;
+    writeJsonDocumentAtomic(context_path, context_document);
   } catch (const std::exception &) {
     RCLCPP_WARN(
       get_logger(),
-      "Failed to write mapping session metadata into %s",
-      mission_output_directory_.c_str());
+      "Failed to write mapping metadata into %s",
+      context_path.string().c_str());
     return;
   }
 }
