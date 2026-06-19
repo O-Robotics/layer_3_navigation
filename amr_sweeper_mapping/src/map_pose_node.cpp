@@ -341,12 +341,10 @@ MapPoseNode::MapPoseNode()
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(fromll_service_name_);
-  rclcpp::TimerBase::Options publish_timer_options;
-  publish_timer_options.callback_group = publish_callback_group_;
   publish_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("publish_period_seconds").as_double()),
     std::bind(&MapPoseNode::publishMapToOdomTransform, this),
-    publish_timer_options);
+    publish_callback_group_);
 }
 
 void MapPoseNode::initializeMapToOdomFilter()
@@ -1106,7 +1104,7 @@ void MapPoseNode::publishMapToOdomTransform()
   }
 
   tf2::Quaternion odom_base_quaternion;
-  tf2::fromMsg(latest_odometry_orientation_, odom_base_quaternion);
+  tf2::fromMsg(snapshot.latest_odometry_orientation, odom_base_quaternion);
   odom_base_quaternion.normalize();
   const tf2::Transform odom_to_base(
     odom_base_quaternion,
@@ -1133,8 +1131,8 @@ void MapPoseNode::publishMapToOdomTransform()
   {
     tf2::Transform measured_map_to_odom = map_match->map_to_base * odom_to_base.inverse();
 
-    if (last_map_to_odom_ready_) {
-      const tf2::Vector3 previous_origin = last_map_to_odom_.getOrigin();
+    if (prediction_snapshot.last_map_to_odom_ready) {
+      const tf2::Vector3 previous_origin = prediction_snapshot.last_map_to_odom.getOrigin();
       const tf2::Vector3 candidate_origin = measured_map_to_odom.getOrigin();
       tf2::Vector3 delta = candidate_origin - previous_origin;
       const double delta_distance = delta.length();
@@ -1142,7 +1140,7 @@ void MapPoseNode::publishMapToOdomTransform()
         delta *= max_translation_jump_m_ / delta_distance;
       }
 
-      const double previous_yaw = yawFromTransform(last_map_to_odom_);
+      const double previous_yaw = yawFromTransform(prediction_snapshot.last_map_to_odom);
       const double candidate_yaw = yawFromTransform(measured_map_to_odom);
       const double yaw_delta = normalizeAngle(candidate_yaw - previous_yaw);
       const double clamped_yaw_delta =
