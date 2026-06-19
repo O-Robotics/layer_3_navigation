@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(fusioncore_core VERSION 0.2.2)
+project(fusioncore_core VERSION 0.3.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,12 +14,17 @@ add_library(fusioncore_core STATIC
   src/motion_model.cpp
 )
 
+add_executable(fusioncore_csv_replay
+  src/fusioncore_csv_replay.cpp
+)
+
 target_include_directories(fusioncore_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/fusioncore_core>
 )
 
 target_link_libraries(fusioncore_core PUBLIC Eigen3::Eigen)
+target_link_libraries(fusioncore_csv_replay fusioncore_core Eigen3::Eigen)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -61,6 +66,11 @@ install(
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
+)
+
+install(
+  TARGETS fusioncore_csv_replay
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()

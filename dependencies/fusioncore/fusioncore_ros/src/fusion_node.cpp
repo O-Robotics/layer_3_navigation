@@ -38,31 +38,25 @@ using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface
 namespace
 {
 
-const char * gnssRejectReasonToString(const fusioncore::GnssRejectReason reason)
+const char * gnssRejectReasonToString(const fusioncore::GnssRejectionReason reason)
 {
   switch (reason) {
-    case fusioncore::GnssRejectReason::NONE:
-      return "none";
-    case fusioncore::GnssRejectReason::QUALITY_GATE:
-      return "quality_gate";
-    case fusioncore::GnssRejectReason::DELAY_REPLAY_FAILED:
-      return "delay_replay_failed";
-    case fusioncore::GnssRejectReason::OUTLIER_GATE:
-      return "outlier_gate";
-  }
-  return "unknown";
-}
-
-const char * delayedMeasurementFailureReasonToString(
-  const fusioncore::DelayedMeasurementFailureReason reason)
-{
-  switch (reason) {
-    case fusioncore::DelayedMeasurementFailureReason::NONE:
-      return "none";
-    case fusioncore::DelayedMeasurementFailureReason::EMPTY_SNAPSHOT_BUFFER:
-      return "empty_snapshot_buffer";
-    case fusioncore::DelayedMeasurementFailureReason::EXCEEDED_MAX_DELAY:
-      return "exceeded_max_delay";
+    case fusioncore::GnssRejectionReason::NOT_PROCESSED:
+      return "not_processed";
+    case fusioncore::GnssRejectionReason::ACCEPTED:
+      return "accepted";
+    case fusioncore::GnssRejectionReason::FIX_TYPE_LOW:
+      return "fix_type_low";
+    case fusioncore::GnssRejectionReason::HDOP_HIGH:
+      return "hdop_high";
+    case fusioncore::GnssRejectionReason::VDOP_HIGH:
+      return "vdop_high";
+    case fusioncore::GnssRejectionReason::MIN_SATS:
+      return "min_sats";
+    case fusioncore::GnssRejectionReason::CHI2_FAILED:
+      return "chi2_failed";
+    case fusioncore::GnssRejectionReason::DELAY_TOO_LARGE:
+      return "delay_too_large";
   }
   return "unknown";
 }
@@ -380,6 +374,8 @@ public:
     config.gnss.base_noise_xy  = get_parameter("gnss.base_noise_xy").as_double();
     config.gnss.base_noise_z   = get_parameter("gnss.base_noise_z").as_double();
     config.gnss.heading_noise  = get_parameter("gnss.heading_noise").as_double();
+    gnss_base_noise_xy_ = config.gnss.base_noise_xy;
+    gnss_base_noise_z_ = config.gnss.base_noise_z;
     gnss_position_covariance_scale_ =
       std::max(1.0, get_parameter("gnss.position_covariance_scale").as_double());
     config.gnss.max_hdop       = get_parameter("gnss.max_hdop").as_double();
@@ -482,13 +478,6 @@ public:
 
     config.gnss_coast_n                    = get_parameter("gnss.coast_n").as_int();
     config.gnss_coast_q_factor             = get_parameter("gnss.coast_q_factor").as_double();
-    config.gnss_degraded_noise_multiplier  = get_parameter("gnss.degraded_noise_multiplier").as_double();
-    config.gnss_soft_position_reject_start_m =
-      get_parameter("gnss.soft_position_reject_start_m").as_double();
-    config.gnss_soft_position_reject_end_m =
-      get_parameter("gnss.soft_position_reject_end_m").as_double();
-    config.gnss_soft_position_max_covariance_scale =
-      get_parameter("gnss.soft_position_max_covariance_scale").as_double();
 
     config.adaptive_imu     = get_parameter("adaptive.imu").as_bool();
     config.adaptive_encoder = get_parameter("adaptive.encoder").as_bool();
@@ -544,11 +533,19 @@ public:
       }
     }
 
+    RCLCPP_INFO(get_logger(), "Constructing FusionCore core...");
     fc_ = std::make_unique<fusioncore::FusionCore>(config);
+    RCLCPP_INFO(get_logger(), "FusionCore core constructed.");
 
+    RCLCPP_INFO(get_logger(), "Creating TF broadcaster...");
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+    RCLCPP_INFO(get_logger(), "TF broadcaster created.");
+    RCLCPP_INFO(get_logger(), "Creating TF buffer...");
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+    RCLCPP_INFO(get_logger(), "TF buffer created.");
+    RCLCPP_INFO(get_logger(), "Creating TF listener...");
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    RCLCPP_INFO(get_logger(), "TF listener created.");
 
     if (!heading_topic_.empty()) {
       RCLCPP_INFO(get_logger(),
@@ -1329,6 +1326,71 @@ private:
     return true;
   }
 
+  bool resolve_primary_imu_measurement(
+    const sensor_msgs::msg::Imu::SharedPtr& msg,
+    bool add_gravity_back,
+    double* wx,
+    double* wy,
+    double* wz,
+    double* ax,
+    double* ay,
+    double* az,
+    std::optional<tf2::Quaternion>* imu_to_base = nullptr,
+    std::string* error_message = nullptr)
+  {
+    std::string imu_frame = imu_frame_override_.empty()
+      ? (msg->header.frame_id.empty() ? "imu_link" : msg->header.frame_id)
+      : imu_frame_override_;
+
+    tf2::Vector3 w(msg->angular_velocity.x,
+                   msg->angular_velocity.y,
+                   msg->angular_velocity.z);
+    tf2::Vector3 a(msg->linear_acceleration.x,
+                   msg->linear_acceleration.y,
+                   msg->linear_acceleration.z);
+
+    if (imu_frame != base_frame_) {
+      try {
+        const auto tf_stamped = tf_buffer_->lookupTransform(
+          base_frame_, imu_frame, tf2::TimePointZero);
+        tf2::Quaternion q(
+          tf_stamped.transform.rotation.x,
+          tf_stamped.transform.rotation.y,
+          tf_stamped.transform.rotation.z,
+          tf_stamped.transform.rotation.w);
+        tf2::Matrix3x3 R(q);
+        w = R * w;
+        a = R * a;
+        if (imu_to_base != nullptr) {
+          *imu_to_base = q;
+        }
+      } catch (const tf2::TransformException & ex) {
+        if (imu_to_base != nullptr) {
+          *imu_to_base = std::nullopt;
+        }
+        if (error_message != nullptr) {
+          *error_message = ex.what();
+        }
+        return false;
+      }
+    } else if (imu_to_base != nullptr) {
+      *imu_to_base = std::nullopt;
+    }
+
+    if (add_gravity_back && fc_ != nullptr && fc_->is_initialized()) {
+      tf2::Vector3 g_base = gravity_in_body_frame();
+      a += g_base;
+    }
+
+    *wx = w.x();
+    *wy = w.y();
+    *wz = w.z();
+    *ax = a.x();
+    *ay = a.y();
+    *az = a.z();
+    return true;
+  }
+
   void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
     double t = rclcpp::Time(msg->header.stamp).seconds();
@@ -1411,13 +1473,37 @@ private:
             "Collecting %.1fs bias window before init...", init_window_duration_);
         }
 
-        // Accumulate gyro and accel
-        init_win_wx_ += msg->angular_velocity.x;
-        init_win_wy_ += msg->angular_velocity.y;
-        init_win_wz_ += msg->angular_velocity.z;
-        init_win_ax_ += msg->linear_acceleration.x;
-        init_win_ay_ += msg->linear_acceleration.y;
-        init_win_az_ += msg->linear_acceleration.z;
+        double init_wx = 0.0;
+        double init_wy = 0.0;
+        double init_wz = 0.0;
+        double init_ax = 0.0;
+        double init_ay = 0.0;
+        double init_az = 0.0;
+        std::string init_error_message;
+        if (!resolve_primary_imu_measurement(
+            msg, false,
+            &init_wx, &init_wy, &init_wz,
+            &init_ax, &init_ay, &init_az,
+            nullptr, &init_error_message))
+        {
+          RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 5000,
+            "Startup bias window skipped IMU sample while waiting for %s -> %s transform: %s",
+            imu_frame_override_.empty() ?
+            (msg->header.frame_id.empty() ? "imu_link" : msg->header.frame_id.c_str()) :
+            imu_frame_override_.c_str(),
+            base_frame_.c_str(),
+            init_error_message.c_str());
+          return;
+        }
+
+        // Accumulate gyro and accel in the same base-frame convention used by update_imu().
+        init_win_wx_ += init_wx;
+        init_win_wy_ += init_wy;
+        init_win_wz_ += init_wz;
+        init_win_ax_ += init_ax;
+        init_win_ay_ += init_ay;
+        init_win_az_ += init_az;
         ++init_win_n_;
 
         // Accumulate orientation if available
@@ -1537,62 +1623,35 @@ private:
       }
     }
 
-    if (imu_frame == base_frame_) {
-      double ax = msg->linear_acceleration.x;
-      double ay = msg->linear_acceleration.y;
-      double az = msg->linear_acceleration.z;
-      if (imu_remove_gravity_ && fc_->is_initialized()) {
-        // IMU driver already removed gravity → add specific force back so the
-        // filter measurement model (which expects specific force) is consistent.
-        tf2::Vector3 g_base = gravity_in_body_frame();
-        ax += g_base.x(); ay += g_base.y(); az += g_base.z();
-      }
-      const bool accepted = fc_->update_imu(t,
-        msg->angular_velocity.x,
-        msg->angular_velocity.y,
-        msg->angular_velocity.z,
-        ax, ay, az);
-      remember_primary_imu_motion_sample(
-        t,
-        msg->angular_velocity.x,
-        msg->angular_velocity.y,
-        msg->angular_velocity.z,
-        ax,
-        ay,
-        az);
-      if (!accepted) {
-        const auto status = fc_->get_status();
-        if (status.last_imu_mahalanobis_valid) {
-          warnRejectedOutlier(
-            get_logger(), *get_clock(), "IMU raw update",
-            status.last_imu_mahalanobis_d2,
-            get_parameter("outlier_threshold_imu").as_double());
-        }
-      }
-      // No frame rotation needed: IMU is already in base_frame
-      fuse_imu_orientation_if_valid(t, msg, std::nullopt);
-      return;
-    }
-
-    geometry_msgs::msg::TransformStamped tf_stamped;
-    try {
-      tf_stamped = tf_buffer_->lookupTransform(
-        base_frame_, imu_frame, tf2::TimePointZero);
-    } catch (const tf2::TransformException & ex) {
+    double wx = 0.0;
+    double wy = 0.0;
+    double wz = 0.0;
+    double ax = 0.0;
+    double ay = 0.0;
+    double az = 0.0;
+    std::optional<tf2::Quaternion> imu_to_base;
+    std::string imu_error_message;
+    if (!resolve_primary_imu_measurement(
+        msg, imu_remove_gravity_,
+        &wx, &wy, &wz, &ax, &ay, &az,
+        &imu_to_base, &imu_error_message))
+    {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
         "Cannot transform IMU from %s to %s: %s"
         " -- Fix: ros2 run tf2_ros static_transform_publisher"
         " --frame-id %s --child-frame-id %s",
-        imu_frame.c_str(), base_frame_.c_str(), ex.what(),
+        imu_frame.c_str(), base_frame_.c_str(), imu_error_message.c_str(),
         base_frame_.c_str(), imu_frame.c_str());
-      double ax = msg->linear_acceleration.x;
-      double ay = msg->linear_acceleration.y;
-      double az = msg->linear_acceleration.z;
+      ax = msg->linear_acceleration.x;
+      ay = msg->linear_acceleration.y;
+      az = msg->linear_acceleration.z;
       if (imu_remove_gravity_ && fc_->is_initialized()) {
         tf2::Vector3 g_base = gravity_in_body_frame();
-        ax += g_base.x(); ay += g_base.y(); az += g_base.z();
+        ax += g_base.x();
+        ay += g_base.y();
+        az += g_base.z();
       }
-      const bool accepted = fc_->update_imu(t,
+      fc_->update_imu(t,
         msg->angular_velocity.x,
         msg->angular_velocity.y,
         msg->angular_velocity.z,
@@ -1605,62 +1664,14 @@ private:
         ax,
         ay,
         az);
-      if (!accepted) {
-        const auto status = fc_->get_status();
-        if (status.last_imu_mahalanobis_valid) {
-          warnRejectedOutlier(
-            get_logger(), *get_clock(), "IMU raw update",
-            status.last_imu_mahalanobis_d2,
-            get_parameter("outlier_threshold_imu").as_double());
-        }
-      }
       return;
     }
 
-    tf2::Quaternion q(
-      tf_stamped.transform.rotation.x,
-      tf_stamped.transform.rotation.y,
-      tf_stamped.transform.rotation.z,
-      tf_stamped.transform.rotation.w);
-    tf2::Matrix3x3 R(q);
-
-    tf2::Vector3 w(msg->angular_velocity.x,
-                   msg->angular_velocity.y,
-                   msg->angular_velocity.z);
-    tf2::Vector3 w_base = R * w;
-
-    tf2::Vector3 a(msg->linear_acceleration.x,
-                   msg->linear_acceleration.y,
-                   msg->linear_acceleration.z);
-    tf2::Vector3 a_base = R * a;
-
-    if (imu_remove_gravity_ && fc_->is_initialized()) {
-      tf2::Vector3 g_base = gravity_in_body_frame();
-      a_base += g_base;
-    }
-
-    const bool accepted = fc_->update_imu(t,
-      w_base.x(), w_base.y(), w_base.z(),
-      a_base.x(), a_base.y(), a_base.z());
+    fc_->update_imu(t, wx, wy, wz, ax, ay, az);
     remember_primary_imu_motion_sample(
       t,
-      w_base.x(),
-      w_base.y(),
-      w_base.z(),
-      a_base.x(),
-      a_base.y(),
-      a_base.z());
-    if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_imu_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "IMU raw update",
-          status.last_imu_mahalanobis_d2,
-          get_parameter("outlier_threshold_imu").as_double());
-      }
-    }
-    // Fix 11: pass the rotation quaternion so orientation is also transformed
-    fuse_imu_orientation_if_valid(t, msg, q);
+      wx, wy, wz, ax, ay, az);
+    fuse_imu_orientation_if_valid(t, msg, imu_to_base);
   }
 
   // Second IMU callback. Mirrors imu_callback but skips filter initialization
@@ -1686,18 +1697,9 @@ private:
         tf2::Vector3 g_base = gravity_in_body_frame();
         ax += g_base.x(); ay += g_base.y(); az += g_base.z();
       }
-      const bool accepted = fc_->update_imu(t,
+      fc_->update_imu(t,
         msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z,
         ax, ay, az);
-      if (!accepted) {
-        const auto status = fc_->get_status();
-        if (status.last_imu_mahalanobis_valid) {
-          warnRejectedOutlier(
-            get_logger(), *get_clock(), "IMU2 raw update",
-            status.last_imu_mahalanobis_d2,
-            get_parameter("outlier_threshold_imu").as_double());
-        }
-      }
       fuse_imu_orientation_if_valid(t, msg, std::nullopt);
       return;
     }
@@ -1720,18 +1722,9 @@ private:
         tf2::Vector3 g_base = gravity_in_body_frame();
         ax += g_base.x(); ay += g_base.y(); az += g_base.z();
       }
-      const bool accepted = fc_->update_imu(t,
+      fc_->update_imu(t,
         msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z,
         ax, ay, az);
-      if (!accepted) {
-        const auto status = fc_->get_status();
-        if (status.last_imu_mahalanobis_valid) {
-          warnRejectedOutlier(
-            get_logger(), *get_clock(), "IMU2 raw update",
-            status.last_imu_mahalanobis_d2,
-            get_parameter("outlier_threshold_imu").as_double());
-        }
-      }
       return;
     }
 
@@ -1757,18 +1750,9 @@ private:
       a_base += g_base;
     }
 
-    const bool accepted = fc_->update_imu(t,
+    fc_->update_imu(t,
       w_base.x(), w_base.y(), w_base.z(),
       a_base.x(), a_base.y(), a_base.z());
-    if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_imu_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "IMU2 raw update",
-          status.last_imu_mahalanobis_d2,
-          get_parameter("outlier_threshold_imu").as_double());
-      }
-    }
     fuse_imu_orientation_if_valid(t, msg, q);
   }
 
@@ -1821,18 +1805,9 @@ private:
     double roll, pitch, yaw;
     tf2::Matrix3x3(q_base).getRPY(roll, pitch, yaw);
 
-    const bool accepted = fc_->update_imu_orientation(
+    fc_->update_imu_orientation(
       t, roll, pitch, yaw,
       msg->orientation_covariance.data());
-    if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_imu_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "IMU orientation update",
-          status.last_imu_mahalanobis_d2,
-          get_parameter("outlier_threshold_imu").as_double());
-      }
-    }
   }
 
   // ─── Encoder callback ─────────────────────────────────────────────────────
@@ -1869,16 +1844,7 @@ private:
     last_primary_encoder_wz_ = wz;
     last_primary_encoder_time_ = t;
 
-    const bool accepted = fc_->update_encoder(t, vx, vy, wz, var_vx, var_vy, var_wz);
-    if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_enc_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "Encoder update",
-          status.last_enc_mahalanobis_d2,
-          get_parameter("outlier_threshold_enc").as_double());
-      }
-    }
+    fc_->update_encoder(t, vx, vy, wz, var_vx, var_vy, var_wz);
 
     // Non-holonomic ground constraint: wheeled robots cannot move vertically.
     // Fuses VZ=0 as a pseudo-measurement to prevent altitude drift.
@@ -1925,16 +1891,7 @@ private:
     const double vy = msg->twist.twist.linear.y;
     const double wz = msg->twist.twist.angular.z;
 
-    const bool accepted = fc_->update_encoder(t, vx, vy, wz, var_vx, var_vy, var_wz);
-    if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_enc_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "Encoder2 update",
-          status.last_enc_mahalanobis_d2,
-          get_parameter("outlier_threshold_enc").as_double());
-      }
-    }
+    fc_->update_encoder(t, vx, vy, wz, var_vx, var_vy, var_wz);
   }
 
   // ─── VSLAM pose callback ──────────────────────────────────────────────────
@@ -2023,13 +1980,9 @@ private:
     if (accepted) {
       vslam_consecutive_rejects_ = 0;
     } else {
-      const auto status = fc_->get_status();
-      if (status.last_vslam_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "VSLAM pose update",
-          status.last_vslam_mahalanobis_d2,
-          get_parameter("outlier_threshold_vslam").as_double());
-      }
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "VSLAM pose update rejected by FusionCore outlier gate");
       ++vslam_consecutive_rejects_;
       // After vslam_reinit_n_ consecutive gate rejections, VSLAM has almost
       // certainly reinitialized to a new map. Re-anchor to the filter's current
@@ -2068,16 +2021,7 @@ private:
     const double var_vx = (cov[0] > 0.0) ? cov[0] : (radar_vel_noise_ * radar_vel_noise_);
     const double var_vy = (cov[7] > 0.0) ? cov[7] : (radar_vel_noise_ * radar_vel_noise_);
 
-    const bool accepted = fc_->update_encoder(t, vx, vy, 0.0, var_vx, var_vy, 1e6);
-    if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_enc_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "Radar velocity update",
-          status.last_enc_mahalanobis_d2,
-          get_parameter("outlier_threshold_enc").as_double());
-      }
-    }
+    fc_->update_encoder(t, vx, vy, 0.0, var_vx, var_vy, 1e6);
   }
 
   // ─── GPS velocity callback ────────────────────────────────────────────────
@@ -2109,16 +2053,7 @@ private:
     const double var_vx = (cov[0] > 0.0) ? cov[0] : -1.0;
     const double var_vy = (cov[7] > 0.0) ? cov[7] : -1.0;
 
-    const bool accepted = fc_->update_encoder(t, vx, vy, 0.0, var_vx, var_vy, 1e6);
-    if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_enc_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "GNSS velocity update",
-          status.last_enc_mahalanobis_d2,
-          get_parameter("outlier_threshold_enc").as_double());
-      }
-    }
+    fc_->update_encoder(t, vx, vy, 0.0, var_vx, var_vy, 1e6);
   }
 
   // ─── GNSS position callback ────────────────────────────────────────────────
@@ -2194,7 +2129,7 @@ private:
     }
     fix.source_id = source_id;
     fix.lever_arm = (source_id == 0) ? gnss_lever_arm_ : gnss_lever_arm2_;
-    fix.covariance_scale = gnss_position_covariance_scale_;
+    double covariance_scale = gnss_position_covariance_scale_;
 
     const bool stationary_context = isGnssStationaryContext(t);
     const double stationary_covariance_scale =
@@ -2208,21 +2143,21 @@ private:
           "Suppressing stationary GNSS position fusion while encoder/IMU report standstill.");
         return;
       }
-      fix.covariance_scale *= stationary_covariance_scale;
+      covariance_scale *= stationary_covariance_scale;
       RCLCPP_DEBUG_THROTTLE(
         get_logger(),
         *get_clock(),
         5000,
         "Inflating GNSS covariance while stationary: scale %.1f.",
-        fix.covariance_scale);
+        covariance_scale);
     } else if (stationary_covariance_scale > 1.0) {
-      fix.covariance_scale *= stationary_covariance_scale;
+      covariance_scale *= stationary_covariance_scale;
       RCLCPP_DEBUG_THROTTLE(
         get_logger(),
         *get_clock(),
         5000,
         "Ramping GNSS covariance back toward nominal motion weight: scale %.1f.",
-        fix.covariance_scale);
+        covariance_scale);
     }
 
     // Use message covariance when meaningful (peci1 fix)
@@ -2302,7 +2237,7 @@ private:
         const double ramp_elapsed = since_init - gnss_startup_delay_seconds_;
         if (ramp_elapsed < gnss_startup_ramp_seconds_) {
           const double alpha = std::clamp(ramp_elapsed / gnss_startup_ramp_seconds_, 0.0, 1.0);
-          fix.covariance_scale *=
+          covariance_scale *=
             gnss_startup_initial_covariance_scale_ +
             (1.0 - gnss_startup_initial_covariance_scale_) * alpha;
           RCLCPP_INFO_THROTTLE(
@@ -2310,12 +2245,26 @@ private:
             *get_clock(),
             5000,
             "Ramping GNSS position fusion in after startup: covariance scale %.1f.",
-            fix.covariance_scale);
+            covariance_scale);
         }
       }
     }
 
-    bool accepted = fc_->update_gnss(t, fix);
+    if (fix.has_full_covariance) {
+      fix.full_covariance *= covariance_scale;
+    } else {
+      Eigen::Matrix3d scaled_covariance = Eigen::Matrix3d::Zero();
+      scaled_covariance(0, 0) =
+        std::pow(gnss_base_noise_xy_ * fix.hdop, 2) * covariance_scale;
+      scaled_covariance(1, 1) =
+        std::pow(gnss_base_noise_xy_ * fix.hdop, 2) * covariance_scale;
+      scaled_covariance(2, 2) =
+        std::pow(gnss_base_noise_z_ * fix.vdop, 2) * covariance_scale;
+      fix.has_full_covariance = true;
+      fix.full_covariance = scaled_covariance;
+    }
+
+    const bool accepted = fc_->update_gnss(t, fix);
     if (!accepted) {
       if (!quality_valid) {
         std::vector<std::string> reasons;
@@ -2353,37 +2302,24 @@ private:
         stream << ")";
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "%s", stream.str().c_str());
       } else {
-        const auto fc_status = fc_->get_status();
+        const auto & debug = fc_->get_gnss_debug();
         std::ostringstream stream;
         stream << std::fixed << std::setprecision(2)
                << "GNSS fix rejected (";
-        if (fc_status.last_gnss_reject_reason == fusioncore::GnssRejectReason::OUTLIER_GATE) {
-          stream << "reason=" << gnssRejectReasonToString(fc_status.last_gnss_reject_reason);
-          if (fc_status.last_gnss_mahalanobis_valid) {
-            stream << ", mahalanobis_d2=" << fc_status.last_gnss_mahalanobis_d2
-                   << ", outlier_threshold_gnss=" << get_parameter("outlier_threshold_gnss").as_double();
-          } else {
-            stream << ", mahalanobis_d2=unknown, outlier_threshold_gnss="
-                   << get_parameter("outlier_threshold_gnss").as_double();
-          }
-        } else if (fc_status.last_gnss_reject_reason == fusioncore::GnssRejectReason::DELAY_REPLAY_FAILED) {
-          stream << "reason=" << gnssRejectReasonToString(fc_status.last_gnss_reject_reason)
-                 << ", delayed_failure_reason="
-                 << delayedMeasurementFailureReasonToString(
-                   fc_status.last_delayed_measurement_failure_reason)
-                 << ", measurement_time=" << fc_status.last_delayed_measurement_timestamp
-                 << ", filter_time=" << fc_status.last_delayed_measurement_current_time
-                 << ", delay=" << fc_status.last_delayed_measurement_delay
-                 << ", max_delay=" << fc_status.last_delayed_measurement_max_delay
-                 << ", snapshot_buffer_size=" << fc_status.last_snapshot_buffer_size
-                 << ", imu_buffer_size=" << fc_status.last_imu_buffer_size
-                 << ", imu_orientation_buffer_size=" << fc_status.last_imu_orientation_buffer_size
-                 << ", encoder_buffer_size=" << fc_status.last_encoder_buffer_size
-                 << ", ground_constraint_buffer_size=" << fc_status.last_ground_constraint_buffer_size
-                 << ", zupt_buffer_size=" << fc_status.last_zupt_buffer_size;
-        } else {
-          stream << "reason=" << gnssRejectReasonToString(fc_status.last_gnss_reject_reason);
+        stream << "reason=" << gnssRejectReasonToString(debug.reason);
+        if (debug.mahalanobis_sq >= 0.0) {
+          stream << ", mahalanobis_d2=" << debug.mahalanobis_sq
+                 << ", outlier_threshold_gnss=" << debug.chi2_threshold;
         }
+        stream << ", hdop=" << debug.hdop
+               << ", vdop=" << debug.vdop
+               << ", satellites=" << debug.satellites
+               << ", fix_type=" << debug.fix_type
+               << ", coast_mode=" << (debug.in_coast_mode ? "true" : "false")
+               << ", consecutive_rejects=" << debug.consecutive_rejects
+               << ", sigma_xy=(" << debug.position_sigma_x << ", " << debug.position_sigma_y << ")"
+               << ", lever_arm_used=" << (debug.lever_arm_used ? "true" : "false")
+               << ", heading_sigma_deg=" << debug.heading_sigma_deg;
         stream << ")";
         RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 5000, "%s", stream.str().c_str());
@@ -2537,18 +2473,10 @@ private:
     heading.accuracy_rad = yaw_sigma;
     heading.valid        = true;
 
-    bool accepted = fc_->update_gnss_heading(t, heading);
+    const bool accepted = fc_->update_gnss_heading(t, heading);
     if (!accepted) {
-      const auto status = fc_->get_status();
-      if (status.last_hdg_mahalanobis_valid) {
-        warnRejectedOutlier(
-          get_logger(), *get_clock(), "GNSS heading update",
-          status.last_hdg_mahalanobis_d2,
-          get_parameter("outlier_threshold_hdg").as_double());
-      } else {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-          "GNSS heading update rejected");
-      }
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+        "GNSS heading update rejected by FusionCore outlier gate");
     }
   }
 
@@ -2945,6 +2873,8 @@ private:
   double                            gnss_max_hdop_ = 4.0;
   double                            gnss_max_vdop_ = 6.0;
   int                               gnss_min_satellites_ = 4;
+  double                            gnss_base_noise_xy_ = 1.0;
+  double                            gnss_base_noise_z_ = 2.0;
   double                            gnss_min_horizontal_stddev_m_ = 0.5;
   double                            gnss_min_vertical_stddev_m_ = 1.0;
   double                            gnss_startup_delay_seconds_ = 0.0;

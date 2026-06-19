@@ -103,11 +103,6 @@ struct GnssFix {
   bool has_full_covariance = false;
   Eigen::Matrix3d full_covariance = Eigen::Matrix3d::Identity();
 
-  // Optional external covariance inflation factor applied after the quality
-  // gate. Lets the ROS node phase GNSS position fusion in gradually during
-  // startup without pretending the fix quality itself is worse.
-  double covariance_scale = 1.0;
-
   bool is_valid(const GnssParams& p) const {
     return fix_type >= p.min_fix_type
         && hdop <= p.max_hdop
@@ -179,8 +174,6 @@ inline GnssPosNoiseMatrix gnss_pos_noise_matrix(
   const GnssParams& p,
   const GnssFix& fix)
 {
-  const double covariance_scale = std::max(1.0e-6, fix.covariance_scale);
-
   // peci1 fix: use full covariance matrix when available.
   // Real GNSS receivers often report correlated X/Y errors:
   // the off-diagonal elements matter, especially with RTK.
@@ -189,7 +182,7 @@ inline GnssPosNoiseMatrix gnss_pos_noise_matrix(
     if (fix.full_covariance(0,0) > 0.0 &&
         fix.full_covariance(1,1) > 0.0 &&
         fix.full_covariance(2,2) > 0.0) {
-      return fix.full_covariance * covariance_scale;
+      return fix.full_covariance;
     }
   }
 
@@ -200,7 +193,7 @@ inline GnssPosNoiseMatrix gnss_pos_noise_matrix(
   R(0,0) = sigma_xy * sigma_xy;
   R(1,1) = sigma_xy * sigma_xy;
   R(2,2) = sigma_z  * sigma_z;
-  return R * covariance_scale;
+  return R;
 }
 
 inline GnssHdgNoiseMatrix gnss_hdg_noise_matrix(

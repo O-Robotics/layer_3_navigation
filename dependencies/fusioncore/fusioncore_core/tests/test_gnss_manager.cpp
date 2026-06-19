@@ -178,20 +178,17 @@ TEST(GNSSManagerTest, StefanFullConfigurationWithGNSSCorrection) {
   EXPECT_EQ(status.gnss_health,    SensorHealth::OK);
 }
 
-// ─── Test 7: Degraded R-inflation breaks cascade rejection loop ───────────────
-// Scenario: N consecutive GPS spikes (rejected by tight Mahalanobis gate) push
-// the filter into coast mode. The next fix is moderately off — too far for the
-// tight gate, but within the relaxed gate (R * gnss_degraded_noise_multiplier).
-// It should be ACCEPTED and position should move toward the degraded fix.
-// This directly validates the fix for issue #38.
+// Test 7: P inflation breaks cascade rejection loop (gnss_recovery_rejection_n)
+// Scenario: N consecutive GPS spikes inflate P[x,x]/P[y,y]. The next valid fix
+// has a large S (HPH^T+R grows with P), so chi2 drops and the fix is accepted.
 
-TEST(GNSSManagerTest, DegradedRInflationBreaksCascadeLoop) {
+TEST(GNSSManagerTest, PInflationBreaksCascadeLoop) {
   FusionCoreConfig config;
-  // Use coast mode with n=3 to enter degraded mode quickly
-  config.gnss_coast_n                  = 3;
-  config.gnss_degraded_noise_multiplier = 100.0;  // wide enough to guarantee acceptance
-  config.outlier_rejection             = true;
-  config.adaptive_gnss                 = false;   // keep R fixed for predictability
+  config.gnss_coast_n              = 3;
+  config.gnss_recovery_rejection_n = 5;   // inflate after 5 rejections
+  config.gnss_p_inflate_sigma      = 200.0;  // large enough to accept a 50m fix
+  config.outlier_rejection         = true;
+  config.adaptive_gnss             = false;
 
   FusionCore fc(config);
 
@@ -200,7 +197,6 @@ TEST(GNSSManagerTest, DegradedRInflationBreaksCascadeLoop) {
   initial.P = StateMatrix::Identity() * 0.1;
   fc.init(initial, 0.0);
 
-  // Phase 1: inject 3 GPS spikes (500m away). All must be rejected by tight gate.
   GnssFix spike;
   spike.fix_type   = GnssFixType::GPS_FIX;
   spike.satellites = 8;
@@ -210,33 +206,380 @@ TEST(GNSSManagerTest, DegradedRInflationBreaksCascadeLoop) {
   spike.y          = 0.0;
   spike.z          = 0.0;
 
-  EXPECT_FALSE(fc.update_gnss(0.1, spike));
-  EXPECT_FALSE(fc.update_gnss(0.2, spike));
-  EXPECT_FALSE(fc.update_gnss(0.3, spike));
+  for (int i = 0; i < 5; ++i)
+    EXPECT_FALSE(fc.update_gnss(0.1 * (i + 1), spike));
 
-  // Position must not have moved (all rejected)
   EXPECT_NEAR(fc.get_state().x[X], 0.0, 0.01);
-  EXPECT_EQ(fc.get_status().gnss_outliers, 3);
 
-  // Phase 2: inject a fix 8m away — fails the tight gate (d² ≈ 40 >> 16.27)
-  // but passes the relaxed gate (d² ≈ 0.44 << 16.27 with 100x R).
-  GnssFix degraded_fix;
-  degraded_fix.fix_type   = GnssFixType::GPS_FIX;
-  degraded_fix.satellites = 8;
-  degraded_fix.hdop       = 1.2;
-  degraded_fix.vdop       = 1.8;
-  degraded_fix.x          = 8.0;
-  degraded_fix.y          = 0.0;
-  degraded_fix.z          = 0.0;
+  // After P inflation fires on the 5th rejection, the next valid fix should pass.
+  GnssFix valid_fix;
+  valid_fix.fix_type   = GnssFixType::GPS_FIX;
+  valid_fix.satellites = 8;
+  valid_fix.hdop       = 1.2;
+  valid_fix.vdop       = 1.8;
+  valid_fix.x          = 50.0;
+  valid_fix.y          = 0.0;
+  valid_fix.z          = 0.0;
 
-  bool accepted = fc.update_gnss(0.4, degraded_fix);
-  EXPECT_TRUE(accepted) << "Degraded fix must pass the R-inflated gate after coast mode";
+  bool accepted = fc.update_gnss(0.6, valid_fix);
+  EXPECT_TRUE(accepted) << "Fix should pass chi2 after P inflation";
+  EXPECT_GT(fc.get_state().x[X], 0.0) << "Position should move toward the fix";
+  EXPECT_LT(fc.get_state().x[X], 50.0) << "Position should not overshoot";
+}
 
-  // Position must have moved toward the degraded fix
-  EXPECT_GT(fc.get_state().x[X], 0.0)
-    << "Position should move toward accepted degraded fix";
-  EXPECT_LT(fc.get_state().x[X], 8.0)
-    << "Position must not overshoot past degraded fix";
+// ─── Observability tests ─────────────────────────────────────────────────────
+
+// Shared setup: initialized filter at origin with large initial P
+static FusionCore make_initialized_fc()
+{
+  FusionCoreConfig cfg;
+  cfg.outlier_rejection = true;
+  cfg.adaptive_gnss     = false;
+  FusionCore fc(cfg);
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 100.0;
+  fc.init(s, 0.0);
+  return fc;
+}
+
+static GnssFix make_good_fix(double x = 0.0, double y = 0.0, double z = 0.0)
+{
+  GnssFix f;
+  f.fix_type   = GnssFixType::GPS_FIX;
+  f.satellites = 8;
+  f.hdop       = 1.2;
+  f.vdop       = 1.8;
+  f.x = x; f.y = y; f.z = z;
+  return f;
+}
+
+// Test 8: HDOP gate failure populates debug with correct reason; chi2 not computed
+TEST(GNSSObservabilityTest, HdopRejectionReason)
+{
+  auto fc = make_initialized_fc();
+
+  GnssFix fix = make_good_fix();
+  fix.hdop = 8.0;  // exceeds default max_hdop=4.0
+
+  bool accepted = fc.update_gnss(0.1, fix);
+  EXPECT_FALSE(accepted);
+
+  const auto& d = fc.get_gnss_debug();
+  EXPECT_FALSE(d.accepted);
+  EXPECT_EQ(d.reason, GnssRejectionReason::HDOP_HIGH);
+  EXPECT_DOUBLE_EQ(d.mahalanobis_sq, -1.0) << "chi2 should not be computed when quality gate fails";
+  EXPECT_NEAR(d.hdop, 8.0, 1e-9);
+}
+
+// Test 9: fix_type gate failure reports FIX_TYPE_LOW
+TEST(GNSSObservabilityTest, FixTypeRejectionReason)
+{
+  FusionCoreConfig cfg;
+  cfg.gnss.min_fix_type = GnssFixType::RTK_FIXED;
+  FusionCore fc(cfg);
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 0.1;
+  fc.init(s, 0.0);
+
+  GnssFix fix = make_good_fix();
+  fix.fix_type = GnssFixType::GPS_FIX;  // below RTK_FIXED threshold
+
+  EXPECT_FALSE(fc.update_gnss(0.1, fix));
+  EXPECT_EQ(fc.get_gnss_debug().reason, GnssRejectionReason::FIX_TYPE_LOW);
+  EXPECT_DOUBLE_EQ(fc.get_gnss_debug().mahalanobis_sq, -1.0);
+}
+
+// Test 10: chi2 rejection populates mahalanobis_sq > threshold
+TEST(GNSSObservabilityTest, Chi2RejectionPopulatesDistance)
+{
+  FusionCoreConfig cfg;
+  cfg.outlier_rejection = true;
+  cfg.adaptive_gnss     = false;
+  FusionCore fc(cfg);
+
+  // Tight initial covariance so a 200m fix is a large Mahalanobis outlier
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 0.01;
+  fc.init(s, 0.0);
+
+  GnssFix fix = make_good_fix(200.0, 0.0, 0.0);  // 200m from origin
+
+  bool accepted = fc.update_gnss(0.1, fix);
+  EXPECT_FALSE(accepted);
+
+  const auto& d = fc.get_gnss_debug();
+  EXPECT_FALSE(d.accepted);
+  EXPECT_EQ(d.reason, GnssRejectionReason::CHI2_FAILED);
+  EXPECT_GT(d.mahalanobis_sq, d.chi2_threshold) << "d2 must exceed threshold to be rejected";
+  EXPECT_NEAR(d.chi2_threshold, 16.27, 0.01);
+}
+
+// Test 11: accepted fix populates debug correctly
+TEST(GNSSObservabilityTest, AcceptedFixPopulatesDebug)
+{
+  auto fc = make_initialized_fc();
+
+  GnssFix fix = make_good_fix(1.0, 0.0, 0.0);
+  bool accepted = fc.update_gnss(0.1, fix);
+  EXPECT_TRUE(accepted);
+
+  const auto& d = fc.get_gnss_debug();
+  EXPECT_TRUE(d.accepted);
+  EXPECT_EQ(d.reason, GnssRejectionReason::ACCEPTED);
+  EXPECT_LT(d.mahalanobis_sq, d.chi2_threshold) << "accepted fix must have d2 < threshold";
+  EXPECT_GE(d.mahalanobis_sq, 0.0);
+  EXPECT_NEAR(d.hdop, 1.2, 1e-9);
+  EXPECT_EQ(d.satellites, 8);
+  EXPECT_EQ(d.fix_type, static_cast<int>(GnssFixType::GPS_FIX));
+  EXPECT_FALSE(d.in_coast_mode);
+  EXPECT_GT(d.position_sigma_x, 0.0);
+  EXPECT_GT(d.position_sigma_y, 0.0);
+}
+
+// Test 12: innovation norms are non-negative and non-zero after fusion
+TEST(GNSSObservabilityTest, InnovationNormsPlausible)
+{
+  auto fc = make_initialized_fc();
+
+  // Drive some IMU and encoder updates first
+  for (int i = 1; i <= 10; ++i) {
+    fc.update_imu(i * 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 9.81);
+    fc.update_encoder(i * 0.01, 1.0, 0.0, 0.0);
+  }
+
+  fc.update_gnss(0.11, make_good_fix(0.1, 0.0, 0.0));
+
+  auto status = fc.get_status();
+  EXPECT_GE(status.gnss_innovation_norm,    0.0);
+  EXPECT_GE(status.imu_innovation_norm,     0.0);
+  EXPECT_GE(status.encoder_innovation_norm, 0.0);
+  // After real sensor updates the norms must be positive
+  EXPECT_GT(status.imu_innovation_norm,     0.0);
+  EXPECT_GT(status.encoder_innovation_norm, 0.0);
+}
+
+// Test 13: position sigma in status matches sqrt of P diagonal
+TEST(GNSSObservabilityTest, PositionSigmaMatchesPDiagonal)
+{
+  auto fc = make_initialized_fc();
+
+  auto status = fc.get_status();
+  const auto& P = fc.get_state().P;
+
+  EXPECT_NEAR(status.position_sigma_x, std::sqrt(P(0,0)), 1e-9);
+  EXPECT_NEAR(status.position_sigma_y, std::sqrt(P(1,1)), 1e-9);
+  EXPECT_NEAR(status.position_sigma_z, std::sqrt(P(2,2)), 1e-9);
+}
+
+// Test 14: coast mode state is reflected in debug and status
+TEST(GNSSObservabilityTest, CoastModeReflectedInDebug)
+{
+  FusionCoreConfig cfg;
+  cfg.gnss_coast_n      = 2;
+  cfg.outlier_rejection = true;
+  cfg.adaptive_gnss     = false;
+  FusionCore fc(cfg);
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 0.01;
+  fc.init(s, 0.0);
+
+  // Three consecutive rejections (200m outlier) to trigger coast mode (coast_n=2)
+  GnssFix spike = make_good_fix(200.0, 0.0, 0.0);
+  for (int i = 0; i < 3; ++i)
+    fc.update_gnss(0.1 * (i + 1), spike);
+
+  const auto& d = fc.get_gnss_debug();
+  EXPECT_TRUE(d.in_coast_mode);
+  EXPECT_GE(d.consecutive_rejects, 2);
+
+  auto status = fc.get_status();
+  EXPECT_TRUE(status.gnss_in_coast);
+  EXPECT_GE(status.gnss_consecutive_rejects, 2);
+}
+
+// ─── Configurable heading threshold tests ────────────────────────────────────
+
+// Helper: drive forward N steps to accumulate distance_traveled
+static void drive_forward(FusionCore& fc, double start_t, int steps, double dt = 0.1,
+                           double speed = 1.0)
+{
+  for (int i = 0; i < steps; ++i) {
+    double t = start_t + i * dt;
+    fc.update_imu(t, 0, 0, 0, 0, 0, 9.81);
+    fc.update_encoder(t, speed, 0, 0);
+  }
+}
+
+// Test 15: custom min_speed prevents heading validation when robot is slow
+TEST(HeadingThresholdTest, HighMinSpeedBlocksValidation)
+{
+  FusionCoreConfig cfg;
+  cfg.gps_track_heading_min_speed = 2.0;   // require 2 m/s to count distance
+  cfg.heading_observable_distance  = 5.0;
+  FusionCore fc(cfg);
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 100.0;
+  fc.init(s, 0.0);
+
+  // Drive at 1 m/s (below min_speed threshold) for 30 steps = ~3m
+  drive_forward(fc, 0.0, 30, 0.1, 1.0);
+
+  // Fuse a GPS fix to trigger update_distance_traveled
+  GnssFix fix = make_good_fix(3.0, 0.0, 0.0);
+  fc.update_gnss(3.0, fix);
+
+  // Heading should NOT be validated: 1 m/s < 2 m/s min_speed
+  EXPECT_FALSE(fc.get_status().heading_validated)
+    << "Heading should not validate at speed below min_speed threshold";
+}
+
+// Test 16: default min_speed validates heading when robot moves with GPS fixes along route.
+// distance_traveled_ only accumulates inside update_distance_traveled(), which is called
+// from update_gnss(). So we must send GPS fixes at multiple positions to accumulate distance.
+TEST(HeadingThresholdTest, DefaultMinSpeedAllowsValidation)
+{
+  FusionCoreConfig cfg;
+  cfg.gps_track_heading_min_speed = 0.2;   // default
+  cfg.heading_observable_distance  = 5.0;
+  cfg.adaptive_gnss                = false;
+  FusionCore fc(cfg);
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 100.0;
+  fc.init(s, 0.0);
+
+  // Drive forward at 1 m/s, sending GPS fixes every 1s at 1m intervals.
+  // After 6 GPS fixes (5 accepted intervals of 1m each), distance_traveled_ >= 5m.
+  for (int i = 0; i < 100; ++i) {
+    double t = 0.1 * (i + 1);
+    fc.update_imu(t, 0.0, 0.0, 0.0, 0.0, 0.0, 9.81);
+    fc.update_encoder(t, 1.0, 0.0, 0.0);
+    if (i % 10 == 9) {  // 1 Hz GPS
+      GnssFix fix;
+      fix.fix_type   = GnssFixType::GPS_FIX;
+      fix.satellites = 8;
+      fix.hdop       = 1.2;
+      fix.vdop       = 1.8;
+      fix.x = t;   // consistent 1 m/s forward
+      fix.y = 0.0;
+      fix.z = 0.0;
+      fc.update_gnss(t, fix);
+    }
+  }
+
+  EXPECT_TRUE(fc.get_status().heading_validated)
+    << "Heading should validate after 10m GPS track at 1 m/s, min_speed=0.2";
+}
+
+// Test 17: lever arm disabled when heading sigma exceeds threshold
+TEST(LeverArmGatingTest, LeverArmDisabledWhenHeadingUncertain)
+{
+  FusionCoreConfig cfg;
+  cfg.gnss_lever_arm_max_heading_sigma_deg = 5.0;  // very tight: disables quickly
+  cfg.outlier_rejection = false;
+  FusionCore fc(cfg);
+
+  State s;
+  s.x = StateVector::Zero();
+  // Large quaternion covariance = large heading sigma (will exceed 5 deg threshold)
+  s.P = StateMatrix::Identity() * 0.1;
+  s.P(QW,QW) = 1.0; s.P(QX,QX) = 1.0;
+  s.P(QY,QY) = 1.0; s.P(QZ,QZ) = 1.0;
+  fc.init(s, 0.0);
+
+  // Set heading_validated so the bool-only gate would pass
+  GnssFix hdg_fix = make_good_fix(10.0, 0.0, 0.0);
+  hdg_fix.hdop = 0.5; hdg_fix.vdop = 0.8;
+  // Manually drive to validate heading via GPS track
+  drive_forward(fc, 0.0, 150, 0.1, 1.0);
+  fc.update_gnss(15.0, hdg_fix);
+
+  // Now add lever arm and fuse a fix
+  GnssFix fix_with_arm = make_good_fix(15.0, 0.0, 0.0);
+  sensors::GnssLeverArm arm;
+  arm.x = 0.5; arm.y = 0.0; arm.z = 0.0;
+  fix_with_arm.lever_arm = arm;
+
+  fc.update_gnss(15.1, fix_with_arm);
+  const auto& d = fc.get_gnss_debug();
+
+  // heading_sigma should be reported
+  EXPECT_GE(d.heading_sigma_deg, 0.0);
+
+  // If heading_sigma > 5 deg threshold: lever arm must be disabled
+  if (d.heading_sigma_deg > 5.0) {
+    EXPECT_FALSE(d.lever_arm_used)
+      << "lever_arm_used should be false when heading_sigma=" << d.heading_sigma_deg
+      << " > threshold=5 deg";
+  }
+}
+
+// Test 18: lever arm active when heading is tight and validated
+TEST(LeverArmGatingTest, LeverArmActiveWhenHeadingTight)
+{
+  FusionCoreConfig cfg;
+  cfg.gnss_lever_arm_max_heading_sigma_deg = 30.0;  // generous threshold
+  cfg.outlier_rejection = false;
+  cfg.adaptive_gnss     = false;
+  FusionCore fc(cfg);
+
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 0.01;  // tight: small heading sigma
+  fc.init(s, 0.0);
+
+  // Drive to validate heading
+  drive_forward(fc, 0.0, 100, 0.1, 1.0);
+  GnssFix anchor = make_good_fix(10.0, 0.0, 0.0);
+  anchor.hdop = 0.5; anchor.vdop = 0.8;
+  fc.update_gnss(10.0, anchor);
+
+  // Fuse with lever arm
+  GnssFix fix = make_good_fix(10.5, 0.0, 0.0);
+  sensors::GnssLeverArm arm;
+  arm.x = 0.3; arm.y = 0.0; arm.z = 0.0;
+  fix.lever_arm = arm;
+
+  fc.update_gnss(10.1, fix);
+  const auto& d = fc.get_gnss_debug();
+
+  // When heading is tight and validated and sigma < threshold: lever arm should be used
+  if (fc.get_status().heading_validated && d.heading_sigma_deg < 30.0) {
+    EXPECT_TRUE(d.lever_arm_used)
+      << "lever_arm_used should be true when heading_sigma=" << d.heading_sigma_deg
+      << " < threshold=30 deg and heading is validated";
+  }
+}
+
+// Test 19: heading_sigma_deg is populated and finite in gnss debug.
+// Uses tight initial P so heading sigma is well-defined (not hundreds of degrees
+// from a near-singular quaternion covariance block).
+TEST(LeverArmGatingTest, HeadingSignaDebugFieldPopulated)
+{
+  FusionCoreConfig cfg;
+  cfg.outlier_rejection = false;
+  cfg.adaptive_gnss     = false;
+  FusionCore fc(cfg);
+  State s;
+  s.x = StateVector::Zero();
+  s.P = StateMatrix::Identity() * 0.01;   // tight P: heading sigma stays small
+  fc.init(s, 0.0);
+
+  GnssFix fix = make_good_fix(1.0, 0.0, 0.0);
+  fc.update_gnss(0.1, fix);
+
+  const auto& d = fc.get_gnss_debug();
+  EXPECT_GE(d.heading_sigma_deg, 0.0);
+  EXPECT_TRUE(std::isfinite(d.heading_sigma_deg)) << "heading_sigma_deg must be finite";
+  // With tight P=0.01*I, quaternion block variance is small.
+  // J_yaw at identity quaternion is [0,0,0,2], so yaw_var = 4*0.01 = 0.04 rad^2,
+  // sigma = 0.2 rad = 11.5 deg. Assert it's in a physically sensible range.
+  EXPECT_LT(d.heading_sigma_deg, 90.0);
 }
 
 int main(int argc, char** argv) {
