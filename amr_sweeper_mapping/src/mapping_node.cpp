@@ -1326,6 +1326,18 @@ void MappingNode::loadSavedCostmapIfConfigured()
 
   try {
     LoadedCostmapArtifact artifact = loadCostmapArtifactFromYaml(resolved_path);
+    RCLCPP_INFO(
+      get_logger(),
+      "Startup costmap candidate %s parsed with georeference_valid=%s type='%s' resolution=%.3f origin=(%.3f, %.3f) size=%ux%u samples=%zu.",
+      resolved_path.c_str(),
+      artifact.georeference_valid ? "true" : "false",
+      artifact.georeference_type.c_str(),
+      artifact.resolution,
+      artifact.origin_x,
+      artifact.origin_y,
+      artifact.width_cells,
+      artifact.height_cells,
+      artifact.georeference_sample_count);
     if (artifact.georeference_valid) {
       pending_saved_costmap_artifact_ = artifact;
       tryInitializeSavedCostmapFromSensors();
