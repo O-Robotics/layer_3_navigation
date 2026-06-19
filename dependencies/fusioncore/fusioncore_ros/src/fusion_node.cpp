@@ -336,9 +336,9 @@ public:
     config.max_measurement_delay =
       std::max(0.0, get_parameter("replay.max_measurement_delay").as_double());
     config.snapshot_buffer_size =
-      std::max(1, get_parameter("replay.snapshot_buffer_size").as_int());
+      static_cast<int>(std::max<int64_t>(1, get_parameter("replay.snapshot_buffer_size").as_int()));
     config.imu_buffer_size =
-      std::max(1, get_parameter("replay.imu_buffer_size").as_int());
+      static_cast<int>(std::max<int64_t>(1, get_parameter("replay.imu_buffer_size").as_int()));
     RCLCPP_INFO(
       get_logger(),
       "Delayed measurement replay: max_delay=%.2fs snapshot_buffer_size=%d imu_buffer_size=%d",
