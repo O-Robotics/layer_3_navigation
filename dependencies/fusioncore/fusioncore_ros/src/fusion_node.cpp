@@ -53,6 +53,20 @@ const char * gnssRejectReasonToString(const fusioncore::GnssRejectReason reason)
   return "unknown";
 }
 
+const char * delayedMeasurementFailureReasonToString(
+  const fusioncore::DelayedMeasurementFailureReason reason)
+{
+  switch (reason) {
+    case fusioncore::DelayedMeasurementFailureReason::NONE:
+      return "none";
+    case fusioncore::DelayedMeasurementFailureReason::EMPTY_SNAPSHOT_BUFFER:
+      return "empty_snapshot_buffer";
+    case fusioncore::DelayedMeasurementFailureReason::EXCEEDED_MAX_DELAY:
+      return "exceeded_max_delay";
+  }
+  return "unknown";
+}
+
 void warnRejectedOutlier(
   rclcpp::Logger logger,
   rclcpp::Clock & clock,
@@ -2307,6 +2321,21 @@ private:
             stream << ", mahalanobis_d2=unknown, outlier_threshold_gnss="
                    << get_parameter("outlier_threshold_gnss").as_double();
           }
+        } else if (fc_status.last_gnss_reject_reason == fusioncore::GnssRejectReason::DELAY_REPLAY_FAILED) {
+          stream << "reason=" << gnssRejectReasonToString(fc_status.last_gnss_reject_reason)
+                 << ", delayed_failure_reason="
+                 << delayedMeasurementFailureReasonToString(
+                   fc_status.last_delayed_measurement_failure_reason)
+                 << ", measurement_time=" << fc_status.last_delayed_measurement_timestamp
+                 << ", filter_time=" << fc_status.last_delayed_measurement_current_time
+                 << ", delay=" << fc_status.last_delayed_measurement_delay
+                 << ", max_delay=" << fc_status.last_delayed_measurement_max_delay
+                 << ", snapshot_buffer_size=" << fc_status.last_snapshot_buffer_size
+                 << ", imu_buffer_size=" << fc_status.last_imu_buffer_size
+                 << ", imu_orientation_buffer_size=" << fc_status.last_imu_orientation_buffer_size
+                 << ", encoder_buffer_size=" << fc_status.last_encoder_buffer_size
+                 << ", ground_constraint_buffer_size=" << fc_status.last_ground_constraint_buffer_size
+                 << ", zupt_buffer_size=" << fc_status.last_zupt_buffer_size;
         } else {
           stream << "reason=" << gnssRejectReasonToString(fc_status.last_gnss_reject_reason);
         }

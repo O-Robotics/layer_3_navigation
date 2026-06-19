@@ -184,12 +184,32 @@ bool FusionCore::apply_delayed_measurement(
   double measurement_timestamp,
   const std::function<void()>& apply_fn
 ) {
-  if (snapshot_buffer_.empty()) return false;
+  last_delayed_measurement_failure_reason_ = DelayedMeasurementFailureReason::NONE;
+  last_delayed_measurement_timestamp_ = measurement_timestamp;
+  last_delayed_measurement_current_time_ = last_timestamp_;
+  last_delayed_measurement_delay_ = last_timestamp_ - measurement_timestamp;
+  last_delayed_measurement_max_delay_ = config_.max_measurement_delay;
+  last_snapshot_buffer_size_ = static_cast<int>(snapshot_buffer_.size());
+  last_imu_buffer_size_ = static_cast<int>(imu_buffer_.size());
+  last_encoder_buffer_size_ = static_cast<int>(encoder_buffer_.size());
+  last_imu_orientation_buffer_size_ = static_cast<int>(imu_orientation_buffer_.size());
+  last_ground_constraint_buffer_size_ = static_cast<int>(ground_constraint_buffer_.size());
+  last_zupt_buffer_size_ = static_cast<int>(zupt_buffer_.size());
 
-  double delay = last_timestamp_ - measurement_timestamp;
+  if (snapshot_buffer_.empty()) {
+    last_delayed_measurement_failure_reason_ =
+      DelayedMeasurementFailureReason::EMPTY_SNAPSHOT_BUFFER;
+    return false;
+  }
+
+  double delay = last_delayed_measurement_delay_;
 
   // Too old: drop it
-  if (delay > config_.max_measurement_delay) return false;
+  if (delay > config_.max_measurement_delay) {
+    last_delayed_measurement_failure_reason_ =
+      DelayedMeasurementFailureReason::EXCEEDED_MAX_DELAY;
+    return false;
+  }
 
   // Not actually delayed: apply normally
   if (delay <= 0.0) {
@@ -1030,6 +1050,17 @@ FusionCoreStatus FusionCore::get_status() const {
   status.last_hdg_mahalanobis_d2     = last_hdg_mahalanobis_d2_;
   status.last_vslam_mahalanobis_valid = last_vslam_mahalanobis_valid_;
   status.last_vslam_mahalanobis_d2    = last_vslam_mahalanobis_d2_;
+  status.last_delayed_measurement_failure_reason = last_delayed_measurement_failure_reason_;
+  status.last_delayed_measurement_timestamp = last_delayed_measurement_timestamp_;
+  status.last_delayed_measurement_current_time = last_delayed_measurement_current_time_;
+  status.last_delayed_measurement_delay = last_delayed_measurement_delay_;
+  status.last_delayed_measurement_max_delay = last_delayed_measurement_max_delay_;
+  status.last_snapshot_buffer_size = last_snapshot_buffer_size_;
+  status.last_imu_buffer_size = last_imu_buffer_size_;
+  status.last_encoder_buffer_size = last_encoder_buffer_size_;
+  status.last_imu_orientation_buffer_size = last_imu_orientation_buffer_size_;
+  status.last_ground_constraint_buffer_size = last_ground_constraint_buffer_size_;
+  status.last_zupt_buffer_size = last_zupt_buffer_size_;
 
   return status;
 }

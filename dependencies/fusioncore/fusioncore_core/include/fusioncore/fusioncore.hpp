@@ -130,6 +130,12 @@ enum class GnssRejectReason {
   OUTLIER_GATE = 3,
 };
 
+enum class DelayedMeasurementFailureReason {
+  NONE = 0,
+  EMPTY_SNAPSHOT_BUFFER = 1,
+  EXCEEDED_MAX_DELAY = 2,
+};
+
 struct FusionCoreStatus {
   bool         initialized          = false;
   SensorHealth imu_health           = SensorHealth::NOT_INIT;
@@ -162,6 +168,18 @@ struct FusionCoreStatus {
   double last_hdg_mahalanobis_d2     = 0.0;
   bool   last_vslam_mahalanobis_valid = false;
   double last_vslam_mahalanobis_d2    = 0.0;
+  DelayedMeasurementFailureReason last_delayed_measurement_failure_reason =
+    DelayedMeasurementFailureReason::NONE;
+  double last_delayed_measurement_timestamp = 0.0;
+  double last_delayed_measurement_current_time = 0.0;
+  double last_delayed_measurement_delay = 0.0;
+  double last_delayed_measurement_max_delay = 0.0;
+  int last_snapshot_buffer_size = 0;
+  int last_imu_buffer_size = 0;
+  int last_encoder_buffer_size = 0;
+  int last_imu_orientation_buffer_size = 0;
+  int last_ground_constraint_buffer_size = 0;
+  int last_zupt_buffer_size = 0;
 };
 
 class FusionCore {
@@ -410,6 +428,18 @@ private:
   bool          heading_validated_ = false;
   HeadingSource heading_source_    = HeadingSource::NONE;
   GnssRejectReason last_gnss_reject_reason_ = GnssRejectReason::NONE;
+  DelayedMeasurementFailureReason last_delayed_measurement_failure_reason_ =
+    DelayedMeasurementFailureReason::NONE;
+  double last_delayed_measurement_timestamp_ = 0.0;
+  double last_delayed_measurement_current_time_ = 0.0;
+  double last_delayed_measurement_delay_ = 0.0;
+  double last_delayed_measurement_max_delay_ = 0.0;
+  int last_snapshot_buffer_size_ = 0;
+  int last_imu_buffer_size_ = 0;
+  int last_encoder_buffer_size_ = 0;
+  int last_imu_orientation_buffer_size_ = 0;
+  int last_ground_constraint_buffer_size_ = 0;
+  int last_zupt_buffer_size_ = 0;
 
   // For GPS track heading observability
   double last_gnss_x_     = 0.0;
