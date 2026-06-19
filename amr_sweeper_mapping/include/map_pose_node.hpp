@@ -129,6 +129,7 @@ private:
   int min_valid_scan_points_{20};
   int endpoint_search_radius_cells_{1};
   int max_scan_match_points_{72};
+  int max_match_compute_time_ms_{30};
   double search_translation_window_m_{2.0};
   double search_translation_step_m_{0.25};
   double search_yaw_window_rad_{0.35};
@@ -137,6 +138,7 @@ private:
   double min_search_yaw_window_rad_{0.0872664626};
   double search_window_translation_covariance_scale_{0.5};
   double search_window_yaw_covariance_scale_{0.5};
+  double max_scan_match_range_m_{2.0};
   double translation_penalty_per_meter_{0.5};
   double yaw_penalty_per_rad_{0.25};
   double free_space_penalty_{0.35};

@@ -154,6 +154,8 @@ MapPoseNode::MapPoseNode()
   declare_parameter("min_valid_scan_points", 20);
   declare_parameter("endpoint_search_radius_cells", 1);
   declare_parameter("max_scan_match_points", 72);
+  declare_parameter("max_match_compute_time_ms", 30);
+  declare_parameter("max_scan_match_range_m", 2.0);
   declare_parameter("search_translation_window_m", 2.0);
   declare_parameter("search_translation_step_m", 0.25);
   declare_parameter("search_yaw_window_rad", 0.35);
@@ -214,6 +216,12 @@ MapPoseNode::MapPoseNode()
   max_scan_match_points_ = std::max(
     min_valid_scan_points_,
     static_cast<int>(get_parameter("max_scan_match_points").as_int()));
+  max_match_compute_time_ms_ = std::max(
+    1,
+    static_cast<int>(get_parameter("max_match_compute_time_ms").as_int()));
+  max_scan_match_range_m_ = std::max(
+    0.05,
+    get_parameter("max_scan_match_range_m").as_double());
   search_translation_window_m_ = get_parameter("search_translation_window_m").as_double();
   search_translation_step_m_ = std::max(
     0.05,
@@ -951,6 +959,7 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
 
   const auto & scan = snapshot.latest_scan;
   const auto & map = snapshot.latest_global_costmap;
+  const auto match_start = std::chrono::steady_clock::now();
   if (scan.ranges.empty()) {
     return std::nullopt;
   }
@@ -975,8 +984,6 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
 
   struct ScanEndpoint
   {
-    double origin_x;
-    double origin_y;
     double x;
     double y;
   };
@@ -1004,11 +1011,11 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
 
   tf2::Transform base_from_scan;
   tf2::fromMsg(base_from_scan_message.transform, base_from_scan);
-  const tf2::Vector3 sensor_origin_in_base = base_from_scan * tf2::Vector3(0.0, 0.0, 0.0);
   std::vector<ScanEndpoint> endpoints;
   endpoints.reserve(scan.ranges.size() / static_cast<std::size_t>(scan_subsample_step_) + 1U);
-  const double effective_max_range = scan.range_max > 0.0 ?
-    scan.range_max : std::numeric_limits<double>::infinity();
+  const double effective_max_range = std::min(
+    scan.range_max > 0.0 ? scan.range_max : std::numeric_limits<double>::infinity(),
+    max_scan_match_range_m_);
   for (std::size_t index = 0U; index < scan.ranges.size(); index += static_cast<std::size_t>(scan_subsample_step_)) {
     const double range = static_cast<double>(scan.ranges.at(index));
     if (!std::isfinite(range) || range < scan.range_min || range > effective_max_range) {
@@ -1021,8 +1028,6 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       range * std::sin(angle),
       0.0);
     endpoints.push_back({
-      sensor_origin_in_base.x(),
-      sensor_origin_in_base.y(),
       endpoint_in_base.x(),
       endpoint_in_base.y()});
   }
@@ -1048,6 +1053,7 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
   double best_score = -std::numeric_limits<double>::infinity();
   tf2::Transform best_transform;
   bool best_transform_ready = false;
+  bool search_timed_out = false;
   const tf2::Transform search_center = map_to_base_prior;
 
   auto scoreCandidate = [&](const double candidate_x, const double candidate_y, const double candidate_yaw) {
@@ -1107,6 +1113,12 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       for (double dx = -translation_window; dx <= translation_window + 1.0e-6; dx += translation_step) {
         for (double dy = -translation_window; dy <= translation_window + 1.0e-6; dy += translation_step) {
           for (double yaw_delta = -yaw_window; yaw_delta <= yaw_window + 1.0e-6; yaw_delta += yaw_step) {
+            const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - match_start).count();
+            if (elapsed_ms >= max_match_compute_time_ms_) {
+              search_timed_out = true;
+              return;
+            }
             const double candidate_x = center_x + dx;
             const double candidate_y = center_y + dy;
             const double candidate_yaw = normalizeAngle(center_yaw + yaw_delta);
@@ -1132,6 +1144,16 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     yaw_window,
     search_yaw_step_rad_);
 
+  if (search_timed_out) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      3000,
+      "Skipping map pose scan matching because it exceeded the compute budget of %d ms.",
+      max_match_compute_time_ms_);
+    return std::nullopt;
+  }
+
   if (best_transform_ready) {
     const double fine_center_x = best_transform.getOrigin().x();
     const double fine_center_y = best_transform.getOrigin().y();
@@ -1146,6 +1168,12 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     for (double dx = -fine_translation_window; dx <= fine_translation_window + 1.0e-6; dx += fine_translation_step) {
       for (double dy = -fine_translation_window; dy <= fine_translation_window + 1.0e-6; dy += fine_translation_step) {
         for (double yaw_delta = -fine_yaw_window; yaw_delta <= fine_yaw_window + 1.0e-6; yaw_delta += fine_yaw_step) {
+          const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - match_start).count();
+          if (elapsed_ms >= max_match_compute_time_ms_) {
+            search_timed_out = true;
+            break;
+          }
           const double candidate_x = fine_center_x + dx;
           const double candidate_y = fine_center_y + dy;
           const double candidate_yaw = normalizeAngle(fine_center_yaw + yaw_delta);
@@ -1160,8 +1188,24 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
             map_to_base_prior.getOrigin().z(),
             candidate_yaw);
         }
+        if (search_timed_out) {
+          break;
+        }
+      }
+      if (search_timed_out) {
+        break;
       }
     }
+  }
+
+  if (search_timed_out) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      3000,
+      "Skipping map pose scan matching because it exceeded the compute budget of %d ms.",
+      max_match_compute_time_ms_);
+    return std::nullopt;
   }
 
   if (!best_transform_ready) {
