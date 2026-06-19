@@ -44,11 +44,13 @@
     gnss.max_hdop:                         4.0             # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
     gnss.max_vdop:                         6.0             # Vertical dilution threshold used by FusionCore's GNSS quality gate.
     gnss.min_satellites:                   4               # Minimum satellite count required before fusing GNSS.
-    gnss.suppress_position_while_stationary: true          # When encoder + IMU agree the robot is standing still, skip GNSS position fusion so multipath and delayed replay cannot yank odom around.
+    gnss.suppress_position_while_stationary: false         # Keep GNSS available even at standstill so the initial pose can still converge from GNSS instead of being hard-gated off.
+    gnss.stationary_covariance_scale:      100.0           # When encoder + IMU agree the robot is standing still, inflate GNSS covariance by 100x so zero-motion encoder/IMU evidence dominates and GNSS only nudges pose slowly.
+    gnss.stationary_covariance_ramp_seconds: 3.0           # Ease the stationary GNSS covariance multiplier in and out over 3 s so replay jitter or the first movement sample does not cause one-frame weighting jumps.
     gnss.stationary_encoder_timeout:       0.5             # Treat encoder samples within 0.5 s of the GNSS stamp as valid standstill evidence; delayed GNSS replay is allowed this same skew window.
-    gnss.stationary_imu_timeout:           0.5             # Require a reasonably fresh IMU sample before using IMU motion cues in the standstill gate.
-    gnss.stationary_imu_angular_threshold: 0.05            # rad/s: if IMU body-rate exceeds this, treat the robot as rotating and allow GNSS fusion again.
-    gnss.stationary_imu_accel_threshold:   0.2             # m/s^2 dynamic acceleration after gravity removal; above this, treat the platform as moving/vibrating enough that GNSS can contribute again.
+    gnss.stationary_imu_timeout:           0.5             # Require a reasonably fresh IMU sample before using IMU motion cues in the standstill covariance inflation logic.
+    gnss.stationary_imu_angular_threshold: 0.05            # rad/s: if IMU body-rate exceeds this, stop applying the standstill GNSS covariance inflation.
+    gnss.stationary_imu_accel_threshold:   0.2             # m/s^2 dynamic acceleration after gravity removal; above this, stop applying the standstill GNSS covariance inflation.
     gnss.startup_delay_seconds:            5.0             # Let IMU + wheel odom settle first; GNSS still establishes the datum immediately but position fusion waits this long after filter init.
     gnss.startup_ramp_seconds:             15.0            # After the delay, taper GNSS position covariance back down over this many seconds instead of letting the first fixes yank odom.
     gnss.startup_initial_covariance_scale: 25.0            # Start the GNSS ramp with 25x covariance so the first accepted fixes are very soft corrections.

@@ -191,6 +191,8 @@ public:
     declare_parameter("gnss.max_vdop",       6.0);
     declare_parameter("gnss.min_satellites", 4);
     declare_parameter("gnss.suppress_position_while_stationary", false);
+    declare_parameter("gnss.stationary_covariance_scale", 1.0);
+    declare_parameter("gnss.stationary_covariance_ramp_seconds", 2.0);
     declare_parameter("gnss.stationary_encoder_timeout", 0.5);
     declare_parameter("gnss.stationary_imu_timeout", 0.5);
     declare_parameter("gnss.stationary_imu_angular_threshold", 0.05);
@@ -380,6 +382,10 @@ public:
       std::max(1.0, get_parameter("gnss.startup_initial_covariance_scale").as_double());
     suppress_gnss_position_while_stationary_ =
       get_parameter("gnss.suppress_position_while_stationary").as_bool();
+    stationary_gnss_covariance_scale_ =
+      std::max(1.0, get_parameter("gnss.stationary_covariance_scale").as_double());
+    stationary_gnss_covariance_ramp_seconds_ =
+      std::max(0.0, get_parameter("gnss.stationary_covariance_ramp_seconds").as_double());
     stationary_encoder_timeout_ =
       get_parameter("gnss.stationary_encoder_timeout").as_double();
     stationary_imu_timeout_ =
@@ -2125,15 +2131,6 @@ private:
       // Do NOT return: fall through and fuse ENU [0,0,0] as first fix.
     }
 
-    if (shouldSuppressGnssPositionWhileStationary(t)) {
-      RCLCPP_DEBUG_THROTTLE(
-        get_logger(),
-        *get_clock(),
-        5000,
-        "Suppressing stationary GNSS position fusion while encoder/IMU report standstill.");
-      return;
-    }
-
     // Pre-filter: drop fixes more than 10km from the reference origin.
     // Handles Gazebo NavSat bug (gz-sim #2163) and catastrophic hardware glitches.
     // Mahalanobis handles normal outliers (1-100m); this handles physically impossible jumps.
@@ -2177,6 +2174,35 @@ private:
     fix.source_id = source_id;
     fix.lever_arm = (source_id == 0) ? gnss_lever_arm_ : gnss_lever_arm2_;
     fix.covariance_scale = gnss_position_covariance_scale_;
+
+    const bool stationary_context = isGnssStationaryContext(t);
+    const double stationary_covariance_scale =
+      stationaryGnssCovarianceScaleForTime(t, stationary_context);
+    if (stationary_context) {
+      if (suppress_gnss_position_while_stationary_) {
+        RCLCPP_DEBUG_THROTTLE(
+          get_logger(),
+          *get_clock(),
+          5000,
+          "Suppressing stationary GNSS position fusion while encoder/IMU report standstill.");
+        return;
+      }
+      fix.covariance_scale *= stationary_covariance_scale;
+      RCLCPP_DEBUG_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Inflating GNSS covariance while stationary: scale %.1f.",
+        fix.covariance_scale);
+    } else if (stationary_covariance_scale > 1.0) {
+      fix.covariance_scale *= stationary_covariance_scale;
+      RCLCPP_DEBUG_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Ramping GNSS covariance back toward nominal motion weight: scale %.1f.",
+        fix.covariance_scale);
+    }
 
     // Use message covariance when meaningful (peci1 fix)
     // position_covariance_type:
@@ -2356,11 +2382,8 @@ private:
     }
   }
 
-  bool shouldSuppressGnssPositionWhileStationary(double timestamp_seconds) const
+  bool isGnssStationaryContext(double timestamp_seconds) const
   {
-    if (!suppress_gnss_position_while_stationary_) {
-      return false;
-    }
     if (last_primary_encoder_time_ <= 0.0 || stationary_encoder_timeout_ <= 0.0) {
       return false;
     }
@@ -2387,6 +2410,52 @@ private:
     }
 
     return true;
+  }
+
+  double stationaryGnssCovarianceScaleForTime(
+    double timestamp_seconds,
+    bool stationary_context)
+  {
+    const double target_scale =
+      stationary_context ? stationary_gnss_covariance_scale_ : 1.0;
+
+    if (!stationary_gnss_covariance_transition_initialized_) {
+      stationary_gnss_covariance_transition_initialized_ = true;
+      last_stationary_gnss_context_ = stationary_context;
+      stationary_gnss_covariance_transition_start_time_ = timestamp_seconds;
+      stationary_gnss_covariance_transition_start_scale_ = target_scale;
+      return target_scale;
+    }
+
+    if (stationary_context != last_stationary_gnss_context_) {
+      const double current_scale = stationaryGnssCovarianceScaleForTime(
+        timestamp_seconds,
+        last_stationary_gnss_context_);
+      last_stationary_gnss_context_ = stationary_context;
+      stationary_gnss_covariance_transition_start_time_ = timestamp_seconds;
+      stationary_gnss_covariance_transition_start_scale_ = current_scale;
+    }
+
+    if (stationary_gnss_covariance_ramp_seconds_ <= 0.0) {
+      stationary_gnss_covariance_transition_start_scale_ = target_scale;
+      stationary_gnss_covariance_transition_start_time_ = timestamp_seconds;
+      return target_scale;
+    }
+
+    const double elapsed =
+      std::max(0.0, timestamp_seconds - stationary_gnss_covariance_transition_start_time_);
+    const double alpha =
+      std::clamp(elapsed / stationary_gnss_covariance_ramp_seconds_, 0.0, 1.0);
+    const double scale =
+      stationary_gnss_covariance_transition_start_scale_ +
+      (target_scale - stationary_gnss_covariance_transition_start_scale_) * alpha;
+
+    if (alpha >= 1.0) {
+      stationary_gnss_covariance_transition_start_scale_ = target_scale;
+      stationary_gnss_covariance_transition_start_time_ = timestamp_seconds;
+    }
+
+    return scale;
   }
 
   void remember_primary_imu_motion_sample(
@@ -2860,7 +2929,13 @@ private:
   double                            gnss_startup_delay_seconds_ = 0.0;
   double                            gnss_startup_ramp_seconds_ = 0.0;
   double                            gnss_startup_initial_covariance_scale_ = 1.0;
+  double                            stationary_gnss_covariance_scale_ = 1.0;
+  double                            stationary_gnss_covariance_ramp_seconds_ = 0.0;
   bool                              suppress_gnss_position_while_stationary_ = false;
+  bool                              stationary_gnss_covariance_transition_initialized_ = false;
+  bool                              last_stationary_gnss_context_ = false;
+  double                            stationary_gnss_covariance_transition_start_time_ = 0.0;
+  double                            stationary_gnss_covariance_transition_start_scale_ = 1.0;
   double                            stationary_encoder_timeout_ = 0.5;
   double                            stationary_imu_timeout_ = 0.5;
   double                            stationary_imu_angular_threshold_ = 0.05;
