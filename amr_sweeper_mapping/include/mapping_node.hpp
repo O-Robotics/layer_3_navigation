@@ -213,6 +213,7 @@ private:
   std::string mission_output_directory_;
   std::string actual_path_output_file_;
   std::string actual_path_navsat_output_file_;
+  std::string startup_saved_costmap_yaml_;
   std::string saved_costmap_yaml_;
   std::string mission_window_start_;
   std::string mission_window_end_;

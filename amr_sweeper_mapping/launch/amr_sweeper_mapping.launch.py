@@ -126,6 +126,8 @@ def _build_nodes(context):
         common_runtime_parameters["actual_path_navsat_output_file"] = actual_path_navsat_output_file
     if mission_costmap_yaml:
         common_runtime_parameters["mission_costmap_yaml"] = mission_costmap_yaml
+    if static_reference_costmap_yaml:
+        common_runtime_parameters["startup_saved_costmap_yaml"] = static_reference_costmap_yaml
     if saved_costmap_yaml:
         common_runtime_parameters["saved_costmap_yaml"] = saved_costmap_yaml
     if mission_window_start:

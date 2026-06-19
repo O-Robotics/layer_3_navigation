@@ -950,6 +950,7 @@ MappingNode::MappingNode()
   declare_parameter("mission_output_directory", std::string(""));
   declare_parameter("actual_path_output_file", std::string(""));
   declare_parameter("actual_path_navsat_output_file", std::string(""));
+  declare_parameter("startup_saved_costmap_yaml", std::string(""));
   declare_parameter("saved_costmap_yaml", std::string(""));
   declare_parameter("mission_costmap_yaml", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
@@ -998,6 +999,7 @@ MappingNode::MappingNode()
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
   actual_path_output_file_ = get_parameter("actual_path_output_file").as_string();
   actual_path_navsat_output_file_ = get_parameter("actual_path_navsat_output_file").as_string();
+  startup_saved_costmap_yaml_ = get_parameter("startup_saved_costmap_yaml").as_string();
   saved_costmap_yaml_ = get_parameter("saved_costmap_yaml").as_string();
   mission_costmap_yaml_ = get_parameter("mission_costmap_yaml").as_string();
   mission_window_start_ = get_parameter("mission_window_start").as_string();
@@ -1306,16 +1308,18 @@ std::optional<double> MappingNode::stabilizedHeadingYaw() const
 
 void MappingNode::loadSavedCostmapIfConfigured()
 {
-  if (saved_costmap_yaml_.empty()) {
+  const std::string startup_costmap_yaml = startup_saved_costmap_yaml_.empty() ?
+    saved_costmap_yaml_ : startup_saved_costmap_yaml_;
+  if (startup_costmap_yaml.empty()) {
     return;
   }
 
-  const std::string resolved_path = resolveRuntimePath(saved_costmap_yaml_);
+  const std::string resolved_path = resolveRuntimePath(startup_costmap_yaml);
   std::error_code filesystem_error;
   if (!std::filesystem::is_regular_file(resolved_path, filesystem_error)) {
     RCLCPP_WARN(
       get_logger(),
-      "Saved costmap yaml was configured as '%s' but no file was found there.",
+      "Startup saved costmap yaml was configured as '%s' but no file was found there.",
       resolved_path.c_str());
     return;
   }
@@ -1332,6 +1336,15 @@ void MappingNode::loadSavedCostmapIfConfigured()
           resolved_path.c_str(),
           map_frame_id_.c_str());
       }
+      return;
+    }
+
+    if (!manual_mapping_mode_ && map_frame_id_ != odom_frame_id_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Skipping startup load of non-georeferenced costmap artifact from %s because this mission navigates in %s and an unprojected local-frame map can place the robot outside the costmap before motion starts.",
+        resolved_path.c_str(),
+        map_frame_id_.c_str());
       return;
     }
 
