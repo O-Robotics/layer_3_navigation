@@ -62,7 +62,7 @@
     georef_lock_min_samples:       10                               # Minimum samples required inside the stabilization window before the one-time startup costmap lock is accepted.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
     global_map_resolution_m:       0.05                             # Resolution of the in-package global occupancy-grid map builder.
-    local_map_size_m:              10.0                             # Width and height in meters of the rolling odom-frame mapping/local_costmap built directly from the latest laser scan for Nav2 local planning.
+    local_map_size_m:              5.0                              # Width and height in meters of the rolling odom-frame mapping/local_costmap built directly from the latest laser scan for Nav2 local planning.
     local_map_decay_per_update:    2.0                              # How much occupied evidence is removed each local-costmap update so transient obstacles such as people fade away over time.
     local_map_free_score_delta:    2.0                              # How strongly each scan ray clears cells in the rolling local costmap.
     local_map_occupied_score_delta: 6.0                             # How strongly each scan endpoint reinforces an occupied cell in the rolling local costmap.
