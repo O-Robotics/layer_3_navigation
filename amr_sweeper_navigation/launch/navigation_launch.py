@@ -14,6 +14,7 @@
 
 import os
 from pathlib import Path
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 import yaml
@@ -39,6 +40,30 @@ def _qualify_topic(namespace: str, relative_topic: str) -> str:
 
 
 def _rewrite_nav2_params(context) -> dict:
+    rewritten_params_path = _materialize_nav2_params(context, include_root_key=False)
+    params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
+    params_data["__rewritten_params_path__"] = rewritten_params_path
+    params_data["__source_params_file__"] = LaunchConfiguration('params_file').perform(context)
+    return params_data
+
+
+def _load_mission_costmap_resolution(context):
+    mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml').perform(context).strip()
+    if not mission_costmap_yaml:
+        return None
+
+    mission_costmap_path = Path(mission_costmap_yaml)
+    if not mission_costmap_path.is_file():
+        return None
+
+    mission_costmap_data = yaml.safe_load(mission_costmap_path.read_text()) or {}
+    resolution = mission_costmap_data.get('resolution')
+    if resolution is None:
+        return None
+    return float(resolution)
+
+
+def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
     namespace_value = LaunchConfiguration('namespace').perform(context)
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
@@ -53,37 +78,35 @@ def _rewrite_nav2_params(context) -> dict:
 
     rewritten_params_path = RewrittenYaml(
         source_file=params_file,
+        root_key=namespace_value if include_root_key else None,
         param_rewrites=param_substitutions,
         convert_types=True,
     ).perform(context)
 
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
-    params_data["__rewritten_params_path__"] = rewritten_params_path
-    params_data["__source_params_file__"] = params_file.perform(context)
-    return params_data
+
+    mission_costmap_resolution = _load_mission_costmap_resolution(context)
+    if mission_costmap_resolution is not None:
+        nav2_root = params_data.get(namespace_value, params_data) if include_root_key else params_data
+        global_costmap_params = (
+            nav2_root
+            .get('global_costmap', {})
+            .get('global_costmap', {})
+            .get('ros__parameters', {})
+        )
+        if global_costmap_params:
+            global_costmap_params['resolution'] = mission_costmap_resolution
+
+    temp_file = Path(tempfile.gettempdir()) / (
+        f"amr_sweeper_nav2_params_{'namespaced' if include_root_key else 'flat'}_{os.getpid()}.yaml"
+    )
+    temp_file.write_text(yaml.safe_dump(params_data, sort_keys=False))
+    return str(temp_file)
 
 
 def _build_configured_params(context):
-    namespace = LaunchConfiguration('namespace')
-    namespace_value = namespace.perform(context)
-    use_sim_time = LaunchConfiguration('use_sim_time')
-    autostart = LaunchConfiguration('autostart')
-    params_file = LaunchConfiguration('params_file')
-    mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml')
-
-    param_substitutions = {
-        'use_sim_time': use_sim_time,
-        'autostart': autostart,
-        'costmap_yaml_path': mission_costmap_yaml,
-    }
-
     return ParameterFile(
-        RewrittenYaml(
-            source_file=params_file,
-            root_key=namespace,
-            param_rewrites=param_substitutions,
-            convert_types=True,
-        ),
+        _materialize_nav2_params(context, include_root_key=True),
         allow_substs=True,
     )
 
