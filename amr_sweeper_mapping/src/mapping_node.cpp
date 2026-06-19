@@ -1786,9 +1786,16 @@ void MappingNode::writeMissionSessionMetadata() const
     {"actual_path_output_file", actual_path_output_file_},
     {"actual_path_navsat_output_file", actual_path_navsat_output_file_}};
 
+  std::string metadata_filename = "mapping_session.json";
+  const auto mission_output_directory = std::filesystem::path(mission_output_directory_);
+  const std::string run_started_at = mission_output_directory.filename().string();
+  if (!mission_id_.empty() && !run_started_at.empty()) {
+    metadata_filename = mission_id_ + "_" + run_started_at + "_mapping.json";
+  }
+
   try {
     writeJsonDocumentAtomic(
-      std::filesystem::path(mission_output_directory_) / "mapping_session.json",
+      mission_output_directory / metadata_filename,
       document);
   } catch (const std::exception &) {
     RCLCPP_WARN(

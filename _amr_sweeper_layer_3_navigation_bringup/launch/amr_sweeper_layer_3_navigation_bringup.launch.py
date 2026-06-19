@@ -75,10 +75,24 @@ def _load_json_file(path: Path) -> dict:
         return json.load(stream)
 
 
-def _resolve_execution_context(mission_execution_directory: str) -> dict:
+def _resolve_execution_context_path(mission_execution_directory: str) -> Path | None:
     if not mission_execution_directory:
+        return None
+    execution_directory = Path(mission_execution_directory)
+    stamped_candidates = sorted(execution_directory.glob("*_context.json"))
+    if stamped_candidates:
+        return stamped_candidates[0]
+    legacy_path = execution_directory / "execution_context.json"
+    if legacy_path.exists():
+        return legacy_path
+    return None
+
+
+def _resolve_execution_context(mission_execution_directory: str) -> dict:
+    context_path = _resolve_execution_context_path(mission_execution_directory)
+    if context_path is None:
         return {}
-    return _load_json_file(Path(mission_execution_directory) / "execution_context.json")
+    return _load_json_file(context_path)
 
 
 def _uses_odom_only_runtime(mission_type: str, execution_mode: str) -> bool:

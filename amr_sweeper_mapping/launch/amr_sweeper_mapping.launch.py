@@ -21,12 +21,34 @@ def _load_json_file(path):
         return json.load(stream)
 
 
-def _resolve_execution_context(mission_execution_directory):
+def _resolve_execution_context_path(mission_execution_directory):
     if not mission_execution_directory:
+        return None
+    execution_directory = Path(mission_execution_directory)
+    stamped_candidates = sorted(execution_directory.glob("*_context.json"))
+    if stamped_candidates:
+        return stamped_candidates[0]
+    legacy_path = execution_directory / "execution_context.json"
+    if legacy_path.exists():
+        return legacy_path
+    return None
+
+
+def _resolve_execution_context(mission_execution_directory):
+    context_path = _resolve_execution_context_path(mission_execution_directory)
+    if context_path is None:
         return {}
-    return _load_json_file(
-        str(Path(mission_execution_directory) / "execution_context.json")
-    )
+    return _load_json_file(str(context_path))
+
+
+def _mission_run_artifact_stem(mission_id, mission_run_directory, mission_context):
+    mission_id = str(mission_id or mission_context.get("mission_id", "")).strip()
+    run_started_at = str(mission_context.get("run_started_at", "")).strip()
+    if not run_started_at and mission_run_directory:
+        run_started_at = Path(mission_run_directory).name
+    if mission_id and run_started_at:
+        return f"{mission_id}_{run_started_at}"
+    return ""
 
 
 def _uses_odom_only_runtime(mission_type):
@@ -102,15 +124,31 @@ def _build_nodes(context):
         mission_id = "RecordMap"
     if use_test and not mission_run_directory and test_output_directory:
         mission_run_directory = test_output_directory
-        if not actual_path_output_file:
-            actual_path_output_file = str(Path(test_output_directory) / "actual_path.geojson")
-        if not actual_path_navsat_output_file:
-            actual_path_navsat_output_file = str(Path(test_output_directory) / "actual_path_navsat.geojson")
         if not gaussian_output_directory:
             gaussian_output_directory = test_output_directory
 
-    gaussian_representation_name = (
-        f"{mission_id}_gaussian_map" if mission_id else "global_gaussian_map"
+    run_artifact_stem = _mission_run_artifact_stem(
+        mission_id,
+        mission_run_directory,
+        mission_context,
+    )
+    if mission_run_directory and run_artifact_stem:
+        if not actual_path_output_file:
+            actual_path_output_file = str(
+                Path(mission_run_directory) / f"{run_artifact_stem}_path_actual.geojson"
+            )
+        if not actual_path_navsat_output_file:
+            actual_path_navsat_output_file = str(
+                Path(mission_run_directory) / f"{run_artifact_stem}_path_navsat.geojson"
+            )
+    elif mission_run_directory:
+        if not actual_path_output_file:
+            actual_path_output_file = str(Path(mission_run_directory) / "actual_path.geojson")
+        if not actual_path_navsat_output_file:
+            actual_path_navsat_output_file = str(Path(mission_run_directory) / "actual_path_navsat.geojson")
+
+    gaussian_representation_name = run_artifact_stem if run_artifact_stem else (
+        mission_id if mission_id else "global_gaussian_map"
     )
 
     common_runtime_parameters = {

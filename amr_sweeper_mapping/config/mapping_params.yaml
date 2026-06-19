@@ -5,7 +5,7 @@
       geojson_layer:
         enabled:                  true
         plugin:                   amr_sweeper_mapping::Vda5050CostmapLayer
-        costmap_yaml_path:        ""               # Resolved from mission_execution_directory/execution_context.json when available; leave empty for standalone launch and the layer will warn then stay inactive.
+        costmap_yaml_path:        ""               # Resolved from the stamped mission execution context when available; leave empty for standalone launch and the layer will warn then stay inactive.
         artifact_frame_id:        odom
 
 /**/gaussian_node:
@@ -42,9 +42,9 @@
     mission_file:                  ""                               # Resolved launch-time mission file path. Leave empty until a mission is selected.
     mission_route_file:            ""                               # Must come from the exact mission execution context; leave empty outside an active mission handoff.
     mission_id:                    ""
-    mission_output_directory:      ""                               # Leave empty until a mission execution folder is injected; mapping_session.json should only land inside per-run folders.
-    actual_path_output_file:       ""                               # Leave empty until execution_context.json provides the per-run actual-path destination.
-    mission_costmap_yaml:          ""                               # Exact mission costmap yaml from execution_context.json when launched by layer 0.
+    mission_output_directory:      ""                               # Leave empty until a mission execution folder is injected; stamped mapping metadata should only land inside per-run folders.
+    actual_path_output_file:       ""                               # Leave empty until the stamped execution context provides the per-run actual-path destination.
+    mission_costmap_yaml:          ""                               # Exact mission costmap yaml from the stamped execution context when launched by layer 0.
     saved_costmap_yaml:            ""                               # Optional georeferenced saved costmap YAML/PGM artifact to lock once into the metric map frame at startup before live scan updates continue.
     mission_window_start:          ""
     mission_window_end:            ""
