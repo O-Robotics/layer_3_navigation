@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Transform.h>
@@ -306,36 +307,55 @@ MapPoseNode::MapPoseNode()
   }
   loadCostmapGeoreference();
 
+  subscription_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  publish_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions subscription_options;
+  subscription_options.callback_group = subscription_callback_group_;
+
   odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
     odometry_topic_,
     50,
-    std::bind(&MapPoseNode::handleOdometry, this, std::placeholders::_1));
+    std::bind(&MapPoseNode::handleOdometry, this, std::placeholders::_1),
+    subscription_options);
   navsat_subscription_ = create_subscription<sensor_msgs::msg::NavSatFix>(
     navsat_topic_,
     rclcpp::SystemDefaultsQoS(),
-    std::bind(&MapPoseNode::handleNavSat, this, std::placeholders::_1));
+    std::bind(&MapPoseNode::handleNavSat, this, std::placeholders::_1),
+    subscription_options);
   heading_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
     heading_topic_,
     rclcpp::SensorDataQoS(),
-    std::bind(&MapPoseNode::handleHeading, this, std::placeholders::_1));
+    std::bind(&MapPoseNode::handleHeading, this, std::placeholders::_1),
+    subscription_options);
   scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
     scan_topic_,
     rclcpp::SensorDataQoS(),
-    std::bind(&MapPoseNode::handleScan, this, std::placeholders::_1));
+    std::bind(&MapPoseNode::handleScan, this, std::placeholders::_1),
+    subscription_options);
   global_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
     global_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
-    std::bind(&MapPoseNode::handleGlobalCostmap, this, std::placeholders::_1));
+    std::bind(&MapPoseNode::handleGlobalCostmap, this, std::placeholders::_1),
+    subscription_options);
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(fromll_service_name_);
+  rclcpp::TimerBase::Options publish_timer_options;
+  publish_timer_options.callback_group = publish_callback_group_;
   publish_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("publish_period_seconds").as_double()),
-    std::bind(&MapPoseNode::publishMapToOdomTransform, this));
+    std::bind(&MapPoseNode::publishMapToOdomTransform, this),
+    publish_timer_options);
 }
 
 void MapPoseNode::initializeMapToOdomFilter()
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  initializeMapToOdomFilterLocked();
+}
+
+void MapPoseNode::initializeMapToOdomFilterLocked()
 {
   map_to_odom_filter_state_ = {0.0, 0.0, 0.0};
   map_to_odom_filter_covariance_ = {
@@ -349,8 +369,14 @@ void MapPoseNode::initializeMapToOdomFilter()
 
 void MapPoseNode::predictMapToOdomFilter()
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  predictMapToOdomFilterLocked();
+}
+
+void MapPoseNode::predictMapToOdomFilterLocked()
+{
   if (!map_to_odom_filter_ready_) {
-    initializeMapToOdomFilter();
+    initializeMapToOdomFilterLocked();
   }
 
   for (std::size_t index = 0U; index < map_to_odom_filter_covariance_.size(); ++index) {
@@ -360,8 +386,16 @@ void MapPoseNode::predictMapToOdomFilter()
 
 void MapPoseNode::updateMapToOdomFilter(const tf2::Transform & measurement, const double confidence)
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  updateMapToOdomFilterLocked(measurement, confidence);
+}
+
+void MapPoseNode::updateMapToOdomFilterLocked(
+  const tf2::Transform & measurement,
+  const double confidence)
+{
   if (!map_to_odom_filter_ready_) {
-    initializeMapToOdomFilter();
+    initializeMapToOdomFilterLocked();
   }
 
   const double clamped_confidence = std::clamp(confidence, 0.0, 1.0);
@@ -394,8 +428,14 @@ void MapPoseNode::updateMapToOdomFilter(const tf2::Transform & measurement, cons
 
 void MapPoseNode::decayMapToOdomFilterTowardsIdentity()
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  decayMapToOdomFilterTowardsIdentityLocked();
+}
+
+void MapPoseNode::decayMapToOdomFilterTowardsIdentityLocked()
+{
   if (!map_to_odom_filter_ready_) {
-    initializeMapToOdomFilter();
+    initializeMapToOdomFilterLocked();
   }
 
   const double keep_weight = 1.0 - low_confidence_identity_pull_alpha_;
@@ -412,39 +452,77 @@ void MapPoseNode::decayMapToOdomFilterTowardsIdentity()
 
 tf2::Transform MapPoseNode::filteredMapToOdomTransform() const
 {
-  return transformFromXYYaw(
-    map_to_odom_filter_state_[0],
-    map_to_odom_filter_state_[1],
-    0.0,
-    map_to_odom_filter_state_[2]);
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  return filteredMapToOdomTransform(map_to_odom_filter_state_);
 }
 
-bool MapPoseNode::correctionInputsReady() const
+tf2::Transform MapPoseNode::filteredMapToOdomTransform(
+  const std::array<double, 3> & filter_state) const
 {
-  if (!latest_odometry_ready_ || !latest_scan_ready_ || !latest_global_costmap_ready_) {
+  return transformFromXYYaw(
+    filter_state[0],
+    filter_state[1],
+    0.0,
+    filter_state[2]);
+}
+
+MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  StateSnapshot snapshot;
+  snapshot.latest_odometry_ready = latest_odometry_ready_;
+  snapshot.latest_navsat_ready = latest_navsat_ready_;
+  snapshot.latest_heading_ready = latest_heading_ready_;
+  snapshot.latest_scan_ready = latest_scan_ready_;
+  snapshot.latest_global_costmap_ready = latest_global_costmap_ready_;
+  snapshot.last_map_to_odom_ready = last_map_to_odom_ready_;
+  snapshot.map_to_odom_filter_ready = map_to_odom_filter_ready_;
+  snapshot.correction_startup_ready = correction_startup_ready_;
+  snapshot.correction_ready_streak = correction_ready_streak_;
+  snapshot.latest_odometry_position = latest_odometry_position_;
+  snapshot.latest_odometry_orientation = latest_odometry_orientation_;
+  snapshot.latest_navsat = latest_navsat_;
+  snapshot.latest_heading = latest_heading_;
+  snapshot.latest_scan = latest_scan_;
+  snapshot.latest_global_costmap = latest_global_costmap_;
+  snapshot.latest_scan_stamp = latest_scan_stamp_;
+  snapshot.latest_global_costmap_stamp = latest_global_costmap_stamp_;
+  snapshot.latest_map_pose_stamp = latest_map_pose_stamp_;
+  snapshot.map_to_odom_filter_state = map_to_odom_filter_state_;
+  snapshot.map_to_odom_filter_covariance = map_to_odom_filter_covariance_;
+  snapshot.last_map_to_odom = last_map_to_odom_;
+  return snapshot;
+}
+
+bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
+{
+  if (
+    !snapshot.latest_odometry_ready || !snapshot.latest_scan_ready ||
+    !snapshot.latest_global_costmap_ready)
+  {
     return false;
   }
 
-  if ((now() - latest_scan_stamp_).seconds() > scan_timeout_seconds_) {
+  if ((now() - snapshot.latest_scan_stamp).seconds() > scan_timeout_seconds_) {
     return false;
   }
 
-  if ((now() - latest_global_costmap_stamp_).seconds() > costmap_timeout_seconds_) {
+  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
     return false;
   }
 
-  if (latest_scan_.header.frame_id.empty()) {
+  if (snapshot.latest_scan.header.frame_id.empty()) {
     return false;
   }
 
   try {
     const rclcpp::Time transform_stamp =
-      latest_scan_.header.stamp.sec == 0 && latest_scan_.header.stamp.nanosec == 0 ?
+      snapshot.latest_scan.header.stamp.sec == 0 && snapshot.latest_scan.header.stamp.nanosec == 0 ?
       now() :
-      rclcpp::Time(latest_scan_.header.stamp);
+      rclcpp::Time(snapshot.latest_scan.header.stamp);
     tf_buffer_->lookupTransform(
       base_frame_id_,
-      latest_scan_.header.frame_id,
+      snapshot.latest_scan.header.frame_id,
       transform_stamp,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException &) {
@@ -454,22 +532,37 @@ bool MapPoseNode::correctionInputsReady() const
   return true;
 }
 
-bool MapPoseNode::shouldHoldIdentityAtStartup()
+bool MapPoseNode::shouldHoldIdentityAtStartup(const StateSnapshot & snapshot)
 {
-  if (correction_startup_ready_) {
+  if (snapshot.correction_startup_ready) {
     return false;
   }
 
-  if (correctionInputsReady()) {
-    correction_ready_streak_ = std::min(
+  const bool inputs_ready = correctionInputsReady(snapshot);
+  int updated_streak = 0;
+  bool startup_ready = false;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (correction_startup_ready_) {
+      return false;
+    }
+    if (inputs_ready) {
+      correction_ready_streak_ = std::min(
       correction_ready_streak_ + 1,
       startup_ready_streak_required_);
-  } else {
-    correction_ready_streak_ = 0;
+    } else {
+      correction_ready_streak_ = 0;
+    }
+
+    if (correction_ready_streak_ >= startup_ready_streak_required_) {
+      correction_startup_ready_ = true;
+      startup_ready = true;
+    }
+
+    updated_streak = correction_ready_streak_;
   }
 
-  if (correction_ready_streak_ >= startup_ready_streak_required_) {
-    correction_startup_ready_ = true;
+  if (startup_ready) {
     RCLCPP_INFO(
       get_logger(),
       "Map pose startup holdoff cleared after %d consecutive ready cycles; enabling runtime map -> odom corrections.",
@@ -483,7 +576,7 @@ bool MapPoseNode::shouldHoldIdentityAtStartup()
     3000,
     "Holding map -> odom at identity until scan, TF, and global map inputs stay ready for %d consecutive publish cycles (%d/%d).",
     startup_ready_streak_required_,
-    correction_ready_streak_,
+    updated_streak,
     startup_ready_streak_required_);
   return true;
 }
@@ -536,6 +629,7 @@ void MapPoseNode::loadCostmapGeoreference()
 
 void MapPoseNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message)
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   latest_odometry_position_ = message->pose.pose.position;
   latest_odometry_orientation_ = message->pose.pose.orientation;
   latest_odometry_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
@@ -546,6 +640,7 @@ void MapPoseNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
 
 void MapPoseNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message)
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   latest_navsat_ = *message;
   latest_map_pose_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
     now() :
@@ -555,6 +650,7 @@ void MapPoseNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
 
 void MapPoseNode::handleHeading(const sensor_msgs::msg::Imu::SharedPtr message)
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   latest_heading_ = *message;
   latest_heading_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
     now() :
@@ -565,6 +661,7 @@ void MapPoseNode::handleHeading(const sensor_msgs::msg::Imu::SharedPtr message)
 
 void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message)
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   latest_scan_ = *message;
   latest_scan_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
     now() :
@@ -575,6 +672,7 @@ void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
 
 void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   latest_global_costmap_ = *message;
   latest_global_costmap_stamp_ =
     message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
@@ -678,9 +776,11 @@ std::optional<geographic_msgs::msg::GeoPoint> MapPoseNode::artifactGeoPointFromM
   return geo_point;
 }
 
-double MapPoseNode::georeferenceConsistencyConfidence(const tf2::Transform & candidate_map_to_base) const
+double MapPoseNode::georeferenceConsistencyConfidence(
+  const StateSnapshot & snapshot,
+  const tf2::Transform & candidate_map_to_base) const
 {
-  if (!latest_navsat_ready_ || !latest_heading_ready_ || !artifact_georeference_ready_) {
+  if (!snapshot.latest_navsat_ready || !snapshot.latest_heading_ready || !artifact_georeference_ready_) {
     return 1.0;
   }
 
@@ -695,9 +795,9 @@ double MapPoseNode::georeferenceConsistencyConfidence(const tf2::Transform & can
   }
 
   geographic_msgs::msg::GeoPoint gnss_geo_point;
-  gnss_geo_point.latitude = latest_navsat_.latitude;
-  gnss_geo_point.longitude = latest_navsat_.longitude;
-  gnss_geo_point.altitude = latest_navsat_.altitude;
+  gnss_geo_point.latitude = snapshot.latest_navsat.latitude;
+  gnss_geo_point.longitude = snapshot.latest_navsat.longitude;
+  gnss_geo_point.altitude = snapshot.latest_navsat.altitude;
 
   const double position_confidence = std::clamp(
     1.0 - (geographicDistanceMeters(gnss_geo_point, *derived_geo_point) / georef_consistency_max_error_m_),
@@ -705,7 +805,7 @@ double MapPoseNode::georeferenceConsistencyConfidence(const tf2::Transform & can
     1.0);
 
   tf2::Quaternion heading_quaternion;
-  tf2::fromMsg(latest_heading_.orientation, heading_quaternion);
+  tf2::fromMsg(snapshot.latest_heading.orientation, heading_quaternion);
   heading_quaternion.normalize();
   double roll = 0.0;
   double pitch = 0.0;
@@ -722,33 +822,34 @@ double MapPoseNode::georeferenceConsistencyConfidence(const tf2::Transform & can
 }
 
 std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromPrior(
+  const StateSnapshot & snapshot,
   const tf2::Transform & map_to_base_prior) const
 {
-  if (!latest_scan_ready_ || !latest_global_costmap_ready_) {
+  if (!snapshot.latest_scan_ready || !snapshot.latest_global_costmap_ready) {
     return std::nullopt;
   }
 
-  const auto & scan = latest_scan_;
-  const auto & map = latest_global_costmap_;
+  const auto & scan = snapshot.latest_scan;
+  const auto & map = snapshot.latest_global_costmap;
   if (scan.ranges.empty()) {
     return std::nullopt;
   }
-  if ((now() - latest_scan_stamp_).seconds() > scan_timeout_seconds_) {
+  if ((now() - snapshot.latest_scan_stamp).seconds() > scan_timeout_seconds_) {
     RCLCPP_WARN_THROTTLE(
       get_logger(),
       *get_clock(),
       3000,
       "Skipping map pose scan matching because the latest scan is stale by %.3fs.",
-      (now() - latest_scan_stamp_).seconds());
+      (now() - snapshot.latest_scan_stamp).seconds());
     return std::nullopt;
   }
-  if ((now() - latest_global_costmap_stamp_).seconds() > costmap_timeout_seconds_) {
+  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
     RCLCPP_WARN_THROTTLE(
       get_logger(),
       *get_clock(),
       3000,
       "Skipping map pose scan matching because the latest global costmap is stale by %.3fs.",
-      (now() - latest_global_costmap_stamp_).seconds());
+      (now() - snapshot.latest_global_costmap_stamp).seconds());
     return std::nullopt;
   }
 
@@ -962,7 +1063,7 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     std::max(1.0e-6, high_confidence_match_score_ - minimum_match_score_),
     0.0,
     1.0);
-  const double georef_confidence = georeferenceConsistencyConfidence(best_transform);
+  const double georef_confidence = georeferenceConsistencyConfidence(snapshot, best_transform);
   return MapMatchEstimate{
     best_transform,
     best_score,
@@ -975,22 +1076,30 @@ void MapPoseNode::publishMapToOdomTransform()
     return;
   }
 
-  if (!latest_odometry_ready_) {
+  const StateSnapshot snapshot = snapshotState();
+  if (!snapshot.latest_odometry_ready) {
     return;
   }
 
-  if (!map_to_odom_filter_ready_) {
-    initializeMapToOdomFilter();
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (!map_to_odom_filter_ready_) {
+      initializeMapToOdomFilterLocked();
+    }
   }
 
-  if (shouldHoldIdentityAtStartup()) {
-    initializeMapToOdomFilter();
-    last_map_to_odom_ = transformFromXYYaw(0.0, 0.0, 0.0, 0.0);
-    last_map_to_odom_ready_ = true;
+  if (shouldHoldIdentityAtStartup(snapshot)) {
+    const tf2::Transform identity = transformFromXYYaw(0.0, 0.0, 0.0, 0.0);
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      initializeMapToOdomFilterLocked();
+      last_map_to_odom_ = identity;
+      last_map_to_odom_ready_ = true;
+    }
     tf_broadcaster_->sendTransform(
       stampedFromTransform(
-        last_map_to_odom_,
-        latest_map_pose_stamp_.nanoseconds() > 0 ? latest_map_pose_stamp_ : now(),
+        identity,
+        snapshot.latest_map_pose_stamp.nanoseconds() > 0 ? snapshot.latest_map_pose_stamp : now(),
         map_frame_id_,
         odom_frame_id_));
     return;
@@ -1002,17 +1111,21 @@ void MapPoseNode::publishMapToOdomTransform()
   const tf2::Transform odom_to_base(
     odom_base_quaternion,
     tf2::Vector3(
-      latest_odometry_position_.x,
-      latest_odometry_position_.y,
-      latest_odometry_position_.z));
+      snapshot.latest_odometry_position.x,
+      snapshot.latest_odometry_position.y,
+      snapshot.latest_odometry_position.z));
 
   // Layer 3 starts with map and odom intentionally co-located so the correction state begins at zero.
-  tf2::Transform map_to_odom = filteredMapToOdomTransform();
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    predictMapToOdomFilterLocked();
+  }
+  StateSnapshot prediction_snapshot = snapshotState();
+  tf2::Transform map_to_odom = filteredMapToOdomTransform(prediction_snapshot.map_to_odom_filter_state);
   tf2::Transform map_to_base_prior = map_to_odom * odom_to_base;
 
-  predictMapToOdomFilter();
-
-  const std::optional<MapMatchEstimate> map_match = estimateMapToBaseFromPrior(map_to_base_prior);
+  const std::optional<MapMatchEstimate> map_match =
+    estimateMapToBaseFromPrior(prediction_snapshot, map_to_base_prior);
   if (
     map_match.has_value() &&
     map_match->confidence >= minimum_confidence_for_filter_update_ &&
@@ -1044,23 +1157,33 @@ void MapPoseNode::publishMapToOdomTransform()
         normalizeAngle(previous_yaw + clamped_yaw_delta));
     }
 
-    updateMapToOdomFilter(measured_map_to_odom, map_match->confidence);
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    updateMapToOdomFilterLocked(measured_map_to_odom, map_match->confidence);
   } else {
-    decayMapToOdomFilterTowardsIdentity();
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    decayMapToOdomFilterTowardsIdentityLocked();
   }
 
+  StateSnapshot final_snapshot = snapshotState();
   map_to_odom = blendTransforms(
-    last_map_to_odom_ready_ ? last_map_to_odom_ : transformFromXYYaw(0.0, 0.0, 0.0, 0.0),
-    filteredMapToOdomTransform(),
+    final_snapshot.last_map_to_odom_ready ?
+    final_snapshot.last_map_to_odom :
+    transformFromXYYaw(0.0, 0.0, 0.0, 0.0),
+    filteredMapToOdomTransform(final_snapshot.map_to_odom_filter_state),
     transform_smoothing_alpha_);
 
-  last_map_to_odom_ = map_to_odom;
-  last_map_to_odom_ready_ = true;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    last_map_to_odom_ = map_to_odom;
+    last_map_to_odom_ready_ = true;
+  }
 
   tf_broadcaster_->sendTransform(
     stampedFromTransform(
       map_to_odom,
-      latest_map_pose_stamp_.nanoseconds() > 0 ? latest_map_pose_stamp_ : now(),
+      final_snapshot.latest_map_pose_stamp.nanoseconds() > 0 ?
+      final_snapshot.latest_map_pose_stamp :
+      now(),
       map_frame_id_,
       odom_frame_id_));
 }
@@ -1071,7 +1194,9 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<amr_sweeper_mapping::MapPoseNode>();
-  rclcpp::spin(node);
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 2U);
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }

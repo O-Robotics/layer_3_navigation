@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include <memory>
 #include <optional>
 #include <array>
@@ -38,6 +39,31 @@ private:
     double confidence{0.0};
   };
 
+  struct StateSnapshot
+  {
+    bool latest_odometry_ready{false};
+    bool latest_navsat_ready{false};
+    bool latest_heading_ready{false};
+    bool latest_scan_ready{false};
+    bool latest_global_costmap_ready{false};
+    bool last_map_to_odom_ready{false};
+    bool map_to_odom_filter_ready{false};
+    bool correction_startup_ready{false};
+    int correction_ready_streak{0};
+    geometry_msgs::msg::Point latest_odometry_position;
+    geometry_msgs::msg::Quaternion latest_odometry_orientation;
+    sensor_msgs::msg::NavSatFix latest_navsat;
+    sensor_msgs::msg::Imu latest_heading;
+    sensor_msgs::msg::LaserScan latest_scan;
+    nav_msgs::msg::OccupancyGrid latest_global_costmap;
+    rclcpp::Time latest_scan_stamp{0, 0, RCL_ROS_TIME};
+    rclcpp::Time latest_global_costmap_stamp{0, 0, RCL_ROS_TIME};
+    rclcpp::Time latest_map_pose_stamp{0, 0, RCL_ROS_TIME};
+    std::array<double, 3> map_to_odom_filter_state{0.0, 0.0, 0.0};
+    std::array<double, 3> map_to_odom_filter_covariance{1.0, 1.0, 0.5};
+    tf2::Transform last_map_to_odom;
+  };
+
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
@@ -46,19 +72,28 @@ private:
   void publishMapToOdomTransform();
   void loadCostmapGeoreference();
   void initializeMapToOdomFilter();
+  void initializeMapToOdomFilterLocked();
   void predictMapToOdomFilter();
+  void predictMapToOdomFilterLocked();
   void updateMapToOdomFilter(const tf2::Transform & measurement, double confidence);
+  void updateMapToOdomFilterLocked(const tf2::Transform & measurement, double confidence);
   void decayMapToOdomFilterTowardsIdentity();
+  void decayMapToOdomFilterTowardsIdentityLocked();
   [[nodiscard]] tf2::Transform filteredMapToOdomTransform() const;
-  [[nodiscard]] bool correctionInputsReady() const;
-  [[nodiscard]] bool shouldHoldIdentityAtStartup();
+  [[nodiscard]] tf2::Transform filteredMapToOdomTransform(
+    const std::array<double, 3> & filter_state) const;
+  [[nodiscard]] StateSnapshot snapshotState() const;
+  [[nodiscard]] bool correctionInputsReady(const StateSnapshot & snapshot) const;
+  [[nodiscard]] bool shouldHoldIdentityAtStartup(const StateSnapshot & snapshot);
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> latestMapPositionFromNavSat() const;
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPositionFromArtifactGeoreference() const;
   [[nodiscard]] std::optional<geographic_msgs::msg::GeoPoint> artifactGeoPointFromMapPoint(
     const geometry_msgs::msg::Point & map_point) const;
   [[nodiscard]] double georeferenceConsistencyConfidence(
+    const StateSnapshot & snapshot,
     const tf2::Transform & candidate_map_to_base) const;
   [[nodiscard]] std::optional<MapMatchEstimate> estimateMapToBaseFromPrior(
+    const StateSnapshot & snapshot,
     const tf2::Transform & map_to_base_prior) const;
 
   std::string map_frame_id_;
@@ -128,6 +163,9 @@ private:
   std::array<double, 3> map_to_odom_filter_state_{0.0, 0.0, 0.0};
   std::array<double, 3> map_to_odom_filter_covariance_{1.0, 1.0, 0.5};
   tf2::Transform last_map_to_odom_;
+  mutable std::mutex state_mutex_;
+  rclcpp::CallbackGroup::SharedPtr subscription_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr publish_callback_group_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
