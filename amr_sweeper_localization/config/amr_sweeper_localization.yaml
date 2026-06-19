@@ -41,6 +41,8 @@
     gnss.base_noise_z:                     3.0             # Baseline vertical GNSS sigma in meters.
     gnss.heading_noise:                    0.02            # Heading measurement noise in radians for dual-antenna or azimuth inputs.
     gnss.position_covariance_scale:        400.0           # Down-weight every GNSS position fix, including full-covariance RTK fixes, so GNSS only nudges the filter instead of steering a stationary robot.
+    gnss.min_horizontal_stddev_m:          0.5             # Match the upstream GNSS publisher floor so FusionCore never assumes tighter horizontal covariance than the NavSatFix source claims.
+    gnss.min_vertical_stddev_m:            1.0             # Match the upstream GNSS publisher vertical floor for consistent covariance handling across both packages.
     gnss.max_hdop:                         4.0             # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
     gnss.max_vdop:                         6.0             # Vertical dilution threshold used by FusionCore's GNSS quality gate.
     gnss.min_satellites:                   4               # Minimum satellite count required before fusing GNSS.
