@@ -169,6 +169,7 @@ def _build_launches(context):
     mission_type = LaunchConfiguration('mission_type').perform(context)
     mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml').perform(context)
     auto_start_mission = LaunchConfiguration('auto_start_mission').perform(context)
+    use_gaussian = LaunchConfiguration('use_gaussian').perform(context)
     use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
     test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
     mission_context = _resolve_execution_context(mission_execution_directory)
@@ -252,6 +253,7 @@ def _build_launches(context):
             'mission_id': effective_mission_id,
             'mission_type': effective_mission_type,
             'mission_costmap_yaml': effective_mission_costmap_yaml,
+            'use_gaussian': use_gaussian,
             'auto_start_mission': auto_start_mission,
             'use_test': 'true' if use_test else 'false',
             'test_output_directory': test_output_directory,
@@ -411,6 +413,7 @@ def generate_launch_description():
         DeclareLaunchArgument('mission_id', default_value=''),
         DeclareLaunchArgument('mission_type', default_value=''),
         DeclareLaunchArgument('mission_costmap_yaml', default_value=''),
+        DeclareLaunchArgument('use_gaussian', default_value='true'),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('use_test', default_value='false'),
         DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),

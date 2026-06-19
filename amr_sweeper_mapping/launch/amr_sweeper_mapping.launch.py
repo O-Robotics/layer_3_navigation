@@ -54,6 +54,7 @@ def _build_nodes(context):
     test_output_directory = LaunchConfiguration("test_output_directory").perform(context)
     configured_mission_costmap_yaml = LaunchConfiguration("mission_costmap_yaml").perform(context)
     auto_start_mission = LaunchConfiguration("auto_start_mission").perform(context).lower() == "true"
+    use_gaussian = LaunchConfiguration("use_gaussian").perform(context).lower() == "true"
 
     mission_context = _resolve_execution_context(mission_execution_directory)
     mission_type = configured_mission_type or str(mission_context.get("mission_type", "")).lower()
@@ -153,7 +154,7 @@ def _build_nodes(context):
         )
     )
 
-    if not builtin_local_pattern_mode:
+    if use_gaussian and not builtin_local_pattern_mode:
         actions.extend([
             Node(
                 package="amr_sweeper_mapping",
@@ -232,6 +233,11 @@ def generate_launch_description():
                 "mission_type",
                 default_value="",
                 description="Optional mission type override used to specialize direct-run builtin profiles.",
+            ),
+            DeclareLaunchArgument(
+                "use_gaussian",
+                default_value="true",
+                description="Launch gaussian_node when true.",
             ),
             DeclareLaunchArgument(
                 "use_test",

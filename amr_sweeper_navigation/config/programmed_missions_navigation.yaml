@@ -111,7 +111,7 @@ local_costmap:
       static_layer:
         plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the mapping-owned rolling occupancy grid instead of subscribing to raw sensors directly.
         map_topic:                   mapping/local_costmap               # Rolling odom-frame local costmap published by amr_sweeper_mapping.
-        map_subscribe_transient_local: false                              # Use normal durability because the mapping node republishes the full local map continuously.
+        map_subscribe_transient_local: true                               # Match the mapping publisher's transient-local durability so Nav2 gets the latest latched map immediately at startup.
         subscribe_to_updates:        false                                # The mapping node republishes full local OccupancyGrid messages rather than incremental updates.
 
       # -- Inflation layer -----------------------------------------------------
@@ -141,7 +141,7 @@ global_costmap:
       static_layer:
         plugin:                      "nav2_costmap_2d::StaticLayer"      # Consume the continuously updated global costmap published by amr_sweeper_mapping.
         map_topic:                   mapping/global_costmap               # The mapping coordinator republishes the runtime global costmap on a dedicated topic for Nav2 consumption.
-        map_subscribe_transient_local: false                              # Subscribe with normal durability because the mapping node republishes the full global map continuously.
+        map_subscribe_transient_local: true                               # Match the mapping publisher's transient-local durability so Nav2 gets the latest latched map immediately at startup.
         subscribe_to_updates:        false                                # The padded live map is republished as full OccupancyGrid messages, so a separate update stream is unnecessary.
 
       # -- Inflation layer -----------------------------------------------------
