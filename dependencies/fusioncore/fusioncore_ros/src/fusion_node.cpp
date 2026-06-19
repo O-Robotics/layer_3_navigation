@@ -305,6 +305,9 @@ public:
     // ~/load_checkpoint restores state from this file (re-run from any point in a bag).
     declare_parameter("replay.checkpoint_path",
       std::string("/tmp/fusioncore_checkpoint.txt"));
+    declare_parameter("replay.max_measurement_delay", 0.5);
+    declare_parameter("replay.snapshot_buffer_size", 50);
+    declare_parameter("replay.imu_buffer_size", 100);
 
     // Motion model: controls how sigma points are propagated in the predict step.
     // "ConstantVelocityAcceleration" (default): no platform constraints.
@@ -330,6 +333,18 @@ public:
     heading_topic_ = get_parameter("gnss.heading_topic").as_string();
     gnss2_topic_    = get_parameter("gnss.fix2_topic").as_string();
     fusioncore::FusionCoreConfig config;
+    config.max_measurement_delay =
+      std::max(0.0, get_parameter("replay.max_measurement_delay").as_double());
+    config.snapshot_buffer_size =
+      std::max(1, get_parameter("replay.snapshot_buffer_size").as_int());
+    config.imu_buffer_size =
+      std::max(1, get_parameter("replay.imu_buffer_size").as_int());
+    RCLCPP_INFO(
+      get_logger(),
+      "Delayed measurement replay: max_delay=%.2fs snapshot_buffer_size=%d imu_buffer_size=%d",
+      config.max_measurement_delay,
+      config.snapshot_buffer_size,
+      config.imu_buffer_size);
 
     config.imu.gyro_noise_x  = get_parameter("imu.gyro_noise").as_double();
     config.imu.gyro_noise_y  = config.imu.gyro_noise_x;
