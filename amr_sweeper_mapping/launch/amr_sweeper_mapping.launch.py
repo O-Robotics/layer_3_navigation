@@ -83,6 +83,17 @@ def _build_nodes(context):
         or mission_context.get("persistent_mission_costmap_yaml", "")
         or saved_costmap_yaml
     )
+    # For mapping startup seeding, prefer the exact run-specific mission artifact first.
+    # Scheduled mission execution copies the selected mission costmap into the run folder
+    # and that copy can carry georeference metadata even when the persistent mission-folder
+    # artifact is an older local-frame map. Falling back to the persistent file first causes
+    # mapping_node to reject startup seeding for map-frame missions.
+    startup_saved_costmap_yaml = (
+        mission_costmap_yaml
+        or mission_context.get("source_mission_costmap_yaml", "")
+        or mission_context.get("persistent_mission_costmap_yaml", "")
+        or saved_costmap_yaml
+    )
     gaussian_output_directory = mission_context.get("gaussian_output_directory", "")
     if not gaussian_output_directory and mission_run_directory:
         gaussian_output_directory = str(Path(mission_run_directory) / "gaussian")
@@ -126,8 +137,8 @@ def _build_nodes(context):
         common_runtime_parameters["actual_path_navsat_output_file"] = actual_path_navsat_output_file
     if mission_costmap_yaml:
         common_runtime_parameters["mission_costmap_yaml"] = mission_costmap_yaml
-    if static_reference_costmap_yaml:
-        common_runtime_parameters["startup_saved_costmap_yaml"] = static_reference_costmap_yaml
+    if startup_saved_costmap_yaml:
+        common_runtime_parameters["startup_saved_costmap_yaml"] = startup_saved_costmap_yaml
     if saved_costmap_yaml:
         common_runtime_parameters["saved_costmap_yaml"] = saved_costmap_yaml
     if mission_window_start:

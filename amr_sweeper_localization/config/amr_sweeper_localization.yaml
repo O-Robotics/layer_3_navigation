@@ -62,9 +62,9 @@
     gnss.min_fix_type:                     1               # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
     gnss.fix2_topic:                       ""              # Optional second GNSS receiver topic; leave empty to disable.
     gnss.heading_topic:                    ""              # Disabled because yaw is fused directly from the configured IMU topic.
-    gnss.lever_arm_x:                      0.0             # Antenna offset from base frame in meters: X forward.
-    gnss.lever_arm_y:                      0.0             # Antenna offset from base frame in meters: Y left.
-    gnss.lever_arm_z:                      0.199           # Antenna offset from base frame in meters: Z up.
+    gnss.lever_arm_x:                      0.0             # Lever arm disabled: use GNSS as if mounted at the base frame so stationary GNSS fixes cannot rotate yaw through the antenna-offset model.
+    gnss.lever_arm_y:                      0.0             # Lever arm disabled alongside X/Z for consistent GNSS position fusion.
+    gnss.lever_arm_z:                      0.0             # Lever arm disabled: removes the z-offset coupling that was letting centimeter-scale GNSS shifts produce large yaw jumps while stationary.
 
     # -- Outlier rejection -----------------------------------------------------
     outlier_rejection:                     true
