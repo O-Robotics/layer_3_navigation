@@ -281,15 +281,7 @@ def _build_launches(context):
 
     delayed_navigation_launch = TimerAction(
         period=navigation_startup_delay_sec,
-        actions=[
-            LogInfo(
-                msg=(
-                    '[layer_3_navigation_bringup] Launching navigation after fixed startup '
-                    f'delay of {navigation_startup_delay_sec:.1f}s.'
-                )
-            ),
-            navigation_launch,
-        ],
+        actions=[navigation_launch],
     )
 
     if use_amr_sweeper_localization:
