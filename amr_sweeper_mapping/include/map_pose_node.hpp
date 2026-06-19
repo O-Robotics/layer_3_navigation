@@ -8,6 +8,7 @@
 #include <optional>
 #include <array>
 #include <string>
+#include <vector>
 
 #include <fusioncore_ros/srv/from_ll.hpp>
 #include <geometry_msgs/msg/point.hpp>
@@ -56,6 +57,7 @@ private:
     sensor_msgs::msg::Imu latest_heading;
     sensor_msgs::msg::LaserScan latest_scan;
     nav_msgs::msg::OccupancyGrid latest_global_costmap;
+    std::shared_ptr<const std::vector<float>> latest_global_costmap_score_field;
     rclcpp::Time latest_scan_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_global_costmap_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_map_pose_stamp{0, 0, RCL_ROS_TIME};
@@ -71,6 +73,7 @@ private:
   void handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishMapToOdomTransform();
   void loadCostmapGeoreference();
+  void rebuildGlobalCostmapScoreFieldLocked();
   void initializeMapToOdomFilter();
   void initializeMapToOdomFilterLocked();
   void predictMapToOdomFilter();
@@ -82,6 +85,10 @@ private:
   [[nodiscard]] tf2::Transform filteredMapToOdomTransform() const;
   [[nodiscard]] tf2::Transform filteredMapToOdomTransform(
     const std::array<double, 3> & filter_state) const;
+  [[nodiscard]] float scoreCostmapCell(
+    const StateSnapshot & snapshot,
+    int grid_x,
+    int grid_y) const;
   [[nodiscard]] StateSnapshot snapshotState() const;
   [[nodiscard]] bool correctionInputsReady(const StateSnapshot & snapshot) const;
   [[nodiscard]] bool shouldHoldIdentityAtStartup(const StateSnapshot & snapshot);
@@ -121,16 +128,25 @@ private:
   int scan_subsample_step_{4};
   int min_valid_scan_points_{20};
   int endpoint_search_radius_cells_{1};
+  int max_scan_match_points_{72};
   double search_translation_window_m_{2.0};
   double search_translation_step_m_{0.25};
   double search_yaw_window_rad_{0.35};
   double search_yaw_step_rad_{0.0872664626};
+  double min_search_translation_window_m_{0.2};
+  double min_search_yaw_window_rad_{0.0872664626};
+  double search_window_translation_covariance_scale_{0.5};
+  double search_window_yaw_covariance_scale_{0.5};
   double translation_penalty_per_meter_{0.5};
   double yaw_penalty_per_rad_{0.25};
   double free_space_penalty_{0.35};
   double free_space_reward_{0.02};
   double occupied_reward_{1.0};
   double occupied_penalty_{0.3};
+  double likelihood_field_max_distance_m_{0.75};
+  double likelihood_field_sigma_m_{0.12};
+  double unknown_space_score_{0.05};
+  double out_of_bounds_score_{-0.25};
   double prior_blend_weight_{0.7};
   double scan_timeout_seconds_{1.0};
   double costmap_timeout_seconds_{2.0};
@@ -153,6 +169,7 @@ private:
   sensor_msgs::msg::Imu latest_heading_;
   sensor_msgs::msg::LaserScan latest_scan_;
   nav_msgs::msg::OccupancyGrid latest_global_costmap_;
+  std::shared_ptr<std::vector<float>> latest_global_costmap_score_field_;
   rclcpp::Time latest_odometry_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_heading_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_scan_stamp_{0, 0, RCL_ROS_TIME};

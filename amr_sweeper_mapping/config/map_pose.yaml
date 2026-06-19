@@ -19,16 +19,25 @@
     # -- Scan matching --------------------------------------------------------
     occupied_threshold:                  65                               # Occupancy value that counts as a map hit when correlating scan endpoints against the global costmap.
     scan_subsample_step:                 4                                # Use every Nth beam during correlation to keep the bounded search light enough for startup and recovery.
+    max_scan_match_points:               72                               # Hard cap on how many scan endpoints enter one correction cycle; evenly resample if more beams survive filtering.
     min_valid_scan_points:               20                               # Require at least this many usable scan endpoints before a scan match can correct map -> odom.
-    endpoint_search_radius_cells:        1                                # Accept occupied cells within this neighborhood radius so minor raster offsets do not destabilize the score.
-    search_translation_window_m:         2.0                              # Search this far around the current map-aligned odom pose in X and Y when refining the robot pose against the map.
-    search_translation_step_m:           0.25                             # Translation step for the bounded map-correlation search.
-    search_yaw_window_rad:               0.35                             # Search this far around the current map-aligned odom yaw, in radians.
-    search_yaw_step_rad:                 0.0872664626                     # Yaw search step in radians, here roughly 5 degrees.
+    endpoint_search_radius_cells:        1                                # Legacy compatibility knob from the earlier endpoint-neighborhood scorer; the runtime matcher now uses a precomputed likelihood field instead.
+    likelihood_field_max_distance_m:     0.75                             # Precompute obstacle proximity scores out to this distance, mirroring AMCL's likelihood-field strategy instead of ray marching each beam.
+    likelihood_field_sigma_m:            0.12                             # Gaussian falloff applied to obstacle distance in the precomputed likelihood field.
+    unknown_space_score:                 0.05                             # Score for endpoints that land in unknown cells inside the map bounds.
+    out_of_bounds_score:                -0.25                             # Penalty for endpoints that project outside the current global costmap bounds.
+    search_translation_window_m:         0.75                             # Upper bound on how far the bounded search may move in X/Y around the map-aligned odom prior.
+    search_translation_step_m:           0.15                             # Translation step for the bounded map-correlation search.
+    search_yaw_window_rad:               0.20                             # Upper bound on how far the bounded search may rotate around the map-aligned odom yaw prior.
+    search_yaw_step_rad:                 0.0523598776                     # Yaw search step in radians, here roughly 3 degrees.
+    min_search_translation_window_m:     0.20                             # Floor on the adaptive translation window once the filter covariance shrinks.
+    min_search_yaw_window_rad:           0.0872664626                     # Floor on the adaptive yaw window once the filter covariance shrinks.
+    search_window_translation_covariance_scale: 0.5                       # Grow the translation search window with the runtime filter covariance instead of always sweeping the full upper bound.
+    search_window_yaw_covariance_scale:  0.5                              # Grow the yaw search window with the runtime filter covariance instead of always sweeping the full upper bound.
     translation_penalty_per_meter:       0.5                              # Penalize candidates that drift too far from the current map-aligned odom prediction.
     yaw_penalty_per_rad:                 0.25                             # Penalize candidates that drift too far from the current map-aligned odom yaw prediction.
-    free_space_penalty:                  0.35                             # Penalize candidates whose beams pass through occupied cells before reaching the measured endpoint.
-    free_space_reward:                   0.02                             # Small reward for beams that traverse cells already known to be free.
+    free_space_penalty:                  0.35                             # Legacy compatibility knob from the earlier ray-marching scorer; retained so existing parameter files keep loading.
+    free_space_reward:                   0.02                             # Legacy compatibility knob from the earlier ray-marching scorer; retained so existing parameter files keep loading.
     occupied_reward:                     1.0                              # Reward given when a beam endpoint lands on an occupied structure in the global costmap.
     occupied_penalty:                    0.3                              # Penalty applied when a beam endpoint lands in a place that does not agree with the map.
     prior_blend_weight:                  0.7                              # Reserved compatibility knob from the earlier prior-based matcher; the runtime filter now starts identity and tracks scan corrections.

@@ -7,7 +7,9 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <queue>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
@@ -81,45 +83,6 @@ bool worldToGrid(
   return true;
 }
 
-double bestOccupancyScoreAroundCell(
-  const nav_msgs::msg::OccupancyGrid & map,
-  const int grid_x,
-  const int grid_y,
-  const int radius_cells,
-  const int occupied_threshold)
-{
-  double best_score = -1.0;
-  for (int dy = -radius_cells; dy <= radius_cells; ++dy) {
-    for (int dx = -radius_cells; dx <= radius_cells; ++dx) {
-      const int sample_x = grid_x + dx;
-      const int sample_y = grid_y + dy;
-      if (
-        sample_x < 0 || sample_y < 0 ||
-        sample_x >= static_cast<int>(map.info.width) ||
-        sample_y >= static_cast<int>(map.info.height))
-      {
-        continue;
-      }
-
-      const std::size_t index =
-        static_cast<std::size_t>(sample_y) * map.info.width + static_cast<std::size_t>(sample_x);
-      const int8_t value = map.data.at(index);
-      if (value < 0) {
-        best_score = std::max(best_score, -0.25);
-        continue;
-      }
-
-      if (value >= occupied_threshold) {
-        return 1.0;
-      }
-
-      best_score = std::max(best_score, static_cast<double>(value) / 100.0);
-    }
-  }
-
-  return best_score;
-}
-
 tf2::Transform transformFromXYYaw(
   const double x,
   const double y,
@@ -190,16 +153,25 @@ MapPoseNode::MapPoseNode()
   declare_parameter("scan_subsample_step", 4);
   declare_parameter("min_valid_scan_points", 20);
   declare_parameter("endpoint_search_radius_cells", 1);
+  declare_parameter("max_scan_match_points", 72);
   declare_parameter("search_translation_window_m", 2.0);
   declare_parameter("search_translation_step_m", 0.25);
   declare_parameter("search_yaw_window_rad", 0.35);
   declare_parameter("search_yaw_step_rad", 0.0872664626);
+  declare_parameter("min_search_translation_window_m", 0.2);
+  declare_parameter("min_search_yaw_window_rad", 0.0872664626);
+  declare_parameter("search_window_translation_covariance_scale", 0.5);
+  declare_parameter("search_window_yaw_covariance_scale", 0.5);
   declare_parameter("translation_penalty_per_meter", 0.5);
   declare_parameter("yaw_penalty_per_rad", 0.25);
   declare_parameter("free_space_penalty", 0.35);
   declare_parameter("free_space_reward", 0.02);
   declare_parameter("occupied_reward", 1.0);
   declare_parameter("occupied_penalty", 0.3);
+  declare_parameter("likelihood_field_max_distance_m", 0.75);
+  declare_parameter("likelihood_field_sigma_m", 0.12);
+  declare_parameter("unknown_space_score", 0.05);
+  declare_parameter("out_of_bounds_score", -0.25);
   declare_parameter("prior_blend_weight", 0.7);
   declare_parameter("scan_timeout_seconds", 1.0);
   declare_parameter("costmap_timeout_seconds", 2.0);
@@ -239,18 +211,41 @@ MapPoseNode::MapPoseNode()
   endpoint_search_radius_cells_ = std::max(
     0,
     static_cast<int>(get_parameter("endpoint_search_radius_cells").as_int()));
+  max_scan_match_points_ = std::max(
+    min_valid_scan_points_,
+    static_cast<int>(get_parameter("max_scan_match_points").as_int()));
   search_translation_window_m_ = get_parameter("search_translation_window_m").as_double();
   search_translation_step_m_ = std::max(
     0.05,
     get_parameter("search_translation_step_m").as_double());
   search_yaw_window_rad_ = get_parameter("search_yaw_window_rad").as_double();
   search_yaw_step_rad_ = std::max(0.01, get_parameter("search_yaw_step_rad").as_double());
+  min_search_translation_window_m_ = std::max(
+    0.05,
+    get_parameter("min_search_translation_window_m").as_double());
+  min_search_yaw_window_rad_ = std::max(
+    0.01,
+    get_parameter("min_search_yaw_window_rad").as_double());
+  search_window_translation_covariance_scale_ = std::max(
+    0.0,
+    get_parameter("search_window_translation_covariance_scale").as_double());
+  search_window_yaw_covariance_scale_ = std::max(
+    0.0,
+    get_parameter("search_window_yaw_covariance_scale").as_double());
   translation_penalty_per_meter_ = get_parameter("translation_penalty_per_meter").as_double();
   yaw_penalty_per_rad_ = get_parameter("yaw_penalty_per_rad").as_double();
   free_space_penalty_ = get_parameter("free_space_penalty").as_double();
   free_space_reward_ = get_parameter("free_space_reward").as_double();
   occupied_reward_ = get_parameter("occupied_reward").as_double();
   occupied_penalty_ = get_parameter("occupied_penalty").as_double();
+  likelihood_field_max_distance_m_ = std::max(
+    0.05,
+    get_parameter("likelihood_field_max_distance_m").as_double());
+  likelihood_field_sigma_m_ = std::max(
+    1.0e-3,
+    get_parameter("likelihood_field_sigma_m").as_double());
+  unknown_space_score_ = get_parameter("unknown_space_score").as_double();
+  out_of_bounds_score_ = get_parameter("out_of_bounds_score").as_double();
   prior_blend_weight_ = std::clamp(get_parameter("prior_blend_weight").as_double(), 0.0, 1.0);
   scan_timeout_seconds_ = std::max(0.05, get_parameter("scan_timeout_seconds").as_double());
   costmap_timeout_seconds_ = std::max(0.05, get_parameter("costmap_timeout_seconds").as_double());
@@ -483,6 +478,7 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.latest_heading = latest_heading_;
   snapshot.latest_scan = latest_scan_;
   snapshot.latest_global_costmap = latest_global_costmap_;
+  snapshot.latest_global_costmap_score_field = latest_global_costmap_score_field_;
   snapshot.latest_scan_stamp = latest_scan_stamp_;
   snapshot.latest_global_costmap_stamp = latest_global_costmap_stamp_;
   snapshot.latest_map_pose_stamp = latest_map_pose_stamp_;
@@ -625,6 +621,101 @@ void MapPoseNode::loadCostmapGeoreference()
   }
 }
 
+void MapPoseNode::rebuildGlobalCostmapScoreFieldLocked()
+{
+  if (
+    latest_global_costmap_.info.width == 0U || latest_global_costmap_.info.height == 0U ||
+    latest_global_costmap_.info.resolution <= 0.0F)
+  {
+    latest_global_costmap_score_field_.reset();
+    return;
+  }
+
+  const std::size_t width = latest_global_costmap_.info.width;
+  const std::size_t height = latest_global_costmap_.info.height;
+  const std::size_t cell_count = width * height;
+  auto score_field = std::make_shared<std::vector<float>>(
+    cell_count,
+    static_cast<float>(out_of_bounds_score_));
+  std::vector<float> distances(cell_count, std::numeric_limits<float>::infinity());
+
+  using QueueEntry = std::tuple<float, int, int>;
+  auto queue_compare = [](const QueueEntry & left, const QueueEntry & right) {
+      return std::get<0>(left) > std::get<0>(right);
+    };
+  std::priority_queue<QueueEntry, std::vector<QueueEntry>, decltype(queue_compare)> open_set(
+    queue_compare);
+
+  auto enqueue_if_better = [&](const int x, const int y, const float distance) {
+      if (
+        x < 0 || y < 0 || x >= static_cast<int>(width) || y >= static_cast<int>(height) ||
+        distance > static_cast<float>(likelihood_field_max_distance_m_))
+      {
+        return;
+      }
+
+      const std::size_t index =
+        static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x);
+      if (distance >= distances[index]) {
+        return;
+      }
+
+      distances[index] = distance;
+      open_set.emplace(distance, x, y);
+    };
+
+  for (std::size_t index = 0U; index < cell_count; ++index) {
+    if (latest_global_costmap_.data.at(index) >= occupied_threshold_) {
+      const int x = static_cast<int>(index % width);
+      const int y = static_cast<int>(index / width);
+      enqueue_if_better(x, y, 0.0F);
+    }
+  }
+
+  const float resolution = latest_global_costmap_.info.resolution;
+  const float diagonal = resolution * static_cast<float>(std::sqrt(2.0));
+  constexpr std::array<int, 8> delta_x{{-1, 0, 1, -1, 1, -1, 0, 1}};
+  constexpr std::array<int, 8> delta_y{{-1, -1, -1, 0, 0, 1, 1, 1}};
+
+  while (!open_set.empty()) {
+    const auto [distance, x, y] = open_set.top();
+    open_set.pop();
+
+    const std::size_t index =
+      static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x);
+    if (distance > distances[index]) {
+      continue;
+    }
+
+    for (std::size_t neighbor = 0U; neighbor < delta_x.size(); ++neighbor) {
+      const float step_cost =
+        delta_x[neighbor] == 0 || delta_y[neighbor] == 0 ? resolution : diagonal;
+      enqueue_if_better(x + delta_x[neighbor], y + delta_y[neighbor], distance + step_cost);
+    }
+  }
+
+  const double gaussian_denom = 2.0 * likelihood_field_sigma_m_ * likelihood_field_sigma_m_;
+  for (std::size_t index = 0U; index < cell_count; ++index) {
+    const int8_t value = latest_global_costmap_.data.at(index);
+    if (value < 0) {
+      score_field->at(index) = static_cast<float>(unknown_space_score_);
+      continue;
+    }
+
+    const float distance = distances[index];
+    if (!std::isfinite(distance)) {
+      score_field->at(index) = static_cast<float>(out_of_bounds_score_);
+      continue;
+    }
+
+    score_field->at(index) = static_cast<float>(
+      occupied_reward_ *
+      std::exp(-(static_cast<double>(distance) * static_cast<double>(distance)) / gaussian_denom));
+  }
+
+  latest_global_costmap_score_field_ = score_field;
+}
+
 void MapPoseNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message)
 {
   std::lock_guard<std::mutex> lock(state_mutex_);
@@ -678,6 +769,37 @@ void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::Shared
     rclcpp::Time(message->header.stamp);
   latest_global_costmap_ready_ =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;
+  if (latest_global_costmap_ready_) {
+    rebuildGlobalCostmapScoreFieldLocked();
+  } else {
+    latest_global_costmap_score_field_.reset();
+  }
+}
+
+float MapPoseNode::scoreCostmapCell(
+  const StateSnapshot & snapshot,
+  const int grid_x,
+  const int grid_y) const
+{
+  if (
+    grid_x < 0 || grid_y < 0 ||
+    grid_x >= static_cast<int>(snapshot.latest_global_costmap.info.width) ||
+    grid_y >= static_cast<int>(snapshot.latest_global_costmap.info.height))
+  {
+    return static_cast<float>(out_of_bounds_score_);
+  }
+
+  const std::size_t index =
+    static_cast<std::size_t>(grid_y) * snapshot.latest_global_costmap.info.width +
+    static_cast<std::size_t>(grid_x);
+  if (
+    snapshot.latest_global_costmap_score_field &&
+    index < snapshot.latest_global_costmap_score_field->size())
+  {
+    return snapshot.latest_global_costmap_score_field->at(index);
+  }
+
+  return static_cast<float>(out_of_bounds_score_);
 }
 
 std::optional<geometry_msgs::msg::Point> MapPoseNode::latestMapPositionFromNavSat() const
@@ -909,6 +1031,20 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     return std::nullopt;
   }
 
+  if (static_cast<int>(endpoints.size()) > max_scan_match_points_) {
+    std::vector<ScanEndpoint> reduced_endpoints;
+    reduced_endpoints.reserve(static_cast<std::size_t>(max_scan_match_points_));
+    const double endpoint_stride =
+      static_cast<double>(endpoints.size()) / static_cast<double>(max_scan_match_points_);
+    for (int point_index = 0; point_index < max_scan_match_points_; ++point_index) {
+      const std::size_t sample_index = std::min(
+        endpoints.size() - 1U,
+        static_cast<std::size_t>(std::floor(static_cast<double>(point_index) * endpoint_stride)));
+      reduced_endpoints.push_back(endpoints[sample_index]);
+    }
+    endpoints = std::move(reduced_endpoints);
+  }
+
   double best_score = -std::numeric_limits<double>::infinity();
   tf2::Transform best_transform;
   bool best_transform_ready = false;
@@ -918,59 +1054,20 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       const double cos_yaw = std::cos(candidate_yaw);
       const double sin_yaw = std::sin(candidate_yaw);
       double endpoint_score_sum = 0.0;
-      double freespace_score_sum = 0.0;
       int valid_points = 0;
 
       for (const auto & endpoint : endpoints) {
-        const double world_origin_x =
-          candidate_x + endpoint.origin_x * cos_yaw - endpoint.origin_y * sin_yaw;
-        const double world_origin_y =
-          candidate_y + endpoint.origin_x * sin_yaw + endpoint.origin_y * cos_yaw;
         const double world_x = candidate_x + endpoint.x * cos_yaw - endpoint.y * sin_yaw;
         const double world_y = candidate_y + endpoint.x * sin_yaw + endpoint.y * cos_yaw;
         int grid_x = 0;
         int grid_y = 0;
         if (!worldToGrid(map, world_x, world_y, grid_x, grid_y)) {
+          endpoint_score_sum += out_of_bounds_score_;
+          ++valid_points;
           continue;
         }
 
-        const double endpoint_score = bestOccupancyScoreAroundCell(
-          map,
-          grid_x,
-          grid_y,
-          endpoint_search_radius_cells_,
-          occupied_threshold_);
-
-        const double beam_dx = world_x - world_origin_x;
-        const double beam_dy = world_y - world_origin_y;
-        const double beam_length = std::hypot(beam_dx, beam_dy);
-        const int ray_steps = std::max(
-          1,
-          static_cast<int>(beam_length / std::max(0.05, static_cast<double>(map.info.resolution))));
-        double ray_score = 0.0;
-        for (int step = 1; step < ray_steps; ++step) {
-          const double ratio = static_cast<double>(step) / static_cast<double>(ray_steps);
-          const double sample_x = world_origin_x + beam_dx * ratio;
-          const double sample_y = world_origin_y + beam_dy * ratio;
-          int sample_grid_x = 0;
-          int sample_grid_y = 0;
-          if (!worldToGrid(map, sample_x, sample_y, sample_grid_x, sample_grid_y)) {
-            continue;
-          }
-          const std::size_t sample_index =
-            static_cast<std::size_t>(sample_grid_y) * map.info.width +
-            static_cast<std::size_t>(sample_grid_x);
-          const int8_t sample_value = map.data.at(sample_index);
-          if (sample_value >= occupied_threshold_) {
-            ray_score -= free_space_penalty_;
-          } else if (sample_value >= 0) {
-            ray_score += free_space_reward_;
-          }
-        }
-
-        endpoint_score_sum += endpoint_score >= 0.75 ? occupied_reward_ :
-          (endpoint_score < 0.0 ? -occupied_penalty_ : endpoint_score);
-        freespace_score_sum += ray_score;
+        endpoint_score_sum += static_cast<double>(scoreCostmapCell(snapshot, grid_x, grid_y));
         ++valid_points;
       }
 
@@ -982,7 +1079,7 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       const double center_dy = candidate_y - search_center.getOrigin().y();
       const double yaw_delta = normalizeAngle(candidate_yaw - yawFromTransform(search_center));
       return
-        ((endpoint_score_sum + freespace_score_sum) / static_cast<double>(valid_points)) -
+        (endpoint_score_sum / static_cast<double>(valid_points)) -
         (translation_penalty_per_meter_ * std::hypot(center_dx, center_dy)) -
         (yaw_penalty_per_rad_ * std::abs(yaw_delta));
     };
@@ -990,6 +1087,21 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
   const double center_x = search_center.getOrigin().x();
   const double center_y = search_center.getOrigin().y();
   const double center_yaw = yawFromTransform(search_center);
+  const double translation_sigma = std::sqrt(std::max(
+      snapshot.map_to_odom_filter_covariance[0],
+      snapshot.map_to_odom_filter_covariance[1]));
+  const double yaw_sigma = std::sqrt(
+    std::max(1.0e-6, snapshot.map_to_odom_filter_covariance[2]));
+  const double translation_window = std::clamp(
+    min_search_translation_window_m_ +
+    (search_window_translation_covariance_scale_ * translation_sigma),
+    min_search_translation_window_m_,
+    search_translation_window_m_);
+  const double yaw_window = std::clamp(
+    min_search_yaw_window_rad_ +
+    (search_window_yaw_covariance_scale_ * yaw_sigma),
+    min_search_yaw_window_rad_,
+    search_yaw_window_rad_);
   const auto runSearch = [&](const double translation_window, const double translation_step,
       const double yaw_window, const double yaw_step) {
       for (double dx = -translation_window; dx <= translation_window + 1.0e-6; dx += translation_step) {
@@ -1015,9 +1127,9 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     };
 
   runSearch(
-    search_translation_window_m_,
+    translation_window,
     search_translation_step_m_,
-    search_yaw_window_rad_,
+    yaw_window,
     search_yaw_step_rad_);
 
   if (best_transform_ready) {
