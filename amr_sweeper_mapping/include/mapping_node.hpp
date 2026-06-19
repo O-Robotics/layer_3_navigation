@@ -144,6 +144,8 @@ private:
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
+  void handleNav2LocalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
+  void handleNav2GlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
   void publishLocalCostmap();
@@ -198,6 +200,7 @@ private:
   void markCellFree(int grid_x, int grid_y);
   void markCellOccupied(int grid_x, int grid_y);
   void publishGlobalMaps();
+  [[nodiscard]] bool areNav2CostmapsReadyForMissionStart() const;
   [[nodiscard]] std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunkRoute(
     const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   void markMissionTerminal(const std::string & outcome, const std::string & reason);
@@ -228,7 +231,10 @@ private:
   std::string fromll_service_name_;
   std::string end_mission_service_name_;
   std::string waypoint_follower_state_service_name_;
+  std::string nav2_local_costmap_topic_;
+  std::string nav2_global_costmap_topic_;
   double runtime_costmap_save_period_seconds_{10.0};
+  double nav2_costmap_ready_timeout_seconds_{2.5};
   int static_obstacle_min_observations_{6};
   double static_obstacle_min_occupied_fraction_{0.75};
   bool auto_start_mission_{true};
@@ -262,6 +268,8 @@ private:
   double min_global_map_size_m_{10.0};
   bool live_map_ready_{false};
   bool latest_padded_live_map_ready_{false};
+  bool nav2_local_costmap_ready_{false};
+  bool nav2_global_costmap_ready_{false};
   bool latest_odometry_pose_ready_{false};
   bool latest_heading_ready_{false};
   bool georeferenced_costmap_locked_{false};
@@ -272,6 +280,8 @@ private:
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   sensor_msgs::msg::Imu latest_heading_;
+  rclcpp::Time latest_nav2_local_costmap_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_nav2_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
   geometry_msgs::msg::Point mission_anchor_position_;
   geometry_msgs::msg::Quaternion mission_anchor_orientation_;
   std::string last_scan_frame_id_;
@@ -301,6 +311,8 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr nav2_local_costmap_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr nav2_global_costmap_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_costmap_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_publisher_;

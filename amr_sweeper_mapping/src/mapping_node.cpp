@@ -1043,6 +1043,9 @@ MappingNode::MappingNode()
   declare_parameter("mission_tick_period_seconds", 1.0);
   declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
   declare_parameter("waypoint_follower_state_service", std::string("waypoint_follower/get_state"));
+  declare_parameter("nav2_local_costmap_topic", std::string("local_costmap/costmap_raw"));
+  declare_parameter("nav2_global_costmap_topic", std::string("global_costmap/costmap_raw"));
+  declare_parameter("nav2_costmap_ready_timeout_seconds", 2.5);
   declare_parameter("end_mission_service", std::string("end_mission"));
 
   mission_file_ = get_parameter("mission_file").as_string();
@@ -1073,6 +1076,8 @@ MappingNode::MappingNode()
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
   waypoint_follower_state_service_name_ =
     get_parameter("waypoint_follower_state_service").as_string();
+  nav2_local_costmap_topic_ = get_parameter("nav2_local_costmap_topic").as_string();
+  nav2_global_costmap_topic_ = get_parameter("nav2_global_costmap_topic").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
@@ -1093,6 +1098,9 @@ MappingNode::MappingNode()
   max_waypoint_spacing_m_ = get_parameter("max_waypoint_spacing_m").as_double();
   pad_live_map_to_minimum_size_ = get_parameter("pad_live_map_to_minimum_size").as_bool();
   min_global_map_size_m_ = get_parameter("min_global_map_size_m").as_double();
+  nav2_costmap_ready_timeout_seconds_ = std::max(
+    0.1,
+    get_parameter("nav2_costmap_ready_timeout_seconds").as_double());
   manual_mapping_mode_ = execution_mode_ == kManualMappingExecutionMode;
   if (
     !manual_mapping_mode_ &&
@@ -1131,6 +1139,14 @@ MappingNode::MappingNode()
     heading_topic_,
     rclcpp::SensorDataQoS(),
     std::bind(&MappingNode::handleHeading, this, std::placeholders::_1));
+  nav2_local_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    nav2_local_costmap_topic_,
+    rclcpp::SystemDefaultsQoS(),
+    std::bind(&MappingNode::handleNav2LocalCostmap, this, std::placeholders::_1));
+  nav2_global_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    nav2_global_costmap_topic_,
+    rclcpp::SystemDefaultsQoS(),
+    std::bind(&MappingNode::handleNav2GlobalCostmap, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
   local_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
     "mapping/local_costmap",
@@ -1210,6 +1226,40 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
   publishLocalCostmap();
   if (latest_odometry_pose_ready_) {
     integrateScanIntoGlobalMap(*message);
+  }
+}
+
+void MappingNode::handleNav2LocalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
+{
+  latest_nav2_local_costmap_stamp_ = message->header.stamp;
+  if (!nav2_local_costmap_ready_) {
+    nav2_local_costmap_ready_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Nav2 local costmap is now publishing on %s with frame=%s size=%ux%u res=%.3f.",
+      nav2_local_costmap_topic_.c_str(),
+      message->header.frame_id.c_str(),
+      message->info.width,
+      message->info.height,
+      static_cast<double>(message->info.resolution));
+  }
+}
+
+void MappingNode::handleNav2GlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
+{
+  latest_nav2_global_costmap_stamp_ = message->header.stamp;
+  if (!nav2_global_costmap_ready_) {
+    nav2_global_costmap_ready_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Nav2 global costmap is now publishing on %s with frame=%s size=%ux%u res=%.3f origin=(%.3f, %.3f).",
+      nav2_global_costmap_topic_.c_str(),
+      message->header.frame_id.c_str(),
+      message->info.width,
+      message->info.height,
+      static_cast<double>(message->info.resolution),
+      message->info.origin.position.x,
+      message->info.origin.position.y);
   }
 }
 
@@ -2322,6 +2372,10 @@ void MappingNode::startNextMissionChunk()
     return;
   }
 
+  if (!areNav2CostmapsReadyForMissionStart()) {
+    return;
+  }
+
   if (!odom_only_navigation && latest_odometry_pose_ready_ && latest_padded_live_map_ready_) {
     try {
       const auto map_to_odom = tf_buffer_->lookupTransform(
@@ -2444,6 +2498,44 @@ void MappingNode::startNextMissionChunk()
     active_chunk_index_ + 1U,
     mission_chunks_.size(),
     goal.poses.size());
+}
+
+bool MappingNode::areNav2CostmapsReadyForMissionStart() const
+{
+  if (!nav2_local_costmap_ready_ || !nav2_global_costmap_ready_) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      2000,
+      "Waiting for Nav2 costmap publishers before dispatching the first mission chunk. "
+      "local=%s (%s) global=%s (%s).",
+      nav2_local_costmap_ready_ ? "ready" : "missing",
+      nav2_local_costmap_topic_.c_str(),
+      nav2_global_costmap_ready_ ? "ready" : "missing",
+      nav2_global_costmap_topic_.c_str());
+    return false;
+  }
+
+  const rclcpp::Time now_time = now();
+  const double local_age = (now_time - latest_nav2_local_costmap_stamp_).seconds();
+  const double global_age = (now_time - latest_nav2_global_costmap_stamp_).seconds();
+  if (
+    local_age > nav2_costmap_ready_timeout_seconds_ ||
+    global_age > nav2_costmap_ready_timeout_seconds_)
+  {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      2000,
+      "Waiting for fresh Nav2 costmap updates before dispatching the first mission chunk. "
+      "local age=%.3fs global age=%.3fs timeout=%.3fs.",
+      local_age,
+      global_age,
+      nav2_costmap_ready_timeout_seconds_);
+    return false;
+  }
+
+  return true;
 }
 
 bool MappingNode::isWaypointFollowerActive()
