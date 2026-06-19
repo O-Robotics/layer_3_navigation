@@ -48,6 +48,32 @@ def _rewrite_nav2_params(context) -> dict:
 
 
 def _load_mission_costmap_resolution(context):
+    geometry = _load_mission_costmap_geometry(context)
+    if geometry is None:
+        return None
+    return geometry["resolution"]
+
+
+def _read_pgm_size(image_path: Path):
+    with image_path.open('rb') as stream:
+        magic = stream.readline().strip()
+        if magic != b'P5':
+            raise RuntimeError(f'Unsupported PGM magic {magic!r} in {image_path}')
+
+        tokens = []
+        while len(tokens) < 3:
+            line = stream.readline()
+            if not line:
+                raise RuntimeError(f'Unexpected EOF while reading PGM header from {image_path}')
+            line = line.split(b'#', 1)[0]
+            tokens.extend(line.split())
+
+        width = int(tokens[0])
+        height = int(tokens[1])
+        return width, height
+
+
+def _load_mission_costmap_geometry(context):
     mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml').perform(context).strip()
     if not mission_costmap_yaml:
         return None
@@ -58,9 +84,23 @@ def _load_mission_costmap_resolution(context):
 
     mission_costmap_data = yaml.safe_load(mission_costmap_path.read_text()) or {}
     resolution = mission_costmap_data.get('resolution')
-    if resolution is None:
+    origin = mission_costmap_data.get('origin')
+    image_name = mission_costmap_data.get('image')
+    if resolution is None or not isinstance(origin, list) or len(origin) < 2 or not image_name:
         return None
-    return float(resolution)
+
+    image_path = (mission_costmap_path.parent / str(image_name)).resolve()
+    if not image_path.is_file():
+        return None
+
+    width, height = _read_pgm_size(image_path)
+    return {
+        "resolution": float(resolution),
+        "width": int(width),
+        "height": int(height),
+        "origin_x": float(origin[0]),
+        "origin_y": float(origin[1]),
+    }
 
 
 def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
@@ -85,8 +125,8 @@ def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
 
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
 
-    mission_costmap_resolution = _load_mission_costmap_resolution(context)
-    if mission_costmap_resolution is not None:
+    mission_costmap_geometry = _load_mission_costmap_geometry(context)
+    if mission_costmap_geometry is not None:
         nav2_root = params_data.get(namespace_value, params_data) if include_root_key else params_data
         global_costmap_params = (
             nav2_root
@@ -95,7 +135,11 @@ def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
             .get('ros__parameters', {})
         )
         if global_costmap_params:
-            global_costmap_params['resolution'] = mission_costmap_resolution
+            global_costmap_params['resolution'] = mission_costmap_geometry['resolution']
+            global_costmap_params['width'] = mission_costmap_geometry['width']
+            global_costmap_params['height'] = mission_costmap_geometry['height']
+            global_costmap_params['origin_x'] = mission_costmap_geometry['origin_x']
+            global_costmap_params['origin_y'] = mission_costmap_geometry['origin_y']
 
     temp_file = Path(tempfile.gettempdir()) / (
         f"amr_sweeper_nav2_params_{'namespaced' if include_root_key else 'flat'}_{os.getpid()}.yaml"
