@@ -312,8 +312,8 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr nav2_local_costmap_subscription_;
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr nav2_global_costmap_subscription_;
+  rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_local_costmap_subscription_;
+  rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_global_costmap_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_costmap_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_publisher_;
