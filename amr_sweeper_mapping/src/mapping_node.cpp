@@ -2519,20 +2519,27 @@ bool MappingNode::areNav2CostmapsReadyForMissionStart() const
   const rclcpp::Time now_time = now();
   const double local_age = (now_time - latest_nav2_local_costmap_stamp_).seconds();
   const double global_age = (now_time - latest_nav2_global_costmap_stamp_).seconds();
-  if (
-    local_age > nav2_costmap_ready_timeout_seconds_ ||
-    global_age > nav2_costmap_ready_timeout_seconds_)
-  {
+  if (local_age > nav2_costmap_ready_timeout_seconds_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
       2000,
-      "Waiting for fresh Nav2 costmap updates before dispatching the first mission chunk. "
+      "Waiting for fresh Nav2 local costmap updates before dispatching the first mission chunk. "
       "local age=%.3fs global age=%.3fs timeout=%.3fs.",
       local_age,
       global_age,
       nav2_costmap_ready_timeout_seconds_);
     return false;
+  }
+
+  if (global_age > nav2_costmap_ready_timeout_seconds_) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Nav2 global costmap has not refreshed recently (age=%.3fs), but mission start is allowed "
+      "because the local costmap is fresh and the global costmap has already published at least once.",
+      global_age);
   }
 
   return true;
