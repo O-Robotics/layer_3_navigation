@@ -1139,11 +1139,11 @@ MappingNode::MappingNode()
     heading_topic_,
     rclcpp::SensorDataQoS(),
     std::bind(&MappingNode::handleHeading, this, std::placeholders::_1));
-  nav2_local_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+  nav2_local_costmap_subscription_ = create_subscription<nav2_msgs::msg::Costmap>(
     nav2_local_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNav2LocalCostmap, this, std::placeholders::_1));
-  nav2_global_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+  nav2_global_costmap_subscription_ = create_subscription<nav2_msgs::msg::Costmap>(
     nav2_global_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNav2GlobalCostmap, this, std::placeholders::_1));
@@ -1229,7 +1229,7 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
   }
 }
 
-void MappingNode::handleNav2LocalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
+void MappingNode::handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message)
 {
   latest_nav2_local_costmap_stamp_ = message->header.stamp;
   if (!nav2_local_costmap_ready_) {
@@ -1239,13 +1239,13 @@ void MappingNode::handleNav2LocalCostmap(const nav_msgs::msg::OccupancyGrid::Sha
       "Nav2 local costmap is now publishing on %s with frame=%s size=%ux%u res=%.3f.",
       nav2_local_costmap_topic_.c_str(),
       message->header.frame_id.c_str(),
-      message->info.width,
-      message->info.height,
-      static_cast<double>(message->info.resolution));
+      message->metadata.size_x,
+      message->metadata.size_y,
+      static_cast<double>(message->metadata.resolution));
   }
 }
 
-void MappingNode::handleNav2GlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
+void MappingNode::handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message)
 {
   latest_nav2_global_costmap_stamp_ = message->header.stamp;
   if (!nav2_global_costmap_ready_) {
@@ -1255,11 +1255,11 @@ void MappingNode::handleNav2GlobalCostmap(const nav_msgs::msg::OccupancyGrid::Sh
       "Nav2 global costmap is now publishing on %s with frame=%s size=%ux%u res=%.3f origin=(%.3f, %.3f).",
       nav2_global_costmap_topic_.c_str(),
       message->header.frame_id.c_str(),
-      message->info.width,
-      message->info.height,
-      static_cast<double>(message->info.resolution),
-      message->info.origin.position.x,
-      message->info.origin.position.y);
+      message->metadata.size_x,
+      message->metadata.size_y,
+      static_cast<double>(message->metadata.resolution),
+      message->metadata.origin.position.x,
+      message->metadata.origin.position.y);
   }
 }
 

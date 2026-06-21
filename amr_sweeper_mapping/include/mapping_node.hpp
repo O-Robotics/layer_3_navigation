@@ -18,6 +18,7 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav2_costmap_2d/costmap_layer.hpp>
 #include <nav2_msgs/action/follow_waypoints.hpp>
+#include <nav2_msgs/msg/costmap.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -144,8 +145,8 @@ private:
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
-  void handleNav2LocalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
-  void handleNav2GlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
+  void handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
+  void handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
   void publishLocalCostmap();
