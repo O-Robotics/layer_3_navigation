@@ -21,7 +21,7 @@
     scan_subsample_step:                 4                                # Use every Nth beam during correlation to keep the bounded search light enough for startup and recovery.
     max_scan_match_points:               72                               # Hard cap on how many scan endpoints enter one correction cycle; evenly resample if more beams survive filtering.
     max_scan_match_range_m:              2.0                              # Ignore beams longer than this so scan matching focuses on nearby static structure for centimeter-scale wall-relative corrections.
-    max_match_compute_time_ms:           30                               # Skip the correction entirely if the bounded search cannot finish within this compute budget.
+    max_match_compute_time_ms:           100                              # Skip the correction entirely if the bounded search cannot finish within this compute budget.
     min_valid_scan_points:               20                               # Require at least this many usable scan endpoints before a scan match can correct map -> odom.
     endpoint_search_radius_cells:        1                                # Legacy compatibility knob from the earlier endpoint-neighborhood scorer; the runtime matcher now uses a precomputed likelihood field instead.
     likelihood_field_max_distance_m:     0.75                             # Precompute obstacle proximity scores out to this distance, mirroring AMCL's likelihood-field strategy instead of ray marching each beam.
