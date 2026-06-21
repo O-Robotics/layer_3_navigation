@@ -1231,7 +1231,7 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
 
 void MappingNode::handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message)
 {
-  latest_nav2_local_costmap_stamp_ = message->header.stamp;
+  latest_nav2_local_costmap_stamp_ = now();
   if (!nav2_local_costmap_ready_) {
     nav2_local_costmap_ready_ = true;
     RCLCPP_INFO(
@@ -1247,7 +1247,7 @@ void MappingNode::handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPt
 
 void MappingNode::handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message)
 {
-  latest_nav2_global_costmap_stamp_ = message->header.stamp;
+  latest_nav2_global_costmap_stamp_ = now();
   if (!nav2_global_costmap_ready_) {
     nav2_global_costmap_ready_ = true;
     RCLCPP_INFO(
