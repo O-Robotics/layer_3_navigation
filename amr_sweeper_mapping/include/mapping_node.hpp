@@ -13,10 +13,8 @@
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <lifecycle_msgs/srv/get_state.hpp>
-#include <nav_msgs/msg/map_meta_data.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
-#include <nav2_costmap_2d/costmap_layer.hpp>
 #include <nav2_msgs/action/follow_waypoints.hpp>
 #include <nav2_msgs/msg/costmap.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -94,47 +92,6 @@ struct LoadedCostmapArtifact
   std::array<double, 3> latitude_coefficients{0.0, 0.0, 0.0};
 };
 
-class Vda5050CostmapLayer : public nav2_costmap_2d::CostmapLayer
-{
-public:
-  Vda5050CostmapLayer();
-
-  void onInitialize() override;
-  void updateBounds(
-    double robot_x,
-    double robot_y,
-    double robot_yaw,
-    double * min_x,
-    double * min_y,
-    double * max_x,
-    double * max_y) override;
-  void updateCosts(
-    nav2_costmap_2d::Costmap2D & master_grid,
-    int min_i,
-    int min_j,
-    int max_i,
-    int max_j) override;
-  void reset() override;
-  bool isClearable() override;
-  void matchSize() override;
-
-private:
-  void loadArtifact();
-  [[nodiscard]] LoadedCostmapArtifact parseCostmapArtifact(const std::string & yaml_path) const;
-  [[nodiscard]] std::string resolveArtifactPath(const std::string & configured_path) const;
-  [[nodiscard]] unsigned char sampleCostAtWorld(double world_x, double world_y) const;
-  [[nodiscard]] geometry_msgs::msg::PointStamped transformPoint(
-    double x,
-    double y,
-    const std::string & source_frame,
-    const std::string & target_frame) const;
-
-  LoadedCostmapArtifact artifact_;
-  bool artifact_loaded_{false};
-  std::string artifact_frame_id_{"odom"};
-  std::string global_frame_id_;
-};
-
 class MappingNode : public rclcpp::Node
 {
 public:
@@ -149,10 +106,6 @@ private:
   void handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
-  void publishLocalCostmap();
-  void ensureLocalCostmapCentered();
-  void decayLocalCostmap();
-  void integrateLatestScanIntoLocalCostmap();
   void persistRuntimeCostmapArtifact();
   void tickMissionExecution();
   void tryRequestMissionEnd();
@@ -201,7 +154,7 @@ private:
   void markCellFree(int grid_x, int grid_y);
   void markCellOccupied(int grid_x, int grid_y);
   void publishGlobalMaps();
-  [[nodiscard]] bool areNav2CostmapsReadyForMissionStart() const;
+  [[nodiscard]] bool areMissionCostmapsReadyForMissionStart() const;
   [[nodiscard]] std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunkRoute(
     const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   void markMissionTerminal(const std::string & outcome, const std::string & reason);
@@ -252,10 +205,6 @@ private:
   std::size_t active_chunk_index_{0U};
   int max_segments_per_goal_{4};
   double global_map_resolution_m_{0.05};
-  double local_map_size_m_{10.0};
-  double local_map_decay_per_update_{2.0};
-  double local_map_free_score_delta_{2.0};
-  double local_map_occupied_score_delta_{6.0};
   double max_waypoint_spacing_m_{0.5};
   double georef_lock_window_seconds_{3.0};
   int georef_lock_min_samples_{10};
@@ -283,6 +232,7 @@ private:
   sensor_msgs::msg::Imu latest_heading_;
   rclcpp::Time latest_nav2_local_costmap_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_nav2_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_global_costmap_publish_stamp_{0, 0, RCL_ROS_TIME};
   geometry_msgs::msg::Point mission_anchor_position_;
   geometry_msgs::msg::Quaternion mission_anchor_orientation_;
   std::string last_scan_frame_id_;
@@ -294,10 +244,8 @@ private:
   std::vector<uint16_t> global_map_observations_;
   std::vector<uint16_t> global_map_occupied_observations_;
   std::vector<uint16_t> global_map_free_observations_;
-  std::vector<int16_t> local_map_scores_;
   nav_msgs::msg::OccupancyGrid latest_live_map_;
   nav_msgs::msg::OccupancyGrid latest_padded_live_map_;
-  nav_msgs::msg::OccupancyGrid latest_local_costmap_;
   nav_msgs::msg::OccupancyGrid seeded_runtime_map_;
   bool seeded_runtime_map_ready_{false};
   bool saved_costmap_initialized_{false};
@@ -315,9 +263,7 @@ private:
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_local_costmap_subscription_;
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_global_costmap_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_costmap_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_publisher_;
-  rclcpp::Publisher<nav_msgs::msg::MapMetaData>::SharedPtr local_costmap_metadata_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr waypoint_path_publisher_;
   rclcpp::CallbackGroup::SharedPtr mission_callback_group_;
   rclcpp::CallbackGroup::SharedPtr status_callback_group_;

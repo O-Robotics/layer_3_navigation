@@ -3,7 +3,7 @@
 <package format="3">
   <name>amr_sweeper_mapping</name>
   <version>0.0.0</version>
-  <description>Mapping nodes and VDA5050 mission-artifact driven costmap support for layer 3.</description>
+  <description>Mapping nodes and runtime costmap support for layer 3.</description>
   <maintainer email="info@O-Robotics.com">O-Robotics</maintainer>
   <license>Apache-2.0</license>
 
@@ -16,11 +16,9 @@
   <depend>geographic_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>lifecycle_msgs</depend>
-  <depend>nav2_costmap_2d</depend>
   <depend>nav2_msgs</depend>
   <depend>nav2_util</depend>
   <depend>nav_msgs</depend>
-  <depend>pluginlib</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_action</depend>
   <depend>sensor_msgs</depend>

@@ -12,11 +12,9 @@ find_package(geographic_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(nav2_costmap_2d REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -43,9 +41,7 @@ ament_target_dependencies(${PROJECT_NAME}
   geometry_msgs
   lifecycle_msgs
   nav_msgs
-  nav2_costmap_2d
   nav2_msgs
-  pluginlib
   rclcpp
   rclcpp_action
   sensor_msgs
@@ -91,9 +87,7 @@ ament_target_dependencies(
   geometry_msgs
   lifecycle_msgs
   nav_msgs
-  nav2_costmap_2d
   nav2_msgs
-  pluginlib
   rclcpp
   rclcpp_action
   sensor_msgs
@@ -124,8 +118,6 @@ ament_target_dependencies(
   tf2_ros
 )
 
-pluginlib_export_plugin_description_file(nav2_costmap_2d geojson_costmap_plugins.xml)
-
 install(DIRECTORY include DESTINATION include)
 
 install(
@@ -141,7 +133,6 @@ install(
 )
 
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
-install(FILES geojson_costmap_plugins.xml DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -153,13 +144,11 @@ ament_export_libraries(${PROJECT_NAME})
 ament_export_targets(export_${PROJECT_NAME})
 ament_export_dependencies(
   amr_sweeper_mission_executor
-  nav2_costmap_2d
   geometry_msgs
   geographic_msgs
   lifecycle_msgs
   nav_msgs
   nav2_msgs
-  pluginlib
   rclcpp
   rclcpp_action
   sensor_msgs

@@ -113,7 +113,6 @@ def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
     param_substitutions = {
         'use_sim_time': use_sim_time,
         'autostart': autostart,
-        'costmap_yaml_path': mission_costmap_yaml,
     }
 
     rewritten_params_path = RewrittenYaml(

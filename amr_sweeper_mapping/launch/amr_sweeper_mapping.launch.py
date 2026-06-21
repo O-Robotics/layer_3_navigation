@@ -254,7 +254,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "mapping_params_file",
                 default_value=PathJoinSubstitution(
-                    [FindPackageShare("amr_sweeper_mapping"), "config", "mapping_params.yaml"]
+                    [FindPackageShare("amr_sweeper_mapping"), "config", "mapping.yaml"]
                 ),
                 description="Shared parameter file for mapping package nodes.",
             ),
@@ -305,7 +305,7 @@ def generate_launch_description():
                 default_value="",
                 description=(
                     "Exact mission costmap yaml. Leave empty to resolve it from execution_context.json "
-                    "or continue standalone with an inactive geojson layer."
+                    "or continue standalone without artifact seeding."
                 ),
             ),
             DeclareLaunchArgument(

@@ -18,7 +18,6 @@
 #include <geometry_msgs/msg/point.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <nlohmann/json.hpp>
-#include <pluginlib/class_list_macros.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -33,11 +32,6 @@ namespace amr_sweeper_mapping
 namespace
 {
 
-constexpr char kEnabledParam[] = "enabled";
-constexpr char kCostmapYamlPathParam[] = "costmap_yaml_path";
-constexpr char kArtifactFrameIdParam[] = "artifact_frame_id";
-constexpr char kDefaultCostmapYamlPath[] = "";
-constexpr char kDefaultArtifactFrameId[] = "odom";
 constexpr char kDefaultMissionRoutePath[] = "";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
@@ -805,197 +799,6 @@ void saveOccupancyGridArtifact(
 
 }  // namespace
 
-Vda5050CostmapLayer::Vda5050CostmapLayer() = default;
-
-void Vda5050CostmapLayer::onInitialize()
-{
-  declareParameter(kEnabledParam, rclcpp::ParameterValue(true));
-  declareParameter(kCostmapYamlPathParam, rclcpp::ParameterValue(std::string(kDefaultCostmapYamlPath)));
-  declareParameter(kArtifactFrameIdParam, rclcpp::ParameterValue(std::string(kDefaultArtifactFrameId)));
-
-  auto node = node_.lock();
-  if (!node) {
-    throw std::runtime_error("Failed to lock lifecycle node in Vda5050CostmapLayer");
-  }
-
-  node->get_parameter(getFullName(kEnabledParam), enabled_);
-  node->get_parameter(getFullName(kArtifactFrameIdParam), artifact_frame_id_);
-  global_frame_id_ = layered_costmap_->getGlobalFrameID();
-  current_ = true;
-  matchSize();
-  loadArtifact();
-}
-
-void Vda5050CostmapLayer::updateBounds(
-  double,
-  double,
-  double,
-  double * min_x,
-  double * min_y,
-  double * max_x,
-  double * max_y)
-{
-  if (!enabled_ || !artifact_loaded_) {
-    return;
-  }
-
-  const std::array<std::pair<double, double>, 4> corners{{
-    {artifact_.origin_x, artifact_.origin_y},
-    {artifact_.origin_x + artifact_.resolution * artifact_.width_cells, artifact_.origin_y},
-    {artifact_.origin_x, artifact_.origin_y + artifact_.resolution * artifact_.height_cells},
-    {
-      artifact_.origin_x + artifact_.resolution * artifact_.width_cells,
-      artifact_.origin_y + artifact_.resolution * artifact_.height_cells,
-    },
-  }};
-
-  for (const auto & [corner_x, corner_y] : corners) {
-    const auto transformed = transformPoint(corner_x, corner_y, artifact_frame_id_, global_frame_id_);
-    *min_x = std::min(*min_x, transformed.point.x);
-    *min_y = std::min(*min_y, transformed.point.y);
-    *max_x = std::max(*max_x, transformed.point.x);
-    *max_y = std::max(*max_y, transformed.point.y);
-  }
-}
-
-void Vda5050CostmapLayer::updateCosts(
-  nav2_costmap_2d::Costmap2D & master_grid,
-  int min_i,
-  int min_j,
-  int max_i,
-  int max_j)
-{
-  if (!enabled_ || !artifact_loaded_) {
-    return;
-  }
-
-  for (int j = min_j; j < max_j; ++j) {
-    for (int i = min_i; i < max_i; ++i) {
-      double world_x = 0.0;
-      double world_y = 0.0;
-      master_grid.mapToWorld(i, j, world_x, world_y);
-      const unsigned char cost = sampleCostAtWorld(world_x, world_y);
-      master_grid.setCost(i, j, std::max(master_grid.getCost(i, j), cost));
-    }
-  }
-}
-
-void Vda5050CostmapLayer::reset()
-{
-  loadArtifact();
-}
-
-bool Vda5050CostmapLayer::isClearable()
-{
-  return false;
-}
-
-void Vda5050CostmapLayer::matchSize()
-{
-  CostmapLayer::matchSize();
-}
-
-void Vda5050CostmapLayer::loadArtifact()
-{
-  auto node = node_.lock();
-  if (!node) {
-    throw std::runtime_error("Failed to lock lifecycle node while loading costmap artifact");
-  }
-
-  std::string yaml_path;
-  node->get_parameter(getFullName(kCostmapYamlPathParam), yaml_path);
-  if (yaml_path.empty()) {
-    artifact_ = LoadedCostmapArtifact{};
-    artifact_loaded_ = false;
-    RCLCPP_INFO(
-      node->get_logger(),
-      "No mission costmap yaml was provided for %s. The geojson layer will stay inactive until a "
-      "mission-specific costmap artifact is configured.",
-      getName().c_str());
-    return;
-  }
-
-  const std::string resolved_path = resolveArtifactPathString(yaml_path);
-  std::error_code filesystem_error;
-  if (!std::filesystem::is_regular_file(resolved_path, filesystem_error)) {
-    artifact_ = LoadedCostmapArtifact{};
-    artifact_loaded_ = false;
-    RCLCPP_WARN(
-      node->get_logger(),
-      "Mission costmap yaml for %s was configured as '%s' but no file was found there. "
-      "The geojson layer will stay inactive.",
-      getName().c_str(),
-      resolved_path.c_str());
-    return;
-  }
-
-  artifact_ = loadCostmapArtifactFromYaml(resolved_path);
-  artifact_loaded_ = true;
-}
-
-LoadedCostmapArtifact Vda5050CostmapLayer::parseCostmapArtifact(const std::string & yaml_path) const
-{
-  return loadCostmapArtifactFromYaml(yaml_path);
-}
-
-std::string Vda5050CostmapLayer::resolveArtifactPath(const std::string & configured_path) const
-{
-  return resolveArtifactPathString(configured_path);
-}
-
-geometry_msgs::msg::PointStamped Vda5050CostmapLayer::transformPoint(
-  const double x,
-  const double y,
-  const std::string & source_frame,
-  const std::string & target_frame) const
-{
-  geometry_msgs::msg::PointStamped point;
-  point.header.frame_id = source_frame;
-  point.point.x = x;
-  point.point.y = y;
-  point.point.z = 0.0;
-
-  auto node = node_.lock();
-  if (!node || source_frame.empty() || target_frame.empty() || source_frame == target_frame) {
-    point.header.frame_id = target_frame.empty() ? source_frame : target_frame;
-    return point;
-  }
-
-  try {
-    return tf_->transform(point, target_frame, tf2::durationFromSec(0.05));
-  } catch (const tf2::TransformException & exception) {
-    RCLCPP_WARN_THROTTLE(
-      node->get_logger(),
-      *node->get_clock(),
-      5000,
-      "Failed to transform mission artifact point from %s to %s: %s",
-      source_frame.c_str(),
-      target_frame.c_str(),
-      exception.what());
-    point.header.frame_id = target_frame;
-    return point;
-  }
-}
-
-unsigned char Vda5050CostmapLayer::sampleCostAtWorld(const double world_x, const double world_y) const
-{
-  const auto artifact_point = transformPoint(world_x, world_y, global_frame_id_, artifact_frame_id_);
-  const double grid_x = (artifact_point.point.x - artifact_.origin_x) / artifact_.resolution;
-  const double grid_y = (artifact_point.point.y - artifact_.origin_y) / artifact_.resolution;
-  const int ix = static_cast<int>(std::floor(grid_x));
-  const int iy = static_cast<int>(std::floor(grid_y));
-  if (ix < 0 || iy < 0 ||
-    ix >= static_cast<int>(artifact_.width_cells) ||
-    iy >= static_cast<int>(artifact_.height_cells))
-  {
-    return 0U;
-  }
-
-  const std::size_t index =
-    static_cast<std::size_t>(iy) * artifact_.width_cells + static_cast<std::size_t>(ix);
-  return artifact_.costs.at(index);
-}
-
 MappingNode::MappingNode()
 : Node("mapping_node")
 {
@@ -1026,10 +829,6 @@ MappingNode::MappingNode()
   declare_parameter("publish_seeded_map_to_odom", false);
   declare_parameter("map_alignment_publish_period_seconds", 0.5);
   declare_parameter("global_map_resolution_m", 0.05);
-  declare_parameter("local_map_size_m", 10.0);
-  declare_parameter("local_map_decay_per_update", 2.0);
-  declare_parameter("local_map_free_score_delta", 2.0);
-  declare_parameter("local_map_occupied_score_delta", 6.0);
   declare_parameter("runtime_costmap_save_period_seconds", 10.0);
   declare_parameter("static_obstacle_min_observations", 6);
   declare_parameter("static_obstacle_min_occupied_fraction", 0.75);
@@ -1082,11 +881,6 @@ MappingNode::MappingNode()
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
   global_map_resolution_m_ = get_parameter("global_map_resolution_m").as_double();
-  local_map_size_m_ = get_parameter("local_map_size_m").as_double();
-  local_map_decay_per_update_ = std::max(0.0, get_parameter("local_map_decay_per_update").as_double());
-  local_map_free_score_delta_ = std::max(0.0, get_parameter("local_map_free_score_delta").as_double());
-  local_map_occupied_score_delta_ =
-    std::max(0.0, get_parameter("local_map_occupied_score_delta").as_double());
   runtime_costmap_save_period_seconds_ = get_parameter("runtime_costmap_save_period_seconds").as_double();
   static_obstacle_min_observations_ =
     static_cast<int>(get_parameter("static_obstacle_min_observations").as_int());
@@ -1148,14 +942,8 @@ MappingNode::MappingNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNav2GlobalCostmap, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
-  local_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
-    "mapping/local_costmap",
-    rclcpp::QoS(1).reliable().transient_local());
   global_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
     "mapping/global_costmap",
-    rclcpp::QoS(1).reliable().transient_local());
-  local_costmap_metadata_publisher_ = create_publisher<nav_msgs::msg::MapMetaData>(
-    "mapping/local_costmap_metadata",
     rclcpp::QoS(1).reliable().transient_local());
   waypoint_path_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
     "mapping/waypoint_path",
@@ -1223,7 +1011,6 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
     now() :
     rclcpp::Time(message->header.stamp);
   have_scan_ = true;
-  publishLocalCostmap();
   if (latest_odometry_pose_ready_) {
     integrateScanIntoGlobalMap(*message);
   }
@@ -1306,7 +1093,6 @@ void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
     writeActualPathNavSatArtifact();
   }
 
-  publishLocalCostmap();
   tryInitializeSavedCostmapFromSensors();
 }
 
@@ -2372,7 +2158,7 @@ void MappingNode::startNextMissionChunk()
     return;
   }
 
-  if (!areNav2CostmapsReadyForMissionStart()) {
+  if (!areMissionCostmapsReadyForMissionStart()) {
     return;
   }
 
@@ -2500,19 +2286,48 @@ void MappingNode::startNextMissionChunk()
     goal.poses.size());
 }
 
-bool MappingNode::areNav2CostmapsReadyForMissionStart() const
+bool MappingNode::areMissionCostmapsReadyForMissionStart() const
 {
   if (!nav2_local_costmap_ready_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
       2000,
-      "Waiting for Nav2 costmap publishers before dispatching the first mission chunk. "
+      "Waiting for mission costmaps before dispatching the first mission chunk. "
       "local=%s (%s) global=%s (%s).",
       nav2_local_costmap_ready_ ? "ready" : "missing",
       nav2_local_costmap_topic_.c_str(),
-      nav2_global_costmap_ready_ ? "ready" : "missing",
-      nav2_global_costmap_topic_.c_str());
+      latest_padded_live_map_ready_ ? "ready" : "missing",
+      "mapping/global_costmap");
+    return false;
+  }
+
+  if (!latest_padded_live_map_ready_ || latest_global_costmap_publish_stamp_.nanoseconds() == 0) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      2000,
+      "Waiting for mapping/global_costmap before dispatching the first mission chunk. "
+      "Nav2 consumes mapping/global_costmap via StaticLayer, so the upstream mapping publisher "
+      "must be ready before mission start.");
+    return false;
+  }
+
+  const rclcpp::Time now_time = now();
+  const double local_age = (now_time - latest_nav2_local_costmap_stamp_).seconds();
+  const double global_age = (now_time - latest_global_costmap_publish_stamp_).seconds();
+  if (local_age > nav2_costmap_ready_timeout_seconds_ ||
+    global_age > nav2_costmap_ready_timeout_seconds_)
+  {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      2000,
+      "Waiting for fresh mission costmap updates before dispatching the first mission chunk. "
+      "local age=%.3fs global age=%.3fs timeout=%.3fs.",
+      local_age,
+      global_age,
+      nav2_costmap_ready_timeout_seconds_);
     return false;
   }
 
@@ -2521,38 +2336,10 @@ bool MappingNode::areNav2CostmapsReadyForMissionStart() const
       get_logger(),
       *get_clock(),
       5000,
-      "Nav2 global costmap publisher is still missing on %s, but mission start is allowed "
-      "because the local costmap is ready on %s.",
-      nav2_global_costmap_topic_.c_str(),
-      nav2_local_costmap_topic_.c_str());
-  }
-
-  const rclcpp::Time now_time = now();
-  const double local_age = (now_time - latest_nav2_local_costmap_stamp_).seconds();
-  const double global_age = nav2_global_costmap_ready_
-    ? (now_time - latest_nav2_global_costmap_stamp_).seconds()
-    : -1.0;
-  if (local_age > nav2_costmap_ready_timeout_seconds_) {
-    RCLCPP_INFO_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      2000,
-      "Waiting for fresh Nav2 local costmap updates before dispatching the first mission chunk. "
-      "local age=%.3fs global age=%.3fs timeout=%.3fs.",
-      local_age,
-      global_age,
-      nav2_costmap_ready_timeout_seconds_);
-    return false;
-  }
-
-  if (global_age > nav2_costmap_ready_timeout_seconds_) {
-    RCLCPP_INFO_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      5000,
-      "Nav2 global costmap has not refreshed recently (age=%.3fs), but mission start is allowed "
-      "because the local costmap is fresh and the global costmap has already published at least once.",
-      global_age);
+      "Mission-start costmaps are ready and mission start is allowed, but the Nav2 global raw "
+      "diagnostic topic is not fully visible yet. global_raw=%s (%s).",
+      nav2_global_costmap_ready_ ? "ready" : "missing",
+      nav2_global_costmap_topic_.c_str());
   }
 
   return true;
@@ -2949,265 +2736,10 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
   return padded;
 }
 
-void MappingNode::ensureLocalCostmapCentered()
-{
-  if (!latest_odometry_pose_ready_) {
-    return;
-  }
-
-  const double resolution = global_map_resolution_m_ > 0.0 ?
-    global_map_resolution_m_ : 0.05;
-  if (resolution <= 0.0 || local_map_size_m_ <= 0.0) {
-    return;
-  }
-
-  const uint32_t width = static_cast<uint32_t>(
-    std::max(1.0, std::ceil(local_map_size_m_ / resolution)));
-  const uint32_t height = static_cast<uint32_t>(
-    std::max(1.0, std::ceil(local_map_size_m_ / resolution)));
-  const double half_width_m = static_cast<double>(width) * resolution * 0.5;
-  const double half_height_m = static_cast<double>(height) * resolution * 0.5;
-  const double new_origin_x = latest_odometry_position_.x - half_width_m;
-  const double new_origin_y = latest_odometry_position_.y - half_height_m;
-
-  if (
-    latest_local_costmap_.info.width == 0U ||
-    latest_local_costmap_.info.height == 0U ||
-    latest_local_costmap_.info.width != width ||
-    latest_local_costmap_.info.height != height ||
-    std::abs(static_cast<double>(latest_local_costmap_.info.resolution) - resolution) > 1.0e-6 ||
-    local_map_scores_.size() != static_cast<std::size_t>(width) * height)
-  {
-    latest_local_costmap_.header.frame_id = odom_frame_id_;
-    latest_local_costmap_.info.resolution = static_cast<float>(resolution);
-    latest_local_costmap_.info.width = width;
-    latest_local_costmap_.info.height = height;
-    latest_local_costmap_.info.origin.position.x = new_origin_x;
-    latest_local_costmap_.info.origin.position.y = new_origin_y;
-    latest_local_costmap_.info.origin.position.z = 0.0;
-    latest_local_costmap_.info.origin.orientation.w = 1.0;
-    latest_local_costmap_.data.assign(static_cast<std::size_t>(width) * height, -1);
-    local_map_scores_.assign(latest_local_costmap_.data.size(), 0);
-    return;
-  }
-
-  const int x_offset = static_cast<int>(std::round(
-    (latest_local_costmap_.info.origin.position.x - new_origin_x) / resolution));
-  const int y_offset = static_cast<int>(std::round(
-    (latest_local_costmap_.info.origin.position.y - new_origin_y) / resolution));
-  if (x_offset == 0 && y_offset == 0) {
-    latest_local_costmap_.info.origin.position.x = new_origin_x;
-    latest_local_costmap_.info.origin.position.y = new_origin_y;
-    return;
-  }
-
-  std::vector<int16_t> shifted_scores(static_cast<std::size_t>(width) * height, 0);
-  for (uint32_t row = 0U; row < height; ++row) {
-    for (uint32_t col = 0U; col < width; ++col) {
-      const int source_x = static_cast<int>(col) + x_offset;
-      const int source_y = static_cast<int>(row) + y_offset;
-      if (
-        source_x < 0 || source_y < 0 ||
-        source_x >= static_cast<int>(width) ||
-        source_y >= static_cast<int>(height))
-      {
-        continue;
-      }
-      const std::size_t destination_index = static_cast<std::size_t>(row) * width + col;
-      const std::size_t source_index =
-        static_cast<std::size_t>(source_y) * width + static_cast<std::size_t>(source_x);
-      shifted_scores.at(destination_index) = local_map_scores_.at(source_index);
-    }
-  }
-
-  local_map_scores_ = std::move(shifted_scores);
-  latest_local_costmap_.info.origin.position.x = new_origin_x;
-  latest_local_costmap_.info.origin.position.y = new_origin_y;
-}
-
-void MappingNode::decayLocalCostmap()
-{
-  if (local_map_scores_.empty()) {
-    return;
-  }
-
-  const int decay_step = std::max(0, static_cast<int>(std::round(local_map_decay_per_update_)));
-  for (auto & score : local_map_scores_) {
-    if (score > 0 && decay_step > 0) {
-      score = static_cast<int16_t>(std::max<int>(0, score - decay_step));
-    } else if (score < 0) {
-      score = static_cast<int16_t>(std::min<int>(0, score + 1));
-    }
-  }
-}
-
-void MappingNode::integrateLatestScanIntoLocalCostmap()
-{
-  if (!have_scan_ || latest_local_costmap_.info.width == 0U || latest_local_costmap_.info.height == 0U) {
-    return;
-  }
-
-  geometry_msgs::msg::TransformStamped odom_from_scan;
-  try {
-    odom_from_scan = tf_buffer_->lookupTransform(
-      odom_frame_id_,
-      latest_scan_.header.frame_id,
-      tf2::TimePointZero,
-      tf2::durationFromSec(0.05));
-  } catch (const tf2::TransformException & exception) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      3000,
-      "Skipping mapping/local_costmap publish because %s -> %s is unavailable: %s",
-      latest_scan_.header.frame_id.c_str(),
-      odom_frame_id_.c_str(),
-      exception.what());
-    return;
-  }
-
-  auto localWorldToGrid = [this](const double world_x, const double world_y, int & grid_x, int & grid_y) {
-      const double local_resolution = static_cast<double>(latest_local_costmap_.info.resolution);
-      if (local_resolution <= 0.0) {
-        return false;
-      }
-      grid_x = static_cast<int>(std::floor(
-        (world_x - latest_local_costmap_.info.origin.position.x) / local_resolution));
-      grid_y = static_cast<int>(std::floor(
-        (world_y - latest_local_costmap_.info.origin.position.y) / local_resolution));
-      return grid_x >= 0 && grid_y >= 0 &&
-        grid_x < static_cast<int>(latest_local_costmap_.info.width) &&
-        grid_y < static_cast<int>(latest_local_costmap_.info.height);
-    };
-
-  auto markLocalFree = [this](const int grid_x, const int grid_y) {
-      if (
-        grid_x < 0 || grid_y < 0 ||
-        grid_x >= static_cast<int>(latest_local_costmap_.info.width) ||
-        grid_y >= static_cast<int>(latest_local_costmap_.info.height))
-      {
-        return;
-      }
-      const std::size_t index =
-        static_cast<std::size_t>(grid_y) * latest_local_costmap_.info.width +
-        static_cast<std::size_t>(grid_x);
-      const int free_delta = std::max(0, static_cast<int>(std::round(local_map_free_score_delta_)));
-      local_map_scores_.at(index) = static_cast<int16_t>(
-        std::max<int>(-20, local_map_scores_.at(index) - free_delta));
-    };
-
-  auto markLocalOccupied = [this](const int grid_x, const int grid_y) {
-      if (
-        grid_x < 0 || grid_y < 0 ||
-        grid_x >= static_cast<int>(latest_local_costmap_.info.width) ||
-        grid_y >= static_cast<int>(latest_local_costmap_.info.height))
-      {
-        return;
-      }
-      const std::size_t index =
-        static_cast<std::size_t>(grid_y) * latest_local_costmap_.info.width +
-        static_cast<std::size_t>(grid_x);
-      const int occupied_delta = std::max(
-        0,
-        static_cast<int>(std::round(local_map_occupied_score_delta_)));
-      local_map_scores_.at(index) = static_cast<int16_t>(
-        std::min<int>(20, local_map_scores_.at(index) + occupied_delta));
-    };
-
-  tf2::Transform scan_to_odom;
-  tf2::fromMsg(odom_from_scan.transform, scan_to_odom);
-  const tf2::Vector3 sensor_origin = scan_to_odom * tf2::Vector3(0.0, 0.0, 0.0);
-  int start_x = 0;
-  int start_y = 0;
-  if (!localWorldToGrid(sensor_origin.x(), sensor_origin.y(), start_x, start_y)) {
-    return;
-  }
-
-  double angle = latest_scan_.angle_min;
-  const double effective_max_range = latest_scan_.range_max > 0.0 ?
-    latest_scan_.range_max : std::numeric_limits<double>::infinity();
-  for (const float range : latest_scan_.ranges) {
-    const double range_value = static_cast<double>(range);
-    if (
-      !std::isfinite(range_value) ||
-      range_value < latest_scan_.range_min ||
-      range_value > effective_max_range)
-    {
-      angle += latest_scan_.angle_increment;
-      continue;
-    }
-
-    const tf2::Vector3 endpoint = scan_to_odom * tf2::Vector3(
-      range_value * std::cos(angle),
-      range_value * std::sin(angle),
-      0.0);
-    angle += latest_scan_.angle_increment;
-
-    int end_x = 0;
-    int end_y = 0;
-    if (!localWorldToGrid(endpoint.x(), endpoint.y(), end_x, end_y)) {
-      continue;
-    }
-
-    int current_x = start_x;
-    int current_y = start_y;
-    const int delta_x = std::abs(end_x - start_x);
-    const int delta_y = std::abs(end_y - start_y);
-    const int step_x = start_x < end_x ? 1 : -1;
-    const int step_y = start_y < end_y ? 1 : -1;
-    int error = delta_x - delta_y;
-
-    while (current_x != end_x || current_y != end_y) {
-      markLocalFree(current_x, current_y);
-      const int doubled_error = 2 * error;
-      if (doubled_error > -delta_y) {
-        error -= delta_y;
-        current_x += step_x;
-      }
-      if (doubled_error < delta_x) {
-        error += delta_x;
-        current_y += step_y;
-      }
-    }
-    markLocalOccupied(end_x, end_y);
-  }
-}
-
-void MappingNode::publishLocalCostmap()
-{
-  ensureLocalCostmapCentered();
-  if (latest_local_costmap_.info.width == 0U || latest_local_costmap_.info.height == 0U) {
-    return;
-  }
-  decayLocalCostmap();
-  integrateLatestScanIntoLocalCostmap();
-  if (latest_local_costmap_.info.width == 0U || latest_local_costmap_.info.height == 0U) {
-    return;
-  }
-  latest_local_costmap_.header.stamp = now();
-  latest_local_costmap_.header.frame_id = odom_frame_id_;
-  latest_local_costmap_.info.map_load_time = latest_local_costmap_.header.stamp;
-  latest_local_costmap_.info.origin.position.z = 0.0;
-  latest_local_costmap_.info.origin.orientation.w = 1.0;
-  latest_local_costmap_.data.assign(local_map_scores_.size(), -1);
-  for (std::size_t index = 0U; index < local_map_scores_.size(); ++index) {
-    const int score = std::clamp<int>(local_map_scores_.at(index), -20, 20);
-    if (score > 0) {
-      latest_local_costmap_.data.at(index) = static_cast<int8_t>(std::min(100, 50 + score * 2));
-    } else if (score < 0) {
-      latest_local_costmap_.data.at(index) = 0;
-    } else {
-      latest_local_costmap_.data.at(index) = -1;
-    }
-  }
-  local_costmap_publisher_->publish(latest_local_costmap_);
-  local_costmap_metadata_publisher_->publish(latest_local_costmap_.info);
-}
-
 void MappingNode::initializeGlobalMap(const geometry_msgs::msg::Point & center)
 {
   const double resolution = global_map_resolution_m_;
-  const double size_m = std::max(min_global_map_size_m_, local_map_size_m_);
+  const double size_m = std::max(1.0, min_global_map_size_m_);
   const uint32_t width = static_cast<uint32_t>(std::max(1.0, std::ceil(size_m / resolution)));
   const uint32_t height = static_cast<uint32_t>(std::max(1.0, std::ceil(size_m / resolution)));
 
@@ -3381,6 +2913,7 @@ void MappingNode::publishGlobalMaps()
   }
   latest_padded_live_map_ready_ = true;
   global_costmap_publisher_->publish(latest_padded_live_map_);
+  latest_global_costmap_publish_stamp_ = latest_padded_live_map_.header.stamp;
   live_map_ready_ = true;
   persistRuntimeCostmapArtifact();
 }
@@ -3429,5 +2962,3 @@ int main(int argc, char ** argv)
   rclcpp::shutdown();
   return 0;
 }
-
-PLUGINLIB_EXPORT_CLASS(amr_sweeper_mapping::Vda5050CostmapLayer, nav2_costmap_2d::Layer)

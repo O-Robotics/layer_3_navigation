@@ -771,10 +771,7 @@ void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::Shared
 {
   std::lock_guard<std::mutex> lock(state_mutex_);
   latest_global_costmap_ = *message;
-  latest_global_costmap_stamp_ =
-    message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
-    now() :
-    rclcpp::Time(message->header.stamp);
+  latest_global_costmap_stamp_ = now();
   latest_global_costmap_ready_ =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;
   if (latest_global_costmap_ready_) {
