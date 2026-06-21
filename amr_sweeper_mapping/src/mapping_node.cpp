@@ -531,21 +531,6 @@ nlohmann::json loadJsonDocument(const std::filesystem::path & path)
   return document;
 }
 
-std::string resolveArtifactPathString(const std::string & configured_path)
-{
-  namespace fs = std::filesystem;
-  const fs::path configured(configured_path);
-  if (configured.is_absolute()) {
-    return configured.string();
-  }
-
-  const fs::path workspace_relative = fs::current_path() / configured;
-  if (fs::exists(workspace_relative)) {
-    return workspace_relative.string();
-  }
-  return configured.string();
-}
-
 double yawFromQuaternionMessage(const geometry_msgs::msg::Quaternion & orientation)
 {
   tf2::Quaternion quaternion;
