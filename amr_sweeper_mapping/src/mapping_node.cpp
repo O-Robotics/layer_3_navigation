@@ -2502,7 +2502,7 @@ void MappingNode::startNextMissionChunk()
 
 bool MappingNode::areNav2CostmapsReadyForMissionStart() const
 {
-  if (!nav2_local_costmap_ready_ || !nav2_global_costmap_ready_) {
+  if (!nav2_local_costmap_ready_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
@@ -2516,9 +2516,22 @@ bool MappingNode::areNav2CostmapsReadyForMissionStart() const
     return false;
   }
 
+  if (!nav2_global_costmap_ready_) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Nav2 global costmap publisher is still missing on %s, but mission start is allowed "
+      "because the local costmap is ready on %s.",
+      nav2_global_costmap_topic_.c_str(),
+      nav2_local_costmap_topic_.c_str());
+  }
+
   const rclcpp::Time now_time = now();
   const double local_age = (now_time - latest_nav2_local_costmap_stamp_).seconds();
-  const double global_age = (now_time - latest_nav2_global_costmap_stamp_).seconds();
+  const double global_age = nav2_global_costmap_ready_
+    ? (now_time - latest_nav2_global_costmap_stamp_).seconds()
+    : -1.0;
   if (local_age > nav2_costmap_ready_timeout_seconds_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
