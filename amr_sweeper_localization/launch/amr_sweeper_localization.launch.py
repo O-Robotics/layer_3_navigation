@@ -92,6 +92,10 @@ def _launch_fusioncore(context, *args, **kwargs):
         remappings=[
             ("/gnss/fix", "gnss/navsat" if use_gnss else "_gnss_disabled"),
             ("/fusion/odom", "localization/odometry_fused"),
+            ("/fusion/pose", "localization/pose"),
+            ("/fusion/debug/gnss_status", "localization/debug/gnss_status"),
+            ("/fusion/debug/filter_health", "localization/debug/filter_health"),
+            ("/diagnostics", "diagnostics"),
         ],
     )
 
