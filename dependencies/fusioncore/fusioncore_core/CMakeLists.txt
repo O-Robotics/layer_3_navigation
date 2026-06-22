@@ -14,17 +14,12 @@ add_library(fusioncore_core STATIC
   src/motion_model.cpp
 )
 
-add_executable(fusioncore_csv_replay
-  src/fusioncore_csv_replay.cpp
-)
-
 target_include_directories(fusioncore_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/fusioncore_core>
 )
 
 target_link_libraries(fusioncore_core PUBLIC Eigen3::Eigen)
-target_link_libraries(fusioncore_csv_replay fusioncore_core Eigen3::Eigen)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -49,6 +44,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_vslam tests/test_vslam.cpp)
   target_link_libraries(test_vslam fusioncore_core Eigen3::Eigen)
+
+  ament_add_gtest(test_magnetometer tests/test_magnetometer.cpp)
+  target_link_libraries(test_magnetometer fusioncore_core Eigen3::Eigen)
 endif()
 
 ament_export_targets(fusioncore_core_targets HAS_LIBRARY_TARGET)
@@ -66,11 +64,6 @@ install(
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
-)
-
-install(
-  TARGETS fusioncore_csv_replay
-  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()

@@ -13,7 +13,7 @@
 #     fusioncore_config:=$(ros2 pkg prefix fusioncore_ros)/share/fusioncore_ros/config/vslam_imu.yaml
 #
 # Set vslam.topic to wherever your VSLAM publishes nav_msgs/Odometry.
-# The covariance field must be filled — see docs/hardware/vslam-imu.md.
+# The covariance field must be filled; see docs/hardware/vslam-imu.md.
 
 fusioncore:
   ros__parameters:
@@ -74,6 +74,7 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7
 
     # ── Startup ───────────────────────────────────────────────────────────────
     init.stationary_window: 2.0     # collect 2s of IMU at rest for bias init

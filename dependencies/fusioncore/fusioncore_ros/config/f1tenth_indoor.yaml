@@ -83,6 +83,7 @@ fusioncore:
     gnss.min_fix_type: 1
     gnss.fix2_topic: ""
     gnss.heading_topic: ""
+    gnss.azimuth_topic: ""
 
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
@@ -116,6 +117,7 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7
 
     # ── No GPS coordinate system needed ───────────────────────────────────────
     input.gnss_crs: "EPSG:4326"

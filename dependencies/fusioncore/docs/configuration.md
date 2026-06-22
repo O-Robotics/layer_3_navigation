@@ -35,10 +35,20 @@ fusioncore:
     #   ~0.0 m/s² → set true (driver already removed it)
     # NOTE: opposite of robot_localization's imu0_remove_gravitational_acceleration.
 
-    imu.frame_id: ""  # override IMU TF frame. Leave empty to use msg header.frame_id.
-                      # Set when your simulator or IMU driver stamps messages with a
-                      # non-standard frame name (e.g. Gazebo Harmonic TurtleBot3 publishes
-                      # "waffle/imu_link/tb3_imu"). Set to your URDF frame name instead.
+    imu.frame_id: ""  # override IMU TF frame. Leave empty (default) to use msg->header.frame_id.
+                      #
+                      # When to set this:
+                      #   Gazebo Harmonic TurtleBot3 publishes "waffle/imu_link/tb3_imu" instead
+                      #   of "imu_link". FusionCore can't find that frame in the TF tree.
+                      #   Fix: set imu.frame_id to your URDF frame name (e.g. "imu_link").
+                      #
+                      # WARNING: do NOT set this to "base_link".
+                      #   When imu.frame_id equals base_frame, FusionCore skips the TF lookup
+                      #   entirely and treats IMU measurements as already in base_link frame.
+                      #   If your IMU is mounted at any angle relative to base_link, its
+                      #   measurements will be fused with the wrong rotation, silently
+                      #   corrupting the orientation estimate. Leave empty unless your driver
+                      #   publishes with no frame_id at all.
 
     # Optional second IMU. When non-empty, FusionCore subscribes to this topic
     # and fuses each message as an independent measurement of the same state.
@@ -81,9 +91,16 @@ fusioncore:
     gnss.max_hdop: 4.0          # reject fixes with HDOP worse than this
     gnss.min_satellites: 4
     gnss.min_fix_type: 1        # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
-                                # NOTE: sensor_msgs/NavSatFix status=2 → RTK_FIXED only.
-                                # RTK_FLOAT (3) is unreachable via NavSatFix.
-                                # Use 2 or 4 as meaningful thresholds.
+                                # NavSatFix: status=2 maps to RTK_FIXED. RTK_FLOAT (3)
+                                # is unreachable via NavSatFix; use gnss.use_gps_fix
+                                # below if your receiver publishes gps_msgs/GPSFix.
+
+    gnss.use_gps_fix: false     # Set true when your driver publishes gps_msgs/GPSFix
+                                # on /gnss/fix instead of sensor_msgs/NavSatFix.
+                                # GPSFix unlocks RTK_FLOAT status, uses receiver-native
+                                # hdop/vdop values, satellites_used, and err_horz/err_vert
+                                # as a fallback covariance. Default false: NavSatFix works
+                                # with all receivers. See GPS Receiver Setup below.
 
     # Antenna lever arm: offset from base_link to GPS antenna in body frame
     # x=forward, y=left, z=up (meters). Leave 0.0 if antenna is above base_link.
@@ -115,13 +132,124 @@ fusioncore:
     # Accepts nav_msgs/Odometry with velocity in robot body frame:
     #   linear.x = forward speed (m/s), linear.y = lateral speed (m/s)
     # A bridge node extracts ego-velocity from raw Doppler point cloud and publishes here.
-    # Works indoors and in all weather -- rain, fog, dust, darkness.
+    # Works indoors and in all weather: rain, fog, dust, darkness.
     # radar.vel_noise is used when the message covariance is zero or negative.
     radar.velocity_topic: ""
     radar.vel_noise: 0.1        # m/s fallback noise when message has no covariance
 
     # Heading input: pick one or both
     gnss.heading_topic: ""      # sensor_msgs/Imu (dual antenna heading)
+    gnss.azimuth_topic: ""      # compass_msgs/Azimuth (preferred REP-145 standard)
+
+    # ── Raw magnetometer heading ──────────────────────────────────────────────
+    # Fuses sensor_msgs/MagneticField directly into the UKF as a 1-DOF heading
+    # measurement. Applies hard/soft iron correction then tilt compensation using
+    # the current filter roll/pitch. Useful when GPS is unavailable and the robot
+    # is stationary (GPS track heading requires motion; magnetometer does not).
+    # Heading source hierarchy: DUAL_ANTENNA > MAGNETOMETER > GPS_TRACK.
+    # Requires calibration: collect data by rotating the robot through a full circle
+    # and use imu_calib (ROS) or magneto (desktop) to get hard_iron and soft_iron values.
+
+    magnetometer.enabled: false
+    magnetometer.topic: "/imu/mag"   # sensor_msgs/MagneticField publisher
+
+    magnetometer.noise_rad: 0.05
+    # Standard deviation of heading estimate (rad) after correction.
+    # 0.05 rad (~3 deg) is typical for a well-calibrated sensor in benign conditions.
+    # Loosen to 0.15-0.30 near motors or variable magnetic fields.
+
+    magnetometer.chi2_threshold: 9.21
+    # Chi-squared outlier gate: chi2(1, 0.99) = 9.21 for 1-DOF heading.
+    # Rejects magnetic spikes. Tighten to 3.84 (chi2(1,0.95)) in clean environments.
+
+    magnetometer.declination_rad: 0.0
+    # Magnetic declination: offset from magnetic north to true north (rad).
+    # Positive east. Look up your location at https://www.magnetic-declination.com
+    # Leave 0.0 when FusionCore can self-correct via GPS: the constant heading
+    # offset is absorbed by the filter over time.
+
+    magnetometer.hard_iron: [0.0, 0.0, 0.0]
+    # Constant bias offset in body frame (Tesla): [x, y, z].
+    # Estimated by rotating the sensor through a full circle and computing
+    # (max + min) / 2 per axis. Use imu_calib or magneto for best results.
+
+    magnetometer.soft_iron: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    # 3x3 scale+rotation matrix in row-major order. Identity = disabled.
+    # Corrects for elliptical distortion in the magnetic field.
+    # Estimated alongside hard iron using imu_calib or magneto.
+
+    # ── GPS coast mode ────────────────────────────────────────────────────────
+    # During GPS blackouts, inflates process noise so P grows and the chi2 gate
+    # relaxes by the time GPS resumes. Prevents the filter from rejecting its
+    # own recovery fixes because dead-reckoning drift made innovations look like
+    # outliers. See How It Works for the full explanation.
+
+    gnss.coast_n: 3
+    # Consecutive chi2 GPS rejections before entering coast mode. 0 = disabled.
+
+    gnss.coast_q_factor: 10.0
+    # Q_position multiplier in coast mode. Controls how fast position uncertainty
+    # grows during the blackout. 10.0: after 228s, sigma_xy=48m (rejects 840m
+    # outliers, accepts 193m drift). After 461s, sigma_xy=68m (accepts 274m drift).
+
+    gnss.coast_timeout_s: 30.0
+    # Also enter coast if GPS is silent this long (seconds). Handles outages
+    # where the receiver stops publishing entirely. 0.0 = timeout trigger disabled.
+
+    gnss.coast_q_bias_factor: 100.0
+    # Q_gyro_bias multiplier in coast mode. Loosens bias confidence so encoder
+    # WZ can drive fast heading bias correction during the blackout. 100.0 typical.
+
+    gnss.coast_imu_wz_scale: 500.0
+    # R_imu[WZ,WZ] multiplier in coast mode. Makes IMU heading rate less trusted
+    # so encoder WZ dominates. 1.0 = disabled. 500.0 typical for long blackouts.
+
+    gnss.recovery_rejection_n: 0
+    # After this many consecutive rejections, inflate P[x,x] and P[y,y] directly.
+    # Fires once per cascade. Must be > gnss.coast_n. 0 = disabled. Typical: 15.
+
+    gnss.p_inflate_sigma: 50.0
+    # XY sigma used for the P inflation above (meters). Only used when
+    # gnss.recovery_rejection_n > 0.
+
+    gnss.recovery_timeout_s: 0.0
+    # GPS absence (seconds) before entering position-injection recovery mode, which
+    # bypasses chi2 for the first returning fix. Useful only when blackouts are very
+    # long (>200s) AND GPS outliers are not a concern at that location.
+    # 0.0 = disabled (chi2 always active, recommended). Must be >= coast_timeout_s.
+
+    # ── GPS track heading fusion ──────────────────────────────────────────────
+    gnss.track_heading_enabled: true
+    # Fuses GPS displacement bearing as a yaw pseudo-measurement whenever the
+    # robot has moved gnss.track_heading_min_dist meters since the last fusion.
+    # This is the primary mechanism for estimating encoder WZ bias without a
+    # dual-antenna GPS. Disable only with an independent heading source.
+
+    gnss.track_heading_min_dist: 5.0
+    # Minimum GPS displacement (m) between heading fusions.
+
+    gnss.track_heading_max_sigma: 0.4
+    # Maximum heading uncertainty to allow a fusion (radians). Computed as
+    # gps_noise / displacement. 0.4 rad = 23 degrees.
+
+    gnss.track_heading_min_speed: 0.2
+    # Minimum robot speed (m/s) for GPS displacement steps to count toward
+    # heading observability. Below this: could be GPS jitter, not real motion.
+    # Increase on high-vibration platforms (construction equipment, tracked robots).
+
+    gnss.track_heading_max_yaw_rate: 0.3
+    # Maximum yaw rate (rad/s) for displacement steps to count. During fast turns
+    # the bearing changes too quickly for a reliable heading measurement.
+    # Decrease for robots that make tight turns at slow speed.
+
+    # ── Lever arm heading gating ──────────────────────────────────────────────
+    gnss.lever_arm_max_heading_sigma_deg: 20.0
+    # Lever arm correction is only applied when heading uncertainty is below this.
+    # When heading degrades (e.g. during prolonged turns), rotating the lever arm
+    # by an uncertain heading adds more position error than it removes.
+    # Default 20 deg disables lever arm during tight-turn sections while leaving
+    # it active during straight/gentle-curve driving where it genuinely helps.
+    # Rule of thumb: lever_arm_m * sin(threshold_rad) should be < GPS noise sigma.
 
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
@@ -137,36 +265,6 @@ fusioncore:
     # Do NOT lower these below chi2 critical values. At 7.0 normal GPS noise
     # trips the gate and every fix gets rejected.
 
-    # ── VSLAM (visual SLAM pose input) ───────────────────────────────────────
-    # FusionCore accepts 6-DOF pose from any VSLAM system that publishes
-    # nav_msgs/Odometry (ORB-SLAM3, RTAB-Map, Kimera, OpenVINS, etc.).
-    # Only pose.pose and pose.covariance are used; twist is ignored.
-    # See docs/hardware/vslam-imu.md for setup details.
-    vslam.topic: ""              # e.g. "/vslam/odometry" or "/orbslam3/camera/odometry"
-                                 # Leave empty to disable VSLAM input.
-    vslam.position_noise: 0.1   # m: fallback when message covariance is zero
-    vslam.orientation_noise: 0.02  # rad: fallback when message covariance is zero
-    vslam.frame_id: ""           # override VSLAM TF frame. Leave empty to use msg header.
-    vslam.reinit_n: 10           # consecutive gate rejections before re-anchoring map origin
-    # FusionCore tracks the offset between the VSLAM map frame and the filter's odom
-    # frame. When VSLAM reinitializes after tracking loss, its pose jumps to a new
-    # map origin. The chi-squared gate rejects these jumps. After vslam.reinit_n
-    # consecutive rejections, FusionCore assumes reinitialization occurred and
-    # re-anchors the map origin to the filter's current position, restoring fusion.
-
-    # ── GPS coast mode (cascade rejection recovery) ───────────────────────────
-    gnss.coast_n: 5              # consecutive rejections before entering coast mode
-    gnss.coast_q_factor: 20.0   # process noise multiplier while coasting (inflates P)
-    gnss.degraded_noise_multiplier: 3.0
-    # After gnss.coast_n consecutive GPS outliers, the filter enters coast mode.
-    # In coast mode: (1) P is inflated by coast_q_factor each step so the filter
-    # stays open to correction, (2) the next fix is tested against a gate inflated
-    # by degraded_noise_multiplier, giving it a wider acceptance window.
-    # This breaks the cascade rejection loop where a stationary or slowly-drifting
-    # filter keeps rejecting valid fixes because its covariance is too tight.
-    # Increase coast_n if you want more patience before relaxing; increase
-    # degraded_noise_multiplier if large GPS jumps should still be accepted.
-
     # ── Adaptive noise ────────────────────────────────────────────────────────
     adaptive.imu: true
     adaptive.encoder: true
@@ -175,13 +273,23 @@ fusioncore:
     adaptive.alpha: 0.01      # EMA learning rate. 0.01 = slow, stable.
 
     # ── UKF process noise ─────────────────────────────────────────────────────
+    # These are per-predict-step noise values (not spectral densities).
+    # At 100Hz IMU, the filter predicts 100 times per second. Each step adds
+    # Q to P, so effective noise rate = q_* * 100 per second.
+
     ukf.q_position: 0.01
-    ukf.q_orientation: 1.0e-9   # quaternion regularization ONLY: do not increase
+    ukf.q_orientation: 1.0e-9   # quaternion regularization ONLY: do not increase.
+                                 # Orientation uncertainty propagates from q_angular_vel
+                                 # through the kinematics. Large values here corrupt
+                                 # quaternion norm and cause yaw/Z drift.
     ukf.q_velocity: 0.1
     ukf.q_angular_vel: 0.1
     ukf.q_acceleration: 1.0
-    ukf.q_gyro_bias: 1.0e-5
+    ukf.q_gyro_bias: 1.0e-5     # biases change slowly (MEMS thermal drift)
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7  # encoder WZ bias is mechanical: very stable.
+                                    # Smaller than gyro bias because it changes only
+                                    # with physical wear, not thermal effects.
 
     # ── Startup ───────────────────────────────────────────────────────────────
     init.stationary_window: 0.0
@@ -220,26 +328,56 @@ fusioncore:
     # ── Deterministic replay ──────────────────────────────────────────────────
     replay.checkpoint_path: "/tmp/fusioncore_checkpoint.txt"
     # File used by ~/save_checkpoint and ~/load_checkpoint services.
-    # save_checkpoint: writes the full 22-state + 22x22 covariance to this file.
+    # save_checkpoint: writes the full 23-state + 23x23 covariance to this file.
     # load_checkpoint: restores that state (restarts filter from that point).
     # Workflow: replay a bag to a known-good point → save → tweak params →
     #   load (instant, no re-replay) → observe the problem window.
 
-    # ── ZUPT ──────────────────────────────────────────────────────────────────
-    zupt.enabled: true
-    zupt.velocity_threshold: 0.05   # m/s: encoder speed below this → stationary
-    zupt.angular_threshold: 0.05    # rad/s: angular rate below this → not rotating
-    zupt.noise_sigma: 0.01          # m/s: tighter = stronger zero-velocity correction
-
-    # ── GPS coordinate system ─────────────────────────────────────────────────
-    input.gnss_crs: "EPSG:4326"              # WGS84 lat/lon (standard GPS)
-    output.crs: "EPSG:4978"                  # ECEF XYZ (globally valid default)
-    output.convert_to_enu_at_reference: true # required when output.crs is ECEF
-    reference.use_first_fix: true            # map origin = first GPS fix
-    reference.x: 0.0                         # fixed origin (when use_first_fix: false)
-    reference.y: 0.0
-    reference.z: 0.0
 ```
+
+---
+
+## GNSS Doppler velocity bridge (ublox F9P / M8U)
+
+FusionCore itself has no dependency on any specific GPS driver. It accepts velocity from any receiver via `gnss.velocity_topic`, which expects `nav_msgs/Odometry` with ENU velocity (`linear.x=east`, `linear.y=north`).
+
+If your receiver is a u-blox module (F9P, M8U, NEO-M9N, etc.), the `fusioncore_ublox` companion package provides a ready-made bridge. It is a separate package with its own dependency on `ublox_msgs` so the FusionCore core remains clean.
+
+```bash
+# Build the companion package alongside FusionCore
+colcon build --packages-select fusioncore_ros fusioncore_ublox
+```
+
+**Launch the bridge alongside FusionCore:**
+
+```bash
+# Terminal 1: FusionCore
+ros2 launch fusioncore_ros fusioncore.launch.py fusioncore_config:=your_robot.yaml
+
+# Terminal 2: ublox bridge
+ros2 launch fusioncore_ublox gnss_doppler_bridge.launch.py \
+  navpvt_topic:=/ublox/navpvt \
+  output_topic:=/gnss/doppler_vel
+```
+
+**Matching FusionCore config:**
+
+```yaml
+gnss.velocity_topic: "/gnss/doppler_vel"
+```
+
+**What the bridge does:**
+
+| NavPVT field | Unit | ENU output |
+|---|---|---|
+| `vel_e` (east) | mm/s | `twist.linear.x` (m/s) |
+| `vel_n` (north) | mm/s | `twist.linear.y` (m/s) |
+| `vel_d` (down) | mm/s | `twist.linear.z` = -vel_d/1000 (m/s) |
+| `s_acc` | mm/s | `covariance[0,7]` = (s_acc/1000)^2 |
+
+Fixes with `fix_type < 3` (no 3D lock) or `gnssFixOK` flag unset are silently dropped. Speeds below 0.05 m/s are also dropped to avoid heading corruption at standstill.
+
+**Other receivers:** publish `nav_msgs/Odometry` with ENU velocity on any topic and point `gnss.velocity_topic` at it. FusionCore doesn't care which driver produced it.
 
 ---
 
@@ -264,7 +402,7 @@ Do not use `DifferentialDrive` or `Ackermann` for:
 
 ## Wait for all sensors: replacing sleep() in launch files
 
-A common pattern in ROS launch files is `sleep(3)` before starting the navigation stack to give sensors time to come online. This is fragile -- on a slow machine the sensors might need 5 seconds, and on a fast one you waste 3 seconds on every launch.
+A common pattern in ROS launch files is `sleep(3)` before starting the navigation stack to give sensors time to come online. This is fragile: on a slow machine the sensors might need 5 seconds, and on a fast one you waste 3 seconds on every launch.
 
 `init.wait_for_all_sensors: true` replaces this entirely. FusionCore holds initialization until it has seen at least one message from every sensor you configured. Then it starts. No sleep needed.
 
@@ -285,7 +423,7 @@ This is especially useful at competition startup, on-site robot power-on, or any
 
 ## Deterministic replay: debugging without hardware
 
-See [How It Works -- Deterministic replay](how-it-works.md#deterministic-replay-and-state-checkpoints) for the full workflow. Quick reference:
+See [How It Works: Deterministic replay](how-it-works.md#deterministic-replay-and-state-checkpoints) for the full workflow. Quick reference:
 
 ```bash
 # Save filter state at any point during bag replay
@@ -315,6 +453,54 @@ output.crs: "EPSG:32617"
 output.convert_to_enu_at_reference: false
 reference.use_first_fix: true
 ```
+
+---
+
+## GPS receiver setup: NavSatFix vs GPSFix
+
+FusionCore supports two GPS message types on `/gnss/fix`. The default is `sensor_msgs/NavSatFix` because every ROS GPS driver publishes it. Set `gnss.use_gps_fix: true` to switch to `gps_msgs/GPSFix` if your driver supports it.
+
+| | `sensor_msgs/NavSatFix` | `gps_msgs/GPSFix` |
+|---|---|---|
+| Driver support | Universal | nmea_navsat_driver, ublox_dgnss, others |
+| RTK_FLOAT status | Not expressible | Yes (status 20) |
+| Separate HDOP / VDOP | No | Yes |
+| Satellites used | No | Yes |
+| 95% CI error bounds | No | err_horz / err_vert |
+| Covariance matrix | Yes | Yes |
+
+### When to use NavSatFix (default)
+
+NavSatFix works with all receivers. For most setups, leave `gnss.use_gps_fix: false`.
+
+The only thing you cannot get via NavSatFix is RTK_FLOAT. If you are using autonomous GPS (CEP 1-3m) or RTK fixed, NavSatFix is all you need.
+
+### When to use GPSFix
+
+Switch to `gnss.use_gps_fix: true` when:
+
+- Your receiver can output RTK_FLOAT and you want to fuse those fixes (better than autonomous, worse than RTK fixed). Set `gnss.min_fix_type: 3` to require it or allow it.
+- Your driver publishes receiver-native HDOP/VDOP rather than a covariance matrix, and you want those values used directly in the noise model.
+- Your driver sets `err_horz`/`err_vert` (95% CI bounds) and you prefer that over a synthetic covariance.
+
+```yaml
+fusioncore:
+  ros__parameters:
+    gnss.use_gps_fix: true
+    gnss.min_fix_type: 3      # require RTK_FLOAT or better (3=FLOAT, 4=FIXED)
+    gnss.base_noise_xy: 0.5   # metres: baseline at HDOP=1 for RTK_FLOAT
+    gnss.base_noise_z: 1.0
+```
+
+### Covariance priority (GPSFix)
+
+When `gnss.use_gps_fix: true`, FusionCore picks the best available covariance source in this order:
+
+1. `position_covariance_type == 3` (full 3x3): used directly, including off-diagonal terms.
+2. `position_covariance_type >= 1` (diagonal): diagonal elements used, hdop/vdop derived from them.
+3. `err_horz > 0` and `err_vert > 0`: 95% CI bounds converted to 1-sigma variance (divide by 1.96), used as a diagonal covariance.
+4. `hdop > 0` and `vdop > 0`: receiver-native DOP values used directly in the noise model (`sigma_xy = base_noise_xy * hdop`).
+5. Defaults (`hdop=1.5, vdop=2.0`).
 
 ---
 

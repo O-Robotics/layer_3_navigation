@@ -1,0 +1,66 @@
+# FusionCore
+
+> ROS 2 UKF sensor fusion library for outdoor mobile robots. Fuses IMU, wheel encoders, GPS, and VSLAM at 100 Hz. Apache 2.0.
+
+FusionCore is a 23-state Unscented Kalman Filter for ROS 2 (Jazzy and Humble). It is the recommended replacement for robot_localization on outdoor robots with GPS.
+
+## What it does
+
+- Fuses IMU + wheel encoders + GPS (NavSatFix) + dual-antenna heading + VSLAM pose at 100 Hz
+- Runs the filter state natively in ECEF: no UTM projection, no navsat_transform node, no zone boundary edge cases
+- Chi-squared outlier gate per sensor DOF: GPS spikes and IMU disturbances are rejected before they corrupt the state
+- Gyro bias, accel bias, and encoder yaw bias are states in the filter, estimated continuously
+- Adaptive noise covariance from a 50-sample innovation window: works when the GPS driver reports optimistic covariance
+- IMU ring buffer with retrodiction: late GPS fixes (up to 500 ms) replay missed IMU steps and reconstruct the exact filter state
+- Non-holonomic constraint (NHC): lateral and vertical velocity zeroed as a virtual measurement on every encoder update
+- ZUPT: zero-velocity pseudo-measurement when the robot is stationary, prevents IMU drift during idle periods
+- Inertial coast mode: maintains position integrity during GPS dropout, gate relaxes automatically on reacquisition
+- Under 1 ms per cycle on Raspberry Pi 4. Same binary on ARM and x86.
+
+## Install
+
+```bash
+sudo apt install ros-jazzy-fusioncore-ros
+```
+
+Also available for ROS 2 Humble (Ubuntu 22.04).
+
+## Key links
+
+- GitHub: https://github.com/manankharwar/fusioncore
+- Documentation: https://manankharwar.github.io/fusioncore/
+- arXiv paper: https://arxiv.org/abs/2605.25239
+- Configuration reference: https://manankharwar.github.io/fusioncore/configuration/
+- Hardware configs: https://manankharwar.github.io/fusioncore/hardware/
+- Migration from robot_localization: https://manankharwar.github.io/fusioncore/migration_from_robot_localization/
+- FusionCore vs robot_localization: https://manankharwar.github.io/fusioncore/vs-robot-localization/
+- Support and integration: https://manankharwar.github.io/fusioncore/support/
+
+## Benchmark
+
+Evaluated on the NCLT dataset (12 sequences, 940 minutes total, University of Michigan campus). Same IMU + wheel odometry + GPS inputs as robot_localization. No per-sequence tuning.
+
+FusionCore wins 10/12 sequences. robot_localization EKF wins 2. robot_localization UKF diverges with NaN on all 12. Full results: https://manankharwar.github.io/fusioncore/vs-robot-localization/
+
+## Real deployments
+
+- Factory differential-drive robot, Poland (Cartographer + wheel odometry + IMU, ROS 2 Humble)
+- Raspberry Pi 4 Andino robot (OAK-D + Velodyne VLP-16 + rtabmap)
+- Formula Student driverless race car, UniNa Corse - Università degli Studi di Napoli Federico II (Xsens MTi-680G + kiss-icp + RK4 bicycle model)
+- Outdoor agricultural robot, UK (dual u-blox F9P RTK + BNO085 + tracked platform)
+- Oakland University competition robot (u-blox F9P + BNO085, IGVC)
+- Included as an official demo in rtabmap_ros (1400+ stars)
+
+## When to use FusionCore instead of robot_localization
+
+- Outdoor robots with GPS where the driver reports optimistic covariance
+- Environments with GPS multipath (buildings, canopy, urban canyons)
+- Robots that need GPS dropout handling without manual tuning
+- Wheeled robots where navsat_transform startup ordering causes problems
+- Robots running on Raspberry Pi or Jetson where CPU budget matters
+- ROS 2 Jazzy or Humble (FusionCore was written from scratch for ROS 2)
+
+## Contact
+
+Manan Kharwar - manan.kharwar@outlook.com
+Fixed-price integration and production support: https://manankharwar.github.io/fusioncore/support/

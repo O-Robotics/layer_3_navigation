@@ -23,7 +23,7 @@ FusionCore fuses IMU gyro/accel measurements at full rate (typically 100-200 Hz)
 
 The update path:
 
-1. IMU predict steps run at full rate, integrating linear acceleration and gyro into the 22-state UKF.
+1. IMU predict steps run at full rate, integrating linear acceleration and gyro into the 23-state UKF.
 2. Each VSLAM pose arrives as a 6D measurement `[x, y, z, roll, pitch, yaw]`.
 3. Mahalanobis outlier gate (chi2(6, 0.999) = 22.46) rejects reinitializations and tracking jumps.
 4. If accepted: UKF update step corrects position and orientation; covariance shrinks.
@@ -107,7 +107,7 @@ ORB-SLAM3 can jump by meters on tracking loss and recovery. Two mechanisms work 
 **Map re-anchoring** (recovery): after `vslam.reinit_n` consecutive gate rejections (default 10, roughly 2 seconds at 5 Hz), FusionCore concludes that ORB-SLAM3 has reinitialized to a new map origin. It computes a new offset between the VSLAM map frame and the filter's odom frame using the filter's current position estimate, and resumes fusion from there. This is logged as a WARN:
 
 ```
-[WARN] VSLAM: 10 consecutive rejections — reinitialization detected. Re-anchoring map origin.
+[WARN] VSLAM: 10 consecutive rejections: reinitialization detected. Re-anchoring map origin.
 ```
 
 Tune `outlier_threshold_vslam` if:

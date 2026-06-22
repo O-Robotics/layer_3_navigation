@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use FusionCore in your research, please cite it as below."
+title: "FusionCore: A ROS 2 UKF Sensor Fusion Library for Outdoor Mobile Robots"
+version: 0.3.0
+date-released: 2026-06-04
+license: Apache-2.0
+repository-code: "https://github.com/manankharwar/fusioncore"
+url: "https://manankharwar.github.io/fusioncore/"
+doi: 10.5281/zenodo.20091053
+abstract: >
+  FusionCore is a ROS 2 Unscented Kalman Filter sensor fusion library for
+  outdoor mobile robots. It fuses IMU, wheel encoders, and GPS at 100 Hz
+  using a 23-state filter with automatic gyroscope and accelerometer bias
+  estimation, adaptive noise covariance, chi-squared GPS outlier rejection,
+  delay compensation via IMU ring buffer replay, and inertial coast mode
+  during GPS blackouts. Benchmarked against robot_localization EKF on the
+  NCLT dataset across 12 sequences spanning all four seasons.
+authors:
+  - family-names: Kharwar
+    given-names: Manan
+    orcid: ""
+keywords:
+  - sensor fusion
+  - ROS 2
+  - Unscented Kalman Filter
+  - state estimation
+  - mobile robotics
+  - GPS
+  - IMU
+  - wheel odometry
+  - outdoor robotics
+preferred-citation:
+  type: software
+  title: "FusionCore: A ROS 2 UKF Sensor Fusion Library for Outdoor Mobile Robots"
+  authors:
+    - family-names: Kharwar
+      given-names: Manan
+  year: 2026
+  doi: 10.5281/zenodo.20091053
+  url: "https://github.com/manankharwar/fusioncore"

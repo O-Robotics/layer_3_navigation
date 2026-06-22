@@ -2,12 +2,18 @@ site_name: FusionCore
 site_url: https://manankharwar.github.io/fusioncore/
 site_description: ROS 2 UKF sensor fusion. IMU + wheel encoders + GPS → one position estimate.
 site_author: Manan Kharwar
+
+extra:
+  meta:
+    - name: google-site-verification
+      content: QMnu3j8_n9RZsFuif9fuM_N5bm5mKNRRk3PivRVtgWw
 repo_url: https://github.com/manankharwar/fusioncore
 repo_name: manankharwar/fusioncore
 edit_uri: edit/main/docs/
 
 theme:
   name: material
+  custom_dir: docs/overrides
   palette:
     - scheme: slate
       primary: teal
@@ -42,24 +48,51 @@ markdown_extensions:
   - toc:
       permalink: true
 
+extra_files:
+  - llms.txt
+
 plugins:
   - search
+  - blog:
+      blog_dir: blog
+      post_url_format: "{slug}"
+      archive: false
+      categories: false
+      authors: false
+      post_excerpt: required
+  - tags
 
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Docker: docker.md
   - Configuration: configuration.md
   - Hardware:
     - Overview & Configs: hardware/index.md
     - Indoor / Wheels only (no GPS): hardware/wheels-indoor.md
     - Indoor / LiDAR ICP (no GPS): hardware/icp-indoor.md
+    - Visual SLAM + IMU (no GPS): hardware/vslam-imu.md
     - Ackermann / Car-like Robots: hardware/ackermann.md
     - Environment Presets: hardware/environment-presets.md
   - Nav2 Integration: nav2.md
   - Simulation: simulation.md
+  - FusionCore vs robot_localization: vs-robot-localization.md
   - Migrating from robot_localization: migration_from_robot_localization.md
   - How It Works: how-it-works.md
   - Troubleshooting: troubleshooting.md
+  - Guides:
+    - GPS position jumping near buildings: guides/gps-multipath-position-jumping.md
+    - Handling delayed GPS measurements: guides/delayed-gps-measurements.md
+    - navsat_transform startup errors: guides/navsat-transform-startup-errors.md
+    - EKF and UKF NaN divergence: guides/ekf-ukf-nan-divergence.md
+  - Certified Configs:
+    - Registry: certified-configs/index.md
+    - Microstrain 3DM-GX3-45 + Novatel SPAN-CPT: certified-configs/microstrain-3dm-gx3-45-segway.md
+    - Bosch BNO085 + u-blox ZED-F9P: certified-configs/bosch-bno085-ublox-f9p-outdoor.md
+    - Xsens MTi-680G: certified-configs/xsens-mti-680g-fsae.md
+  - Known Limitations: known-limitations.md
+  - Support & Integration: support.md
+  - Blog: blog/index.md
   - Reference:
     - Topics & TF: reference/topics.md
     - Benchmark Results: reference/benchmark.md

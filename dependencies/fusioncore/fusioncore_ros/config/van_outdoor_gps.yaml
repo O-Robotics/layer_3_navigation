@@ -72,9 +72,26 @@ fusioncore:
     gnss.min_fix_type: 1
     gnss.fix2_topic: ""
     gnss.heading_topic: ""
+    gnss.azimuth_topic: ""
     gnss.lever_arm_x: 0.0
     gnss.lever_arm_y: 0.0
     gnss.lever_arm_z: 0.0
+
+    # GPS Doppler velocity: F9P receivers publish accurate Doppler-derived speed.
+    # Uncomment and set your receiver's velocity topic to fuse it independently
+    # from wheel odometry. Reveals wheel slip on wet roads or acceleration events.
+    # gnss.velocity_topic: "/gnss/velocity"
+
+    # Lever arm heading gating: van with a large roof-mounted antenna can have
+    # 0.5-1.0m lever arm. At 20 deg heading sigma, a 1.0m arm adds 0.34m error.
+    # Default 20 deg is reasonable. Tighten to 15 deg for very long lever arms.
+    gnss.lever_arm_max_heading_sigma_deg: 20.0
+
+    # Coast mode: important for vans in urban environments (tunnels, parking garages).
+    gnss.coast_n: 5
+    gnss.coast_q_factor: 20.0
+    gnss.coast_q_bias_factor: 100.0
+    gnss.coast_timeout_s: 30.0     # enter coast if GPS goes silent for 30s (tunnel)
 
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
@@ -82,6 +99,7 @@ fusioncore:
     outlier_threshold_imu: 15.09
     outlier_threshold_enc: 11.34
     outlier_threshold_hdg: 10.83
+    outlier_threshold_vslam: 22.46
 
     # ── Adaptive noise ────────────────────────────────────────────────────────
     adaptive.imu: true
@@ -107,6 +125,9 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7
+
+    adaptive.ground_constraint: true
 
     # ── GPS coordinate system ─────────────────────────────────────────────────
     input.gnss_crs: "EPSG:4326"

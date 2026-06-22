@@ -33,6 +33,7 @@ fusioncore:
     gnss.max_hdop: 4.0
     gnss.min_satellites: 4
     gnss.fix2_topic: ""
+    gnss.azimuth_topic: ""
     gnss.lever_arm_x: 0.0
     gnss.lever_arm_y: 0.0
     gnss.lever_arm_z: 0.0
@@ -59,6 +60,7 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7
 
     input.gnss_crs: "EPSG:4326"
     output.crs: "EPSG:4978"

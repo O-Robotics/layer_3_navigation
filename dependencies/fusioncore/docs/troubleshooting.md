@@ -102,6 +102,65 @@ The IMU bias window (`init.stationary_window`) hasn't settled before the robot s
 
 ---
 
+## Velocity drift or position error when IMU is tilted or robot is on a slope
+
+FusionCore handles this correctly without any configuration change.
+
+The accelerometer measures body acceleration plus gravity projected onto the sensor axes. When the IMU is tilted, gravity projects differently onto each axis. FusionCore's UKF measurement function models this explicitly: at every update step, it computes how much gravity should appear on each axis given the current quaternion estimate, and treats only the residual as signal. The filter knows exactly what the accelerometer should read at any orientation.
+
+robot_localization removes gravity as a preprocessing step before the filter sees the data. That step assumes the robot is level. On a slope or with a physically tilted IMU, the preprocessing subtracts the wrong gravity vector, the residual bleeds into the velocity estimate, and the error accumulates over time without a way to correct it.
+
+Because FusionCore carries the full quaternion in its state vector and the gravity projection is computed inside the measurement function at every update, tilt-induced drift self-corrects whenever the filter updates orientation (via GPS heading, magnetometer, or AHRS roll/pitch). There is no special slope mode or tilt compensation parameter to set.
+
+If you are seeing position drift on a tilted platform and the above does not resolve it, check:
+
+```bash
+ros2 topic echo /imu/data --field linear_acceleration --once
+```
+
+When the robot is stationary on a slope, the acceleration vector magnitude should still be close to 9.81 m/s², just pointing in a different direction. If the magnitude is near zero, your driver is publishing free acceleration (gravity already removed). In that case set:
+
+```yaml
+imu.remove_gravitational_acceleration: true
+```
+
+This tells FusionCore the driver has already removed gravity, so the measurement function uses the raw body acceleration instead.
+
+---
+
+## SLAM map looks like a starburst or explosion pattern
+
+Each incoming scan is placed at a different wrong position, and over time the map fans out in all directions from where the robot started.
+
+This is caused by RTABMAP's SLAM node receiving a corrupted odometry estimate. The most common cause: RTABMAP is subscribed to FusionCore's `/fusion/odom` (or remapped to `/odom`), and FusionCore's estimate degraded at some point during the run.
+
+FusionCore fuses ICP odometry with IMU. When the ICP node throws a registration failure mid-run (the `Registration failed: cannot compute transform` error, which often happens during fast rotation), FusionCore briefly runs on IMU alone. If the IMU has any calibration offset, the position estimate diverges rapidly. Any scans RTABMAP places during that window get stamped with wrong positions and corrupt the map permanently.
+
+**Fix:** wire RTABMAP's SLAM node to subscribe to `icp_odom` directly instead of FusionCore's output:
+
+```python
+Node(
+    package='rtabmap_slam', executable='rtabmap', output='screen',
+    parameters=[{
+        'frame_id': 'base_link',
+        'subscribe_scan': True,
+        'approx_sync': True,
+    }],
+    remappings=[
+        ('odom', '/icp_odom'),
+        ('imu', '/imu/data'),
+    ]
+),
+```
+
+With this setup, when ICP fails mid-run, RTABMAP stops placing scans and waits for ICP to recover rather than placing them at bad positions. The map only accumulates from frames where the position was geometrically reliable.
+
+FusionCore still runs and still owns the `odom → base_link` TF. Nav2 still reads `/fusion/odom`. The change only affects what RTABMAP uses when deciding where to stamp each incoming scan. FusionCore is the right source for navigation. Scan-consistent ICP odometry is the right source for map building.
+
+Also check that `frame_id` in your RTABMAP parameters is set to `base_link`, not a camera frame like `oak-d-base-frame`. Building the map relative to a camera frame causes the map to rotate around the camera origin during turns rather than the robot center, which produces subtle geometric errors at every rotation.
+
+---
+
 ## Camera image not showing in RtabmapViz
 
 This is not a FusionCore issue. FusionCore publishes `/fusion/odom` and `odom → base_link` TF: it has no involvement in the camera pipeline.
@@ -136,26 +195,49 @@ Confirm FusionCore is actually publishing:
 ros2 run tf2_ros tf2_echo odom base_link
 ```
 
-If transforms are printing, the error is a race condition at startup: the downstream node started before FusionCore. The `fusioncore_nav2.launch.py` launch file adds a 5-second delay before starting Nav2 to prevent this.
+If transforms are printing, the error is a race condition at startup: the downstream node started before FusionCore. The `fusioncore_nav2.launch.py` launch file adds an 8-second delay before starting Nav2 to prevent this.
 
 ---
 
 ## Encoder or GPS getting rejected (outlier gate)
 
-Check diagnostics:
+The fastest way to diagnose rejections is to look at the structured debug topic instead of parsing log lines:
 
 ```bash
-ros2 topic echo /diagnostics --once
+ros2 topic echo /fusion/debug/gnss_status
 ```
 
-If you see high outlier counts for a sensor, the Mahalanobis gate is rejecting its measurements. Common causes:
+Every GPS fix produces one message here, whether it was accepted or not. The `rejection_reason` field tells you exactly which gate fired. The `mahalanobis_sq` field tells you how far the fix was from the filter's prediction (-1.0 means the quality gate failed before the math ran).
+
+```yaml
+accepted: false
+rejection_reason: HDOP_HIGH     # quality gate: signal was too noisy
+mahalanobis_sq: -1.0            # chi2 math never ran
+hdop: 6.8                       # this is why
+
+---
+accepted: false
+rejection_reason: CHI2_FAILED   # passed quality gates but position was statistically implausible
+mahalanobis_sq: 847.3           # 53x above the 16.27 threshold: GPS spike
+chi2_threshold: 16.27
+```
+
+For encoder and IMU rejections, check the running counts:
+
+```bash
+ros2 topic echo /fusion/debug/filter_health --field encoder_outlier_count
+ros2 topic echo /fusion/debug/filter_health --field imu_outlier_count
+```
+
+Common causes and fixes:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| GPS rejections at startup | Filter hasn't converged yet: large position uncertainty | Normal: clears after 30–60 s |
-| GPS rejections after outage | Inertial drift exceeded gate | Inertial coast mode will relax the gate automatically |
-| Encoder always rejected | Noise config too tight vs actual speed variance | Loosen `encoder.vel_noise` or enable `adaptive.encoder: true` |
-| IMU always rejected | Driver publishing with wrong scale or units | Check `linear_acceleration.z` at rest: should be ~9.81 or ~0.0 depending on `imu.remove_gravitational_acceleration` |
+| `rejection_reason: HDOP_HIGH` at startup | Open sky not acquired yet | Normal: clears within 30–60 s once receiver locks |
+| `rejection_reason: CHI2_FAILED` after outage | Filter drifted during blackout, returning GPS fails gate | Coast mode relaxes the gate automatically; no action needed |
+| `rejection_reason: CHI2_FAILED` persistently | Fix is far from what filter predicts | Check for antenna obstruction or TF mismatch |
+| `encoder_outlier_count` climbing | Noise config too tight vs actual velocity variance | Loosen `encoder.vel_noise` or enable `adaptive.encoder: true` |
+| `imu_outlier_count` climbing | Driver publishing wrong scale or units | Check `linear_acceleration.z` at rest: should be ~9.81 or ~0.0 depending on `imu.remove_gravitational_acceleration` |
 
 Do **not** lower outlier thresholds below their chi-squared critical values. At `7.0` normal GPS noise trips the gate and every fix gets rejected. The defaults are statistically calibrated.
 
@@ -238,7 +320,7 @@ Two causes and two different fixes:
 - **ORB-SLAM3 just lost tracking and reinitialized:** expected. The chi-squared gate correctly rejects the discontinuous pose jump. After `vslam.reinit_n` consecutive rejections (default 10 ≈ 2 s at 5 Hz), FusionCore automatically re-anchors to the filter's current position and resumes fusion. You will see this in the log:
 
   ```
-  [WARN] VSLAM: 10 consecutive rejections — reinitialization detected. Re-anchoring map origin.
+  [WARN] VSLAM: 10 consecutive rejections: reinitialization detected. Re-anchoring map origin.
   ```
 
   If this fires too eagerly during fast motion, increase `vslam.reinit_n`. If recovery after tracking loss is too slow, decrease it.

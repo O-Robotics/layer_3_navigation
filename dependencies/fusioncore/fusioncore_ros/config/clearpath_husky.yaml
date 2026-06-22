@@ -30,6 +30,12 @@ fusioncore:
     publish_rate: 100.0
     publish.force_2d: true          # Husky is a ground robot
 
+    # ── Motion model ─────────────────────────────────────────────────────────
+    # Husky is a differential drive robot. DifferentialDrive zeros VY each predict
+    # step so the filter knows it cannot slide sideways. Tighter lateral covariance,
+    # less position smear on straight runs than the default CVA model.
+    motion_model: "DifferentialDrive"
+
     # ── IMU: Microstrain 3DM-GX5-25 ──────────────────────────────────────────
     # GX5-25 is a 6-axis IMU (accel + gyro). No magnetometer: yaw from GPS
     # motion or dual-antenna heading. If you have a GX5-45 (adds magnetometer),
@@ -65,6 +71,7 @@ fusioncore:
 
     gnss.fix2_topic: ""             # set to second antenna topic for dual-antenna heading
     gnss.heading_topic: ""          # set to /gnss/heading if using u-blox F9H dual-antenna
+    gnss.azimuth_topic: ""
 
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
@@ -88,6 +95,11 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7  # encoder WZ bias: mechanical, very stable
+
+    outlier_threshold_vslam: 22.46  # chi2(6, 0.999): used if VSLAM is added later
+
+    adaptive.ground_constraint: true
 
     input.gnss_crs: "EPSG:4326"
     output.crs: "EPSG:4978"

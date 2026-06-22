@@ -201,41 +201,6 @@ TEST(FusionCoreTest, NineAxisIMUYawFusedNormally) {
   EXPECT_GT(fc.get_state().yaw(), 0.3);
 }
 
-// ─── Test 9: 9-axis IMU: stationary heading stays pinned ───────────────────
-// Regression for the Ecopark bags where the filter published large yaw jumps
-// while the robot was stationary and the IMU heading itself was flat.
-
-TEST(FusionCoreTest, NineAxisIMUStationaryHeadingRemainsStable) {
-  FusionCoreConfig config;
-  config.imu_has_magnetometer = true;
-  config.adaptive_imu = false;
-  config.outlier_rejection = false;
-  config.encoder.vel_noise_x = 1e-3;
-  config.encoder.vel_noise_y = 1e-3;
-  config.encoder.vel_noise_wz = 1e-3;
-
-  FusionCore fc(config);
-
-  State initial;
-  initial.P = StateMatrix::Identity() * 0.1;
-  fc.init(initial, 0.0);
-
-  constexpr double kYaw = 0.892913;
-  for (int i = 1; i <= 600; ++i) {
-    double t = i * 0.01;
-    double roll = 0.01 * std::sin(0.07 * i);
-    double pitch = 0.01 * std::cos(0.05 * i);
-
-    fc.update_imu(t, 0.0, 0.0, 0.0, 0.0, 0.0, 9.80665);
-    fc.update_imu_orientation(t, roll, pitch, kYaw, nullptr);
-    if ((i % 2) == 0) {
-      fc.update_encoder(t, 0.0, 0.0, 0.0);
-    }
-  }
-
-  EXPECT_NEAR(fc.get_state().yaw(), kYaw, 0.05);
-}
-
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

@@ -21,7 +21,7 @@ RUN apt-get update \
 RUN . /opt/ros/jazzy/setup.sh \
     && cd /fusioncore_ws \
     && colcon build \
-        --packages-up-to fusioncore_core fusioncore_ros \
+        --packages-up-to compass_msgs fusioncore_core fusioncore_ros \
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
     && rm -rf build log
 
@@ -39,13 +39,16 @@ COPY --from=builder /fusioncore_ws/src/fusioncore/demo /fusioncore_ws/src/fusion
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy \
     python3-matplotlib \
+    ros-jazzy-gps-msgs \
+    libproj25 \
+    ros-jazzy-geographic-msgs \
     && rm -rf /var/lib/apt/lists/*
 
 # Source both ROS and workspace on every bash session
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /etc/bash.bashrc \
     && echo "source /fusioncore_ws/install/setup.bash" >> /etc/bash.bashrc
 
-ENV AMENT_PREFIX_PATH=/fusioncore_ws/install/fusioncore_ros:/fusioncore_ws/install/fusioncore_core:/opt/ros/jazzy
+ENV AMENT_PREFIX_PATH=/fusioncore_ws/install/fusioncore_ros:/fusioncore_ws/install/fusioncore_core:/fusioncore_ws/install/compass_msgs:/opt/ros/jazzy
 
 WORKDIR /fusioncore_ws/src/fusioncore
 

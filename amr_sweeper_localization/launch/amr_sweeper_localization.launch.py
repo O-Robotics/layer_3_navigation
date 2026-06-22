@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import LifecycleNode, Node
+from launch_ros.actions import LifecycleNode
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from lifecycle_msgs.msg import Transition
@@ -22,10 +22,27 @@ def _load_localization_parameters() -> dict:
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
     with open(config_path, "r", encoding="utf-8") as stream:
         config = yaml.safe_load(stream) or {}
+    if "fusioncore" in config:
+        return config.get("fusioncore", {}).get("ros__parameters", {})
     return config.get("/**", {}).get("ros__parameters", {})
 
 
 def _load_launch_defaults() -> dict[str, str]:
+    package_dir = get_package_share_directory("amr_sweeper_localization")
+    config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
+    with open(config_path, "r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream) or {}
+
+    defaults = config.get("launch_defaults", {}).get("ros__parameters")
+    if isinstance(defaults, dict):
+        return {
+            "use_imu": str(defaults.get("use_imu", True)).lower(),
+            "use_imu2": str(defaults.get("use_imu2", False)).lower(),
+            "use_encoder": str(defaults.get("use_encoder", True)).lower(),
+            "use_visual_odometry": str(defaults.get("use_visual_odometry", False)).lower(),
+            "use_gnss": str(defaults.get("use_gnss", True)).lower(),
+        }
+
     parameters = _load_localization_parameters()
     return {
         "use_imu": str(parameters.get("use_imu", True)).lower(),
@@ -59,6 +76,7 @@ def _launch_fusioncore(context, *args, **kwargs):
             use_visual_odometry, parameters.get("encoder2.topic", "visual_odometry/odom")),
         "gnss.fix2_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.fix2_topic", "")),
         "gnss.heading_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.heading_topic", "")),
+        "gnss.azimuth_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.azimuth_topic", "")),
     }
 
     node = LifecycleNode(

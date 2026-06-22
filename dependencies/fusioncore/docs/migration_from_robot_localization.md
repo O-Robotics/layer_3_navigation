@@ -21,7 +21,7 @@ ros2 launch fusioncore_ros fusioncore_nav2.launch.py \
   fusioncore_config:=/path/to/your_robot.yaml
 ```
 
-That's it. FusionCore starts, configures itself, activates, and Nav2 comes up 5 seconds later once localization is publishing. No separate `navsat_transform_node`, no feedback loop, no topic wiring.
+That's it. FusionCore starts, configures itself, activates, and Nav2 comes up 8 seconds later once localization is publishing. No separate `navsat_transform_node`, no feedback loop, no topic wiring.
 
 **Don't use Nav2?** Use `fusioncore.launch.py` instead:
 
@@ -309,9 +309,9 @@ These required manual config in robot_localization:
 |---|---|---|
 | IMU frame → base_link transform | specify `imu0_config` axes manually | looks up TF tree automatically |
 | GPS antenna offset (lever arm) | ignored | `gnss.lever_arm_x/y/z` applied per-fix |
-| Sensor noise tuning | fixed config values | adaptive noise from innovation sequence |
+| GPS noise estimation | sensor-reported covariance, used as-is | adapts from 50-sample innovation window |
 | Zero-velocity updates (ZUPT) | not built-in | auto when encoder + UKF angular rate below threshold |
-| IMU bias estimation | not built-in | gyro + accel bias states in the 22D state vector |
+| IMU bias estimation | not built-in | gyro + accel bias states in the 23D state vector |
 | GPS fix quality pre-filter | not built-in | `gnss.max_hdop`, `gnss.min_satellites`, `gnss.min_fix_type` |
 | Measurement rejection | Mahalanobis threshold (per sensor, scalar) | Chi-squared gate (per sensor, calibrated to sensor DOF) |
 | Delayed GPS fusion | `smooth_lagged_data` + `history_length` | IMU ring buffer replay, always on |
@@ -326,7 +326,7 @@ Know these before you migrate:
 |---|---|---|
 | Multiple independent odometry sources | yes (odom0, odom1, ...) | primary wheel odom + one secondary via `encoder2.topic` |
 | Multiple IMUs | yes (imu0, imu1, ...) | primary `/imu/data` + one secondary via `imu2.topic` |
-| Configurable state vector | yes (per-sensor config booleans) | fixed 22D state (position, orientation, velocity, biases) |
+| Configurable state vector | yes (per-sensor config booleans) | fixed 23D state (position, orientation, velocity, biases, encoder WZ bias) |
 | Arbitrary sensor plugins | yes (extensible) | IMU, wheel odometry, GPS only |
 | Published filtered GPS | `publish_filtered_gps: true` | not currently supported |
 | navsat datum from ROS service | `/datum` service | not currently supported |

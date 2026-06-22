@@ -1,40 +1,20 @@
 # Benchmark Results: NCLT Sequence 2012-01-08
 
-## Absolute Trajectory Error (ATE)
+## Metrics (SE3-aligned to RTK ground truth)
 
-| Filter | RMSE (m) | Max error (m) |
-|--------|----------|---------------|
-| FusionCore | 5.609 | 22.487 |
-| RL-EKF | 13.047 | 28.977 |
-
-## Relative Pose Error (RPE, per 10m segment)
-
-| Filter | RMSE (m) |
-|--------|----------|
-| FusionCore | 17.277 |
-| RL-EKF | 17.526 |
+| Filter | ATE RMSE (m) | Within 5 m | Within 10 m | Path Length Ratio | Drift (m/km) | RPE@10m RMSE (m) |
+|--------|-------------|------------|-------------|-------------------|--------------|------------------|
+| FusionCore | 5.506 | 65.3% | 95.9% | 0.9396 | 6.47 | 17.243 |
+| RL-EKF | 4.398 | 86.9% | 97.2% | 0.9221 | 5.16 | 17.634 |
 
 ## Methodology
 
 - Dataset: NCLT (University of Michigan)
 - Sequence: 2012-01-08
 - Ground truth: RTK GPS (gps_rtk.csv) projected to local ENU
-- Evaluation tool: [evo](https://github.com/MichaelGrupp/evo)
-- Alignment: SE(3) alignment
-- Sensor inputs: identical for all filters (IMU + wheel odom + GPS)
-
-### Reproducing
-
-```bash
-# 1. Download NCLT sequence
-# 2. Run benchmark
-ros2 launch fusioncore_datasets nclt_benchmark.launch.py \
-  data_dir:=/path/to/nclt/2012-01-08 output_bag:=./nclt_results
-# 3. Convert ground truth
-python3 tools/nclt_rtk_to_tum.py --rtk gps_rtk.csv --out gt.tum
-# 4. Extract trajectories
-python3 tools/odom_to_tum.py --bag ./nclt_results --topic /fusion/odom --out fc.tum
-python3 tools/odom_to_tum.py --bag ./nclt_results --topic /rl/odometry --out rl.tum
-# 5. Evaluate
-python3 tools/evaluate.py --gt gt.tum --fusioncore fc.tum --rl rl.tum --sequence 2012-01-08
-```
+- Evaluation: [evo](https://github.com/MichaelGrupp/evo), SE(3) alignment
+- All filters consume identical sensor streams: same IMU, wheel odometry, and GPS topics
+- FusionCore: full 3D UKF, adaptive noise, ZUPT, IMU bias estimation
+- RL-EKF: two_d_mode=true (flat-terrain Segway RMP), GPS via navsat_transform
+- RL-UKF excluded: robot_localization UKF diverges under high-rate sim time playback
+  (rapid timer catchup causes near-zero dt between predictions, Cholesky failure, immediate NaN)

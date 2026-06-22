@@ -25,6 +25,8 @@ fusioncore:
     publish_rate: 100.0
     publish.force_2d: true          # ground robot
 
+    motion_model: "DifferentialDrive"  # differential drive: no lateral sliding
+
     # ── IMU: Bosch BNO085 ─────────────────────────────────────────────────────
     # The BNO085 has an onboard magnetometer, but magnetic interference from
     # motors and wiring makes it unreliable on most robot platforms. Leave
@@ -61,6 +63,22 @@ fusioncore:
 
     gnss.fix2_topic: ""
     gnss.heading_topic: ""
+    gnss.azimuth_topic: ""
+
+    # ── Raw magnetometer heading (BNO085-specific) ────────────────────────────
+    # The BNO085 publishes raw magnetometer data on /imu/mag at 100 Hz via the
+    # Hillcrest driver. FusionCore can fuse this directly as a tilt-compensated
+    # heading update. Useful for heading at startup before the robot has moved
+    # enough for GPS track heading to kick in.
+    # Requires hard/soft iron calibration first (use imu_calib or magneto).
+    # Set enabled: true only after verifying your magnetic environment is clean.
+    magnetometer.enabled: false
+    magnetometer.topic: "/imu/mag"
+    magnetometer.noise_rad: 0.05
+    magnetometer.chi2_threshold: 9.21
+    magnetometer.declination_rad: 0.0    # look up at magnetic-declination.com
+    magnetometer.hard_iron: [0.0, 0.0, 0.0]
+    magnetometer.soft_iron: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
@@ -84,6 +102,10 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7
+
+    outlier_threshold_vslam: 22.46
+    adaptive.ground_constraint: true
 
     input.gnss_crs: "EPSG:4326"
     output.crs: "EPSG:4978"

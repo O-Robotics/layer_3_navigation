@@ -1,191 +1,378 @@
 #!/usr/bin/env python3
 """
-NCLT benchmark evaluator: FusionCore vs robot_localization.
+NCLT benchmark evaluator: FusionCore vs robot_localization EKF vs robot_localization UKF.
 
-Converts bags to TUM format, runs evo_ape + evo_rpe, and prints a
-comparison table. Generates trajectory plots saved as PNG files.
+Metrics computed per filter (SE3-aligned to ground truth):
+  - ATE translational RMSE, mean, max
+  - ATE rotational RMSE (degrees)
+  - % of poses within 5 m and 10 m of ground truth
+  - Path length ratio (estimated / ground truth)
+  - Drift rate (ATE RMSE per km traveled)
+  - RPE at 10 m segment length
 
 Prerequisites:
-  pip install evo
+  pip install evo matplotlib
 
 Usage:
-  # Step 1: Convert NCLT ground truth to TUM
-  python3 tools/nclt_rtk_to_tum.py \
-    --rtk /path/to/nclt/2012-01-08/gps_rtk.csv \
-    --out ground_truth.tum
-
-  # Step 2: Extract filter outputs from results bag
-  python3 tools/odom_to_tum.py --bag ./nclt_results --topic /fusion/odom  --out fusioncore.tum
-  python3 tools/odom_to_tum.py --bag ./nclt_results --topic /rl/odometry  --out rl_ekf.tum
-
-  # Step 3: Evaluate
   python3 tools/evaluate.py \
     --gt           ground_truth.tum \
     --fusioncore   fusioncore.tum \
     --rl           rl_ekf.tum \
+    --rl_ukf       rl_ukf.tum \
     --sequence     2012-01-08 \
-    --out_dir      ./results
+    --out_dir      ./benchmarks/nclt/2012-01-08/results
 """
 
 import argparse
+import copy
 import os
-import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 
-def run_evo(cmd: list, label: str) -> dict:
-    """Run an evo CLI command and parse RMSE from its stdout."""
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f'[WARN] evo failed for {label}:')
-        print(result.stderr[-500:])
+try:
+    from evo.core import metrics, sync
+    from evo.core.trajectory import PoseTrajectory3D
+    from evo.tools import file_interface
+except ImportError:
+    print("Error: evo not installed. Run: pip install evo", file=sys.stderr)
+    sys.exit(1)
+
+
+# ── loaders ────────────────────────────────────────────────────────────────────
+
+def load_tum(path: str) -> PoseTrajectory3D:
+    return file_interface.read_tum_trajectory_file(path)
+
+
+def align(est: PoseTrajectory3D, gt: PoseTrajectory3D) -> PoseTrajectory3D:
+    """Return SE3-aligned copy of est matched to gt timestamps."""
+    est_copy = copy.deepcopy(est)
+    est_copy.align(gt, correct_scale=False)
+    return est_copy
+
+
+# ── metric helpers ─────────────────────────────────────────────────────────────
+
+def compute_ate(gt: PoseTrajectory3D, est: PoseTrajectory3D) -> dict:
+    gt_s, est_s = sync.associate_trajectories(gt, est, max_diff=0.1)
+    est_aligned = align(est_s, gt_s)
+    metric = metrics.APE(metrics.PoseRelation.translation_part)
+    metric.process_data((gt_s, est_aligned))
+    errors = metric.error
+
+    # XY-only ATE: horizontal error independent of Z. This is the metric that
+    # actually matters for ground robot navigation (nav2, obstacle avoidance).
+    # 3D ATE is distorted by GPS altitude noise in FC vs forced-zero Z in RL-EKF.
+    gt_xy  = gt_s.positions_xyz[:, :2]
+    est_xy = est_aligned.positions_xyz[:, :2]
+    xy_errors = np.linalg.norm(gt_xy - est_xy, axis=1)
+
+    return {
+        'rmse':        float(np.sqrt(np.mean(errors**2))),
+        'mean':        float(np.mean(errors)),
+        'max':         float(np.max(errors)),
+        'pct5':        float(np.mean(errors <= 5.0) * 100),
+        'pct10':       float(np.mean(errors <= 10.0) * 100),
+        'xy_rmse':     float(np.sqrt(np.mean(xy_errors**2))),
+        'xy_pct5':     float(np.mean(xy_errors <= 5.0) * 100),
+        'xy_pct10':    float(np.mean(xy_errors <= 10.0) * 100),
+        'errors':      errors,
+        'gt_s':        gt_s,
+        'est_aligned': est_aligned,
+    }
+
+
+def compute_ate_rot(gt: PoseTrajectory3D, est: PoseTrajectory3D) -> float:
+    gt_s, est_s = sync.associate_trajectories(gt, est, max_diff=0.1)
+    est_aligned = align(est_s, gt_s)
+    metric = metrics.APE(metrics.PoseRelation.rotation_angle_deg)
+    metric.process_data((gt_s, est_aligned))
+    return float(np.sqrt(np.mean(metric.error**2)))
+
+
+def compute_rpe(gt: PoseTrajectory3D, est: PoseTrajectory3D, delta_m: float) -> dict:
+    gt_s, est_s = sync.associate_trajectories(gt, est, max_diff=0.1)
+    metric = metrics.RPE(
+        metrics.PoseRelation.translation_part,
+        delta=delta_m,
+        delta_unit=metrics.Unit.meters,
+        all_pairs=False,
+    )
+    try:
+        metric.process_data((gt_s, est_s))
+        errors = metric.error
+        return {'rmse': float(np.sqrt(np.mean(errors**2))),
+                'mean': float(np.mean(errors)),
+                'max':  float(np.max(errors))}
+    except Exception:
         return {'rmse': float('nan'), 'mean': float('nan'), 'max': float('nan')}
 
-    metrics = {}
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        for key in ('rmse', 'mean', 'max', 'min', 'median', 'std'):
-            if line.lower().startswith(key):
-                try:
-                    metrics[key] = float(line.split()[-1])
-                except ValueError:
-                    pass
-    return metrics
+
+def path_length(traj: PoseTrajectory3D) -> float:
+    diffs = np.diff(traj.positions_xyz, axis=0)
+    return float(np.sum(np.linalg.norm(diffs, axis=1)))
 
 
-def evo_ape(gt: str, est: str, label: str, out_dir: str) -> dict:
-    plot_path = os.path.join(out_dir, f'ate_{label}.png')
-    cmd = [
-        'evo_ape', 'tum', gt, est,
-        '--align',
-        '--t_max_diff', '0.1',
-    ]
-    m = run_evo(cmd, f'ATE {label}')
-    print(f'  ATE {label:20s}  RMSE={m.get("rmse", float("nan")):.3f}m  '
-          f'max={m.get("max", float("nan")):.3f}m')
-    return m
+def path_length_ratio(gt: PoseTrajectory3D, est: PoseTrajectory3D) -> float:
+    gt_s, est_s = sync.associate_trajectories(gt, est, max_diff=0.1)
+    gt_len  = path_length(gt_s)
+    est_len = path_length(est_s)
+    return est_len / gt_len if gt_len > 0 else float('nan')
 
 
-def evo_rpe(gt: str, est: str, label: str, out_dir: str, delta: float = 10.0) -> dict:
-    plot_path = os.path.join(out_dir, f'rpe_{label}.png')
-    cmd = [
-        'evo_rpe', 'tum', gt, est,
-        '--align',
-        '--t_max_diff', '0.1',
-        '--delta', str(delta),
-        '--delta_unit', 'm',
-    ]
-    m = run_evo(cmd, f'RPE {label}')
-    print(f'  RPE {label:20s}  RMSE={m.get("rmse", float("nan")):.3f}m  '
-          f'(per {delta}m segment)')
-    return m
+def drift_rate(ate_rmse: float, gt: PoseTrajectory3D) -> float:
+    km = path_length(gt) / 1000.0
+    return ate_rmse / km if km > 0 else float('nan')
 
 
-def traj_plot(gt: str, estimates: dict, out_dir: str, title: str):
-    """Overlay all trajectories in one plot."""
-    plot_path = os.path.join(out_dir, 'trajectories.png')
-    cmd = ['evo_traj', 'tum', '--ref', gt] + list(estimates.values()) + \
-          ['-p', '--save_plot', plot_path, '--plot_mode', 'xy']
-    subprocess.run(cmd, capture_output=True)
-    print(f'  Trajectory overlay → {plot_path}')
+# ── printing ───────────────────────────────────────────────────────────────────
+
+def fmt(val, unit='m', decimals=3):
+    if val != val:
+        return 'N/A'
+    return f'{val:.{decimals}f}{unit}'
 
 
-def write_markdown(results: dict, sequence: str, out_dir: str):
-    """Write BENCHMARK.md with the results table."""
+def print_section(title: str):
+    pad = max(0, 54 - len(title))
+    print(f'\n-- {title} {"-" * pad}')
+
+
+def evaluate_filter(label: str, gt: PoseTrajectory3D, est: PoseTrajectory3D) -> dict:
+    ate   = compute_ate(gt, est)
+    rpe10 = compute_rpe(gt, est, 10.0)
+    plr   = path_length_ratio(gt, est)
+    dr    = drift_rate(ate['rmse'], ate['gt_s'])
+
+    print(f'\n  [{label}]')
+    print(f'    ATE RMSE (3D)       {fmt(ate["rmse"])}')
+    print(f'    ATE RMSE (XY only)  {fmt(ate["xy_rmse"])}')
+    print(f'    Within 5 m          {ate["pct5"]:.1f}%  |  Within 10 m  {ate["pct10"]:.1f}%')
+    print(f'    XY within 5 m       {ate["xy_pct5"]:.1f}%  |  XY within 10 m  {ate["xy_pct10"]:.1f}%')
+    print(f'    Path length ratio   {fmt(plr, "", 4)}  (1.0 = perfect scale)')
+    print(f'    Drift rate          {fmt(dr, " m/km", 2)}')
+    print(f'    RPE@10m             RMSE={fmt(rpe10["rmse"])}')
+
+    return {'ate': ate, 'rpe10': rpe10, 'plr': plr, 'drift': dr}
+
+
+# ── plots ──────────────────────────────────────────────────────────────────────
+
+def save_trajectory_plot(gt, filters, out_dir):
+    """filters: list of (label, result_dict, color)"""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        gt_xy = gt.positions_xyz[:, :2]
+        ax.plot(gt_xy[:, 0], gt_xy[:, 1], '--', color='#2ca02c',
+                label='Ground Truth', alpha=0.7, lw=1.5)
+
+        for label, res, color in filters:
+            xy = res['ate']['est_aligned'].positions_xyz[:, :2]
+            ax.plot(xy[:, 0], xy[:, 1], '-', color=color,
+                    label=label, alpha=0.85, lw=1.2)
+
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_title('Trajectory Overlay (XY, SE3-aligned)')
+        ax.set_aspect('equal')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        path = os.path.join(out_dir, 'trajectories.png')
+        fig.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f'  Trajectory overlay  -> {path}')
+    except Exception as e:
+        print(f'  [WARN] trajectory plot failed: {e}')
+
+
+def save_ate_plot(filters, out_dir):
+    """filters: list of (label, result_dict, color)"""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(12, 4))
+
+        for label, res, color in filters:
+            t = res['ate']['gt_s'].timestamps
+            t = t - t[0]
+            rmse = res['ate']['rmse']
+            ax.plot(t, res['ate']['errors'],
+                    label=f'{label} (RMSE={rmse:.1f}m)',
+                    color=color, alpha=0.8, lw=0.8)
+
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('ATE (m)')
+        ax.set_title('Per-pose Translational Error over Time')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        path = os.path.join(out_dir, 'ate_over_time.png')
+        fig.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f'  ATE over time       -> {path}')
+    except Exception as e:
+        print(f'  [WARN] ATE over time plot failed: {e}')
+
+
+def save_error_distribution(filters, out_dir):
+    """filters: list of (label, result_dict, color)"""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        thresholds = np.linspace(0, 50, 200)
+
+        for label, res, color in filters:
+            errors = res['ate']['errors']
+            cdf = [np.mean(errors <= t) * 100 for t in thresholds]
+            ax.plot(thresholds, cdf, label=label, color=color, lw=2)
+
+        ax.axvline(5,  color='gray', linestyle=':',  alpha=0.7, label='5 m')
+        ax.axvline(10, color='gray', linestyle='--', alpha=0.7, label='10 m')
+        ax.set_xlabel('ATE threshold (m)')
+        ax.set_ylabel('% poses within threshold')
+        ax.set_title('Error Distribution (CDF)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(0, 50)
+        ax.set_ylim(0, 100)
+
+        path = os.path.join(out_dir, 'error_distribution.png')
+        fig.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f'  Error distribution  -> {path}')
+    except Exception as e:
+        print(f'  [WARN] error distribution plot failed: {e}')
+
+
+# ── markdown ───────────────────────────────────────────────────────────────────
+
+def write_markdown(filters, sequence: str, out_dir: str):
+    """filters: list of (label, result_dict, color)"""
     md_path = os.path.join(out_dir, 'BENCHMARK.md')
     with open(md_path, 'w') as f:
         f.write(f'# Benchmark Results: NCLT Sequence {sequence}\n\n')
-        f.write('## Absolute Trajectory Error (ATE)\n\n')
-        f.write('| Filter | RMSE (m) | Max error (m) |\n')
-        f.write('|--------|----------|---------------|\n')
-        for label, m in results['ate'].items():
-            f.write(f'| {label} | {m.get("rmse", float("nan")):.3f} | '
-                    f'{m.get("max", float("nan")):.3f} |\n')
 
-        f.write('\n## Relative Pose Error (RPE, per 10m segment)\n\n')
-        f.write('| Filter | RMSE (m) |\n')
-        f.write('|--------|----------|\n')
-        for label, m in results['rpe'].items():
-            f.write(f'| {label} | {m.get("rmse", float("nan")):.3f} |\n')
+        f.write('## Metrics (SE3-aligned to RTK ground truth)\n\n')
+        f.write('| Filter | ATE RMSE 3D (m) | ATE RMSE XY (m) | Within 5 m | Within 10 m | Path Length Ratio | Drift (m/km) | RPE@10m RMSE (m) |\n')
+        f.write('|--------|----------------|----------------|------------|-------------|-------------------|--------------|------------------|\n')
+        for label, r, _ in filters:
+            ate = r['ate']
+            f.write(f"| {label} | {ate['rmse']:.3f} | {ate['xy_rmse']:.3f} | {ate['pct5']:.1f}% | {ate['pct10']:.1f}% | "
+                    f"{r['plr']:.4f} | {r['drift']:.2f} | {r['rpe10']['rmse']:.3f} |\n")
 
         f.write('\n## Methodology\n\n')
         f.write('- Dataset: NCLT (University of Michigan)\n')
         f.write(f'- Sequence: {sequence}\n')
         f.write('- Ground truth: RTK GPS (gps_rtk.csv) projected to local ENU\n')
-        f.write('- Evaluation tool: [evo](https://github.com/MichaelGrupp/evo)\n')
-        f.write('- Alignment: SE(3) alignment\n')
-        f.write('- Sensor inputs: identical for all filters (IMU + wheel odom + GPS)\n\n')
-        f.write('### Reproducing\n\n')
-        f.write('```bash\n')
-        f.write('# 1. Download NCLT sequence\n')
-        f.write('# 2. Run benchmark\n')
-        f.write(f'ros2 launch fusioncore_datasets nclt_benchmark.launch.py \\\n')
-        f.write(f'  data_dir:=/path/to/nclt/{sequence} output_bag:=./nclt_results\n')
-        f.write('# 3. Convert ground truth\n')
-        f.write('python3 tools/nclt_rtk_to_tum.py --rtk gps_rtk.csv --out gt.tum\n')
-        f.write('# 4. Extract trajectories\n')
-        f.write('python3 tools/odom_to_tum.py --bag ./nclt_results --topic /fusion/odom --out fc.tum\n')
-        f.write('python3 tools/odom_to_tum.py --bag ./nclt_results --topic /rl/odometry --out rl.tum\n')
-        f.write('# 5. Evaluate\n')
-        f.write(f'python3 tools/evaluate.py --gt gt.tum --fusioncore fc.tum --rl rl.tum --sequence {sequence}\n')
-        f.write('```\n')
+        f.write('- Evaluation: [evo](https://github.com/MichaelGrupp/evo), SE(3) alignment\n')
+        f.write('- All filters consume identical sensor streams: same IMU, wheel odometry, and GPS topics\n')
+        f.write('- FusionCore: full 3D UKF, adaptive noise, ZUPT, IMU bias estimation\n')
+        f.write('- RL-EKF: two_d_mode=true (flat-terrain Segway RMP), GPS via navsat_transform\n')
+        f.write('- RL-UKF excluded: robot_localization UKF diverges under high-rate sim time playback\n')
+        f.write('  (rapid timer catchup causes near-zero dt between predictions, Cholesky failure, immediate NaN)\n')
 
     print(f'  Results written to {md_path}')
 
 
+# ── main ───────────────────────────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--gt',          required=True, help='Ground truth TUM file')
-    parser.add_argument('--fusioncore',  required=True, help='FusionCore TUM file')
-    parser.add_argument('--rl',          required=True, help='robot_localization TUM file')
-    parser.add_argument('--sequence',    default='unknown', help='NCLT sequence name')
-    parser.add_argument('--out_dir',     default='./benchmarks/nclt/2012-01-08/results',
-                        help='Output directory for plots and report')
-    parser.add_argument('--rpe_delta',   type=float, default=10.0,
-                        help='RPE segment length in meters (default: 10)')
+    parser.add_argument('--gt',         required=True)
+    parser.add_argument('--fusioncore', required=True)
+    parser.add_argument('--rl',         required=True)
+    parser.add_argument('--rl_ukf',     default=None, help='RL-UKF trajectory (optional)')
+    parser.add_argument('--sequence',   default='unknown')
+    parser.add_argument('--out_dir',    default='./results')
     args = parser.parse_args()
 
     for path, name in [(args.gt, 'ground truth'), (args.fusioncore, 'FusionCore'),
-                       (args.rl, 'robot_localization')]:
+                       (args.rl, 'robot_localization EKF')]:
         if not os.path.exists(path):
             print(f'Error: {name} file not found: {path}', file=sys.stderr)
             sys.exit(1)
 
+    if args.rl_ukf and not os.path.exists(args.rl_ukf):
+        print(f'Error: RL-UKF file not found: {args.rl_ukf}', file=sys.stderr)
+        sys.exit(1)
+
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+
+    gt = load_tum(args.gt)
+    fc = load_tum(args.fusioncore)
+    rl = load_tum(args.rl)
 
     print(f'\n{"="*60}')
     print(f'  NCLT Benchmark: {args.sequence}')
-    print(f'{"="*60}\n')
+    print(f'{"="*60}')
 
-    results = {'ate': {}, 'rpe': {}}
+    pose_line = f'  Poses: FC={len(fc.timestamps)}  RL-EKF={len(rl.timestamps)}  GT={len(gt.timestamps)}'
+    if args.rl_ukf:
+        rl_ukf_traj = load_tum(args.rl_ukf)
+        pose_line += f'  RL-UKF={len(rl_ukf_traj.timestamps)}'
+    print(pose_line)
 
-    print('── Absolute Trajectory Error (ATE) ──────────────────────')
-    results['ate']['FusionCore'] = evo_ape(args.gt, args.fusioncore, 'fusioncore', args.out_dir)
-    results['ate']['RL-EKF']     = evo_ape(args.gt, args.rl,          'rl_ekf',     args.out_dir)
+    print_section('Metrics (SE3-aligned to RTK ground truth)')
+    fc_res = evaluate_filter('FusionCore', gt, fc)
+    rl_res = evaluate_filter('RL-EKF',     gt, rl)
 
-    print('\n── Relative Pose Error (RPE) ─────────────────────────────')
-    results['rpe']['FusionCore'] = evo_rpe(args.gt, args.fusioncore, 'fusioncore', args.out_dir, args.rpe_delta)
-    results['rpe']['RL-EKF']     = evo_rpe(args.gt, args.rl,          'rl_ekf',     args.out_dir, args.rpe_delta)
+    filters = [
+        ('FusionCore', fc_res, '#1f77b4'),
+        ('RL-EKF',     rl_res, '#ff7f0e'),
+    ]
 
-    print('\n── Trajectory overlay ────────────────────────────────────')
-    traj_plot(args.gt, {'FusionCore': args.fusioncore, 'RL-EKF': args.rl}, args.out_dir, args.sequence)
+    if args.rl_ukf:
+        rl_ukf_res = evaluate_filter('RL-UKF', gt, rl_ukf_traj)
+        filters.append(('RL-UKF', rl_ukf_res, '#9467bd'))
 
-    print('\n── Summary ───────────────────────────────────────────────')
-    fc_ate = results['ate']['FusionCore'].get('rmse', float('nan'))
-    rl_ate = results['ate']['RL-EKF'].get('rmse', float('nan'))
-    if fc_ate < rl_ate:
-        diff = (rl_ate - fc_ate) / rl_ate * 100
-        print(f'  FusionCore wins ATE by {diff:.1f}%  ({fc_ate:.3f}m vs {rl_ate:.3f}m)')
-    elif rl_ate < fc_ate:
-        diff = (fc_ate - rl_ate) / fc_ate * 100
-        print(f'  RL-EKF wins ATE by {diff:.1f}%  ({rl_ate:.3f}m vs {fc_ate:.3f}m)')
-    else:
-        print(f'  Tie  ({fc_ate:.3f}m)')
+    print_section('Summary')
+    fc_ate    = fc_res['ate']['rmse']
+    fc_ate_xy = fc_res['ate']['xy_rmse']
+    for label, res, _ in filters[1:]:
+        other_ate    = res['ate']['rmse']
+        other_ate_xy = res['ate']['xy_rmse']
 
-    write_markdown(results, args.sequence, args.out_dir)
-    print(f'\nPlots saved to {args.out_dir}/')
+        # 3D summary
+        if fc_ate < other_ate:
+            diff = (other_ate - fc_ate) / other_ate * 100
+            print(f'  3D: FusionCore beats {label} by {diff:.1f}%  ({fc_ate:.3f}m vs {other_ate:.3f}m)')
+        elif other_ate < fc_ate:
+            diff = (fc_ate - other_ate) / fc_ate * 100
+            print(f'  3D: {label} beats FusionCore by {diff:.1f}%  ({other_ate:.3f}m vs {fc_ate:.3f}m)')
+        else:
+            print(f'  3D: Tie vs {label}  ({fc_ate:.3f}m)')
+
+        # XY summary (what actually matters for ground robot navigation)
+        if fc_ate_xy < other_ate_xy:
+            diff = (other_ate_xy - fc_ate_xy) / other_ate_xy * 100
+            print(f'  XY: FusionCore beats {label} by {diff:.1f}%  ({fc_ate_xy:.3f}m vs {other_ate_xy:.3f}m)')
+        elif other_ate_xy < fc_ate_xy:
+            diff = (fc_ate_xy - other_ate_xy) / fc_ate_xy * 100
+            print(f'  XY: {label} beats FusionCore by {diff:.1f}%  ({other_ate_xy:.3f}m vs {fc_ate_xy:.3f}m)')
+        else:
+            print(f'  XY: Tie vs {label}  ({fc_ate_xy:.3f}m)')
+
+    print_section('Plots')
+    save_trajectory_plot(gt, filters, args.out_dir)
+    save_ate_plot(filters, args.out_dir)
+    save_error_distribution(filters, args.out_dir)
+
+    write_markdown(filters, args.sequence, args.out_dir)
+    print(f'\nDone. Results in {args.out_dir}/\n')
 
 
 if __name__ == '__main__':

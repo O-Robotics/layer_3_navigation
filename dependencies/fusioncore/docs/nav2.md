@@ -58,9 +58,9 @@ The lifecycle timing is important. `fusioncore_nav2.launch.py`:
 1. Starts `fusioncore_node` as a lifecycle node
 2. Waits 2 seconds, sends `configure`
 3. On `configuring → inactive`, immediately sends `activate`
-4. Waits 5 seconds after activation, then starts Nav2
+4. Waits 8 seconds from launch start, then starts Nav2
 
-This 5-second delay guarantees `odom → base_link` TF is publishing before Nav2's costmaps initialize. Without it, Nav2 fails silently at startup.
+The 8-second delay gives FusionCore time to activate and publish `odom → base_link`, and gives Nav2's `bt_navigator` TF listener time to warm up before its configure step runs. Without this gap, `bt_navigator` can fail to configure because its TF buffer is empty on cold DDS startup.
 
 ---
 
@@ -88,7 +88,9 @@ velocity_smoother:
     odom_topic: /fusion/odom
 ```
 
-Also remove AMCL if you had it. FusionCore publishes `odom → base_link` only: not `map → odom`. The `global_frame` in bt_navigator, global_costmap, and behavior_server must be set to `odom` for GPS-only navigation. Running AMCL alongside FusionCore will cause TF conflicts on `odom → base_link`.
+Also remove AMCL if you are doing GPS-only outdoor navigation. AMCL publishes `map → odom` and needs a static map to localize against. Without a map it has nothing to do and will log constant warnings. The `global_frame` in bt_navigator, global_costmap, and behavior_server must be set to `odom` for GPS-only navigation.
+
+If you are doing indoor navigation with a static map, keep AMCL. FusionCore publishes `odom → base_link`. AMCL publishes `map → odom`. These are different TF edges and are fully compatible: there is no conflict.
 
 ---
 

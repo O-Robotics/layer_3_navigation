@@ -81,6 +81,7 @@ fusioncore:
     gnss.min_fix_type: 1
     gnss.fix2_topic: ""
     gnss.heading_topic: ""
+    gnss.azimuth_topic: ""
 
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
@@ -104,6 +105,11 @@ fusioncore:
     zupt.angular_threshold: 0.05     # rad/s
     zupt.noise_sigma: 0.01
 
+    # Flat-terrain Z position constraint: 0.0 = disabled (default).
+    # Not useful here: ICP-indoor robots have no GPS, so there is no GPS
+    # altitude noise to suppress. Leave at 0.0.
+    ground_constraint.z_position_sigma: 0.0
+
     # ── Startup bias init ─────────────────────────────────────────────────────
     # Recommended indoors: collects 2s of stationary IMU data to estimate bias
     # before the filter starts. Reduces startup drift from ~10cm to <1cm.
@@ -118,6 +124,10 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7
+
+    outlier_threshold_vslam: 22.46
+    adaptive.ground_constraint: true
 
     # ── No GPS coordinate system needed ───────────────────────────────────────
     input.gnss_crs: "EPSG:4326"

@@ -60,6 +60,7 @@ new_stargazers.tsv
 check_new_stars.sh
 
 posts/
+!docs/blog/posts/
 
 # Article drafts, Word docs, and figure generation scripts: not for public repo
 outreach/
@@ -79,6 +80,9 @@ demo_result.png
 benchmarks/**/launch.log
 benchmarks/**/bag/
 
+# Generated video files: reproducible from TUM files via benchmarks/make_video.py
+benchmarks/*.mp4
+
 # Paper source: only the PDF is committed
 paper/*.tex
 paper/*.png
@@ -87,4 +91,10 @@ paper/*.log
 paper/*.out
 paper/*.bbl
 paper/*.blg
+paper/*.zip
 CLAUDE.md
+
+# Client engagement files: local only, never commit
+clients/
+outreach/
+fusioncore-100-deliverables-to-roscon.md

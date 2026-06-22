@@ -141,7 +141,7 @@ Two numbers from your IMU datasheet: `imu.gyro_noise` (ARW spec) and `imu.accel_
 FusionCore stores a rolling IMU buffer and replays intermediate updates when a delayed GPS fix arrives (delay compensation via retrodiction, up to 500 ms). Timestamp jitter is handled by clamping `dt` to `[min_dt, max_dt]`.
 
 **What is the CPU cost?**
-A 22-state UKF at 100 Hz generates 45 sigma points per predict step. On a laptop Intel i7: under 0.2 ms per cycle. On Raspberry Pi 4: under 1 ms per cycle. FusionCore uses Eigen for all matrix operations; Eigen auto-detects NEON on ARM.
+A 23-state UKF at 100 Hz generates 47 sigma points per predict step. On a laptop Intel i7: under 0.2 ms per cycle. On Raspberry Pi 4: under 1 ms per cycle. FusionCore uses Eigen for all matrix operations; Eigen auto-detects NEON on ARM.
 
 **Does it behave the same on ARM (Raspberry Pi, Jetson)?**
 Yes. All matrix operations use Eigen which compiles to NEON on ARM. The NCLT benchmark result is reproducible on ARM within floating-point rounding tolerance.

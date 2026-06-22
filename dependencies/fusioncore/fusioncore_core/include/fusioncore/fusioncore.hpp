@@ -6,13 +6,13 @@
 #include "fusioncore/sensors/encoder.hpp"
 #include "fusioncore/sensors/gnss.hpp"
 #include "fusioncore/sensors/vslam.hpp"
+#include "fusioncore/sensors/magnetometer.hpp"
 #include <chrono>
 #include <optional>
 #include <string>
 #include <deque>
 #include <functional>
 #include <array>
-#include <cstdint>
 
 namespace fusioncore {
 
@@ -22,6 +22,7 @@ struct FusionCoreConfig {
   sensors::EncoderParams encoder;
   sensors::GnssParams    gnss;
   sensors::VslamParams   vslam;
+  sensors::MagParams     mag;
   double min_dt = 1e-6;
   double max_dt = 1.0;
 
@@ -92,11 +93,7 @@ struct FusionCoreConfig {
   double adaptive_alpha = 0.01;
 
   // Max delay to compensate for (seconds). GNSS is typically 100-300ms late.
-  bool enable_delayed_measurement_replay = true;
   double max_measurement_delay = 0.5;
-  double delayed_gnss_forward_covariance_scale = 25.0;
-  double delayed_gnss_forward_covariance_scale_per_second = 25.0;
-  bool decouple_gnss_position_from_yaw = true;
 
   // How many state snapshots to keep. At 100Hz IMU, 50 = 0.5 seconds.
   int snapshot_buffer_size = 50;
@@ -209,10 +206,11 @@ struct FusionCoreConfig {
 
 // How heading was validated: tracked per filter run
 enum class HeadingSource {
-  NONE           = 0,  // no independent heading: lever arm disabled
-  DUAL_ANTENNA   = 1,  // dual GNSS antenna heading received
-  IMU_ORIENTATION = 2, // AHRS/IMU published full orientation
-  GPS_TRACK      = 3,  // robot moved enough for heading to be geometric
+  NONE            = 0,  // no independent heading: lever arm disabled
+  DUAL_ANTENNA    = 1,  // dual GNSS antenna heading received
+  IMU_ORIENTATION = 2,  // AHRS/IMU published full orientation
+  GPS_TRACK       = 3,  // robot moved enough for heading to be geometric
+  MAGNETOMETER    = 4,  // raw magnetometer field fused directly
 };
 
 // Why a GNSS fix was rejected (or ACCEPTED if it passed)
@@ -272,8 +270,10 @@ struct FusionCoreStatus {
   int enc_outliers   = 0;
   int hdg_outliers   = 0;
   int vslam_outliers = 0;
+  int mag_outliers   = 0;
 
   SensorHealth vslam_health = SensorHealth::NOT_INIT;
+  SensorHealth mag_health   = SensorHealth::NOT_INIT;
 
   // Innovation norms: magnitude of the last accepted measurement residual.
   // Zero until the first accepted update from that sensor.
@@ -296,6 +296,11 @@ public:
   explicit FusionCore(const FusionCoreConfig& config = FusionCoreConfig{});
 
   void init(const State& initial_state, double timestamp_seconds);
+
+  // Runtime updater for the IMU lever arm — the ROS wrapper calls this
+  // after auto-resolving base_frame -> imu_frame from TF. Cheap (one
+  // struct copy) and only touches config_.imu.lever_arm.
+  void set_imu_lever_arm(const sensors::ImuLeverArm& lever_arm);
 
   // IMU raw update (gyro + accel)
   void update_imu(
@@ -356,6 +361,16 @@ public:
     const sensors::GnssHeading& heading
   );
 
+  // Raw magnetometer heading update.
+  // Applies hard/soft iron correction, tilt-compensates using current filter
+  // roll/pitch, then fuses the resulting yaw as a 1-DOF UKF measurement.
+  // Call this from a sensor_msgs/MagneticField subscriber callback.
+  // Returns true if the measurement was accepted (passed chi2 gate).
+  bool update_magnetometer(
+    double timestamp_seconds,
+    double mx, double my, double mz
+  );
+
   const State&       get_state()      const;
   FusionCoreStatus   get_status()     const;
   const GnssFixDebug& get_gnss_debug() const { return gnss_debug_; }
@@ -374,6 +389,7 @@ private:
   double last_encoder_time_ = -1.0;
   double last_gnss_time_    = -1.0;
   double last_vslam_time_   = -1.0;
+  double last_mag_time_     = -1.0;
   int    update_count_      = 0;
 
   // ─── Adaptive noise covariance ───────────────────────────────────────────
@@ -453,6 +469,7 @@ private:
   int enc_outliers_    = 0;
   int hdg_outliers_    = 0;
   int vslam_outliers_  = 0;
+  int mag_outliers_    = 0;
 
   // Per-fix observability: updated on every update_gnss() call
   GnssFixDebug gnss_debug_;
@@ -498,12 +515,13 @@ private:
     double last_imu_time;
     double last_encoder_time;
     double last_gnss_time;
-    std::uint64_t replay_event_index;
   };
 
   std::deque<StateSnapshot> snapshot_buffer_;
 
-  // IMU message buffer for legacy replay bookkeeping.
+  // IMU message buffer for full replay retrodiction
+  // Every raw IMU message is stored so that when a delayed GNSS arrives,
+  // we replay all intermediate IMU updates instead of one big predict(dt).
   struct ImuBufferEntry {
     double timestamp;
     double wx, wy, wz;
@@ -511,40 +529,6 @@ private:
     sensors::ImuNoiseMatrix R;
   };
   std::deque<ImuBufferEntry> imu_buffer_;
-
-  enum class ReplayEventType : std::uint8_t {
-    IMU,
-    IMU_ORIENTATION,
-    IMU_RP,
-    ENCODER,
-    GROUND_CONSTRAINT,
-    ZUPT,
-  };
-
-  struct ReplayEvent {
-    std::uint64_t index{0};
-    double timestamp{0.0};
-    ReplayEventType type{ReplayEventType::IMU};
-
-    double a{0.0};
-    double b{0.0};
-    double c{0.0};
-    double d{0.0};
-    double e{0.0};
-    double f{0.0};
-
-    sensors::ImuNoiseMatrix imu_R = sensors::ImuNoiseMatrix::Zero();
-    sensors::ImuOrientationNoiseMatrix imu_orient_R =
-      sensors::ImuOrientationNoiseMatrix::Zero();
-    sensors::ImuRPNoiseMatrix imu_rp_R = sensors::ImuRPNoiseMatrix::Zero();
-    sensors::EncoderNoiseMatrix encoder_R = sensors::EncoderNoiseMatrix::Zero();
-    double ground_vz_var{0.0};
-    double ground_az_var{0.0};
-    bool   ground_has_z_position{false};
-    double ground_z_position_var{0.0};
-  };
-  std::deque<ReplayEvent> replay_buffer_;
-  std::uint64_t next_replay_event_index_{0};
 
   // Heading observability tracking
   bool          heading_validated_ = false;
@@ -581,8 +565,6 @@ private:
     double measurement_timestamp,
     const std::function<void()>& apply_fn
   );
-  void record_replay_event(ReplayEvent event);
-  void replay_event(const ReplayEvent& event);
   void update_distance_traveled(double x, double y, double pre_update_speed = -1.0);
 };
 

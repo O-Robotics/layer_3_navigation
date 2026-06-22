@@ -1,0 +1,274 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <world name="fusioncore_outdoor">
+
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"        name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"  name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system"        name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system"            name="gz::sim::systems::Imu"/>
+
+    <!-- GPS origin: Hamilton, Ontario -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>43.2557</latitude_deg>
+      <longitude_deg>-79.8711</longitude_deg>
+      <elevation>100.0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <!-- Morning sun from ESE, long shadows -->
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 50 0 0 0</pose>
+      <diffuse>0.95 0.92 0.82 1</diffuse>
+      <specular>0.3 0.3 0.2 1</specular>
+      <direction>-0.6 0.3 -0.75</direction>
+      <attenuation><range>1000</range><linear>0.01</linear></attenuation>
+    </light>
+
+    <!-- Ambient fill to avoid pure black shadows -->
+    <light name="ambient_fill" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <diffuse>0.35 0.40 0.45 1</diffuse>
+      <specular>0 0 0 1</specular>
+      <direction>0.3 -0.3 -0.9</direction>
+    </light>
+
+    <!-- ── Ground ─────────────────────────────────────────────────── -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="col">
+          <geometry><plane><normal>0 0 1</normal><size>300 300</size></plane></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><plane><normal>0 0 1</normal><size>300 300</size></plane></geometry>
+          <material>
+            <ambient>0.28 0.42 0.18 1</ambient>
+            <diffuse>0.30 0.48 0.20 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── Barn ───────────────────────────────────────────────────── -->
+    <!-- Main barn body -->
+    <model name="barn_body">
+      <static>true</static>
+      <pose>-28 3 2.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>12 8 5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>12 8 5</size></box></geometry>
+          <material><ambient>0.62 0.10 0.08 1</ambient><diffuse>0.65 0.12 0.09 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Barn roof (ridge beam approx as tilted box) -->
+    <model name="barn_roof_left">
+      <static>true</static>
+      <pose>-28 3 5.8 0 -0.52 0</pose>
+      <link name="link">
+        <visual name="vis">
+          <geometry><box><size>12.4 0.3 4.5</size></box></geometry>
+          <material><ambient>0.35 0.22 0.10 1</ambient><diffuse>0.38 0.25 0.12 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="barn_roof_right">
+      <static>true</static>
+      <pose>-28 3 5.8 0 0.52 0</pose>
+      <link name="link">
+        <visual name="vis">
+          <geometry><box><size>12.4 0.3 4.5</size></box></geometry>
+          <material><ambient>0.35 0.22 0.10 1</ambient><diffuse>0.38 0.25 0.12 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── Silo ───────────────────────────────────────────────────── -->
+    <model name="silo">
+      <static>true</static>
+      <pose>-22 -12 5 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>2.5</radius><length>10</length></cylinder></geometry></collision>
+        <visual name="vis">
+          <geometry><cylinder><radius>2.5</radius><length>10</length></cylinder></geometry>
+          <material><ambient>0.72 0.72 0.70 1</ambient><diffuse>0.75 0.75 0.72 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <!-- Silo dome top -->
+    <model name="silo_dome">
+      <static>true</static>
+      <pose>-22 -12 10.5 0 0 0</pose>
+      <link name="link">
+        <visual name="vis">
+          <geometry><sphere><radius>2.6</radius></sphere></geometry>
+          <material><ambient>0.65 0.65 0.62 1</ambient><diffuse>0.68 0.68 0.65 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── Trees ──────────────────────────────────────────────────── -->
+    <model name="tree_1_trunk">
+      <static>true</static><pose>-10 8 1.5 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><cylinder><radius>0.18</radius><length>3.0</length></cylinder></geometry>
+        <material><ambient>0.35 0.22 0.10 1</ambient></material>
+      </visual></link>
+    </model>
+    <model name="tree_1_canopy">
+      <static>true</static><pose>-10 8 4.5 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><sphere><radius>2.3</radius></sphere></geometry>
+        <material><ambient>0.15 0.42 0.12 1</ambient><diffuse>0.18 0.45 0.14 1</diffuse></material>
+      </visual></link>
+    </model>
+
+    <model name="tree_2_trunk">
+      <static>true</static><pose>-14 -6 1.5 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><cylinder><radius>0.20</radius><length>3.2</length></cylinder></geometry>
+        <material><ambient>0.35 0.22 0.10 1</ambient></material>
+      </visual></link>
+    </model>
+    <model name="tree_2_canopy">
+      <static>true</static><pose>-14 -6 4.8 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><sphere><radius>2.6</radius></sphere></geometry>
+        <material><ambient>0.12 0.40 0.10 1</ambient><diffuse>0.15 0.44 0.13 1</diffuse></material>
+      </visual></link>
+    </model>
+
+    <model name="tree_3_trunk">
+      <static>true</static><pose>6 -14 1.5 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><cylinder><radius>0.16</radius><length>2.8</length></cylinder></geometry>
+        <material><ambient>0.35 0.22 0.10 1</ambient></material>
+      </visual></link>
+    </model>
+    <model name="tree_3_canopy">
+      <static>true</static><pose>6 -14 4.2 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><sphere><radius>2.1</radius></sphere></geometry>
+        <material><ambient>0.17 0.44 0.13 1</ambient><diffuse>0.20 0.48 0.15 1</diffuse></material>
+      </visual></link>
+    </model>
+
+    <model name="tree_4_trunk">
+      <static>true</static><pose>8 16 1.5 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><cylinder><radius>0.19</radius><length>3.1</length></cylinder></geometry>
+        <material><ambient>0.35 0.22 0.10 1</ambient></material>
+      </visual></link>
+    </model>
+    <model name="tree_4_canopy">
+      <static>true</static><pose>8 16 4.6 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><sphere><radius>2.4</radius></sphere></geometry>
+        <material><ambient>0.14 0.41 0.11 1</ambient><diffuse>0.17 0.45 0.14 1</diffuse></material>
+      </visual></link>
+    </model>
+
+    <model name="tree_5_trunk">
+      <static>true</static><pose>-5 22 1.5 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><cylinder><radius>0.17</radius><length>2.9</length></cylinder></geometry>
+        <material><ambient>0.35 0.22 0.10 1</ambient></material>
+      </visual></link>
+    </model>
+    <model name="tree_5_canopy">
+      <static>true</static><pose>-5 22 4.4 0 0 0</pose>
+      <link name="link"><visual name="vis">
+        <geometry><sphere><radius>2.2</radius></sphere></geometry>
+        <material><ambient>0.16 0.43 0.12 1</ambient><diffuse>0.19 0.47 0.15 1</diffuse></material>
+      </visual></link>
+    </model>
+
+    <!-- ── Crop rows (x=25..39, 8 rows, 2m spacing) ───────────────── -->
+    <model name="crop_row_1"><static>true</static><pose>25 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.20 0.50 0.10 1</ambient></material></visual></link></model>
+    <model name="crop_row_2"><static>true</static><pose>27 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.22 0.52 0.11 1</ambient></material></visual></link></model>
+    <model name="crop_row_3"><static>true</static><pose>29 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.20 0.50 0.10 1</ambient></material></visual></link></model>
+    <model name="crop_row_4"><static>true</static><pose>31 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.22 0.52 0.11 1</ambient></material></visual></link></model>
+    <model name="crop_row_5"><static>true</static><pose>33 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.20 0.50 0.10 1</ambient></material></visual></link></model>
+    <model name="crop_row_6"><static>true</static><pose>35 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.22 0.52 0.11 1</ambient></material></visual></link></model>
+    <model name="crop_row_7"><static>true</static><pose>37 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.20 0.50 0.10 1</ambient></material></visual></link></model>
+    <model name="crop_row_8"><static>true</static><pose>39 0 0.25 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.4 40 0.5</size></box></geometry>
+        <material><ambient>0.22 0.52 0.11 1</ambient></material></visual></link></model>
+
+    <!-- ── Fence posts along x=-40 ────────────────────────────────── -->
+    <model name="fence_post_1"><static>true</static><pose>-40 -30 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_2"><static>true</static><pose>-40 -24 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_3"><static>true</static><pose>-40 -18 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_4"><static>true</static><pose>-40 -12 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_5"><static>true</static><pose>-40 -6 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_6"><static>true</static><pose>-40 0 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_7"><static>true</static><pose>-40 6 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_8"><static>true</static><pose>-40 12 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_9"><static>true</static><pose>-40 18 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_10"><static>true</static><pose>-40 24 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_post_11"><static>true</static><pose>-40 30 0.75 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.12 0.12 1.5</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+
+    <!-- Fence rails (horizontal, connecting posts) -->
+    <model name="fence_rail_top"><static>true</static><pose>-40 0 1.3 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.08 60.5 0.08</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+    <model name="fence_rail_mid"><static>true</static><pose>-40 0 0.8 0 0 0</pose>
+      <link name="link"><visual name="vis"><geometry><box><size>0.08 60.5 0.08</size></box></geometry>
+        <material><ambient>0.42 0.28 0.12 1</ambient></material></visual></link></model>
+
+    <!-- ── Robot ──────────────────────────────────────────────────── -->
+    <include>
+      <uri>model://fusioncore_robot</uri>
+      <pose>0 0 0.15 0 0 0</pose>
+    </include>
+
+  </world>
+</sdf>

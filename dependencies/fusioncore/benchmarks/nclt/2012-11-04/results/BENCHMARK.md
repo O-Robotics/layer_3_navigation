@@ -1,40 +1,17 @@
 # Benchmark Results: NCLT Sequence 2012-11-04
 
-## Absolute Trajectory Error (ATE)
+## Metrics (SE3-aligned to RTK ground truth)
 
-| Filter | RMSE (m) | Max error (m) |
-|--------|----------|---------------|
-| FusionCore | 28.609 | 97.971 |
-| RL-EKF | 9.640 | 19.618 |
-
-## Relative Pose Error (RPE, per 10m segment)
-
-| Filter | RMSE (m) |
-|--------|----------|
-| FusionCore | 29.297 |
-| RL-EKF | 18.284 |
+| Filter | ATE RMSE (m) | Within 5 m | Within 10 m | Path Length Ratio | Drift (m/km) | RPE@10m RMSE (m) |
+|--------|-------------|------------|-------------|-------------------|--------------|------------------|
+| FusionCore | 34.254 | 0.0% | 11.9% | 1.1566 | 5.38 | 30.914 |
+| RL-EKF | 40.729 | 0.0% | 3.1% | 0.9424 | 6.39 | 21.872 |
 
 ## Methodology
 
 - Dataset: NCLT (University of Michigan)
 - Sequence: 2012-11-04
 - Ground truth: RTK GPS (gps_rtk.csv) projected to local ENU
-- Evaluation tool: [evo](https://github.com/MichaelGrupp/evo)
-- Alignment: SE(3) alignment
+- Evaluation: [evo](https://github.com/MichaelGrupp/evo), SE(3) alignment
+- Motion model: DifferentialDrive
 - Sensor inputs: identical for all filters (IMU + wheel odom + GPS)
-
-### Reproducing
-
-```bash
-# 1. Download NCLT sequence
-# 2. Run benchmark
-ros2 launch fusioncore_datasets nclt_benchmark.launch.py \
-  data_dir:=/path/to/nclt/2012-11-04 output_bag:=./nclt_results
-# 3. Convert ground truth
-python3 tools/nclt_rtk_to_tum.py --rtk gps_rtk.csv --out gt.tum
-# 4. Extract trajectories
-python3 tools/odom_to_tum.py --bag ./nclt_results --topic /fusion/odom --out fc.tum
-python3 tools/odom_to_tum.py --bag ./nclt_results --topic /rl/odometry --out rl.tum
-# 5. Evaluate
-python3 tools/evaluate.py --gt gt.tum --fusioncore fc.tum --rl rl.tum --sequence 2012-11-04
-```

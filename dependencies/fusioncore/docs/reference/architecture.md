@@ -6,8 +6,8 @@
 fusioncore/
 ├── fusioncore_core/              # Pure C++17 math library. Zero ROS dependency.
 │   ├── include/fusioncore/
-│   │   ├── ukf.hpp               # Unscented Kalman Filter: 45 sigma points
-│   │   ├── state.hpp             # 22-dimensional state vector (quaternion orientation)
+│   │   ├── ukf.hpp               # Unscented Kalman Filter: 47 sigma points
+│   │   ├── state.hpp             # 23-dimensional state vector (quaternion orientation)
 │   │   ├── fusioncore.hpp        # Public API: FusionCore, FusionCoreConfig
 │   │   └── sensors/
 │   │       ├── imu.hpp           # Raw IMU + orientation measurement models
@@ -39,8 +39,8 @@ The core library (`fusioncore_core`) has zero ROS dependency. It can be used in 
 
 | Property | Value |
 |---|---|
-| Filter | Unscented Kalman Filter, 45 sigma points |
-| State vector | 22-dimensional: position (x,y,z), orientation (qw,qx,qy,qz), linear velocity, angular velocity, linear acceleration, gyroscope bias (x,y,z), accelerometer bias (x,y,z) |
+| Filter | Unscented Kalman Filter, 47 sigma points |
+| State vector | 23-dimensional: position (x,y,z), orientation (qw,qx,qy,qz), linear velocity, angular velocity, linear acceleration, gyroscope bias (x,y,z), accelerometer bias (x,y,z), encoder WZ bias |
 | GPS coordinate system | Configurable via PROJ. Default: ECEF (EPSG:4978, globally valid). Supports any PROJ-compatible CRS including UTM zones. |
 | Bias estimation | Continuous online estimation, no calibration required |
 | GPS noise scaling | Covariance scaled by HDOP/VDOP, or full 3×3 message covariance when available |
@@ -59,11 +59,11 @@ The core library (`fusioncore_core`) has zero ROS dependency. It can be used in 
 
 **Working and tested:**
 
-- UKF core: 39 unit tests passing
+- UKF core: 64 unit tests passing (57 in fusioncore_core, 7 in fusioncore_ros)
 - IMU + encoder + GPS fusion
 - Automatic IMU bias estimation
 - ECEF GPS conversion with quality-aware noise scaling
-- Dual antenna heading: `sensor_msgs/Imu`
+- Dual antenna heading: `sensor_msgs/Imu` and `compass_msgs/Azimuth`
 - IMU frame transform via TF
 - TF validation at startup with fix commands
 - GPS lever arm with heading observability guard
@@ -71,7 +71,7 @@ The core library (`fusioncore_core`) has zero ROS dependency. It can be used in 
 - Mahalanobis outlier rejection
 - Adaptive noise covariance
 - GPS delay compensation: full IMU replay retrodiction up to 500 ms
-- Non-holonomic ground constraint (VZ=0)
+- Non-holonomic ground constraint (VZ=0, AZ=0, optional Z position for flat terrain)
 - Zero velocity updates (ZUPT)
 - Per-sensor diagnostics at 1 Hz
 - Filter reset service

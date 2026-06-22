@@ -1,0 +1,26 @@
+{
+  "name": "FusionCore",
+  "image": "ghcr.io/manankharwar/fusioncore:latest",
+  "workspaceFolder": "/fusioncore_ws/src/fusioncore",
+
+  "postCreateCommand": "echo 'source /opt/ros/jazzy/setup.bash && source /fusioncore_ws/install/setup.bash' >> ~/.bashrc",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "ms-python.python",
+        "twxs.cmake"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "C_Cpp.default.compileCommands": "/fusioncore_ws/build/compile_commands.json"
+      }
+    }
+  },
+
+  "remoteEnv": {
+    "ROS_DOMAIN_ID": "42"
+  }
+}

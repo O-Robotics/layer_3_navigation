@@ -3,15 +3,21 @@
 <package format="3">
   <name>fusioncore_ros</name>
   <version>0.3.0</version>
-  <description>ROS 2 UKF sensor fusion for IMU, wheel encoders, GPS, and visual SLAM pose. 22-state filter with ECEF-native GPS handling, automatic IMU bias estimation, adaptive noise covariance, chi-squared outlier rejection on every sensor, and map reinitialization recovery for GPS-denied operation. Drop-in robot_localization alternative. Native ROS 2 Jazzy, benchmarked on 6 NCLT public dataset sequences.</description>
-  <maintainer email="kharwarm@mcmaster.ca">FusionCore</maintainer>
+  <description>ROS 2 UKF sensor fusion for IMU, wheel encoders, GPS, and visual SLAM pose. 23-state filter with ECEF-native GPS handling, online gyro/accel/encoder bias estimation, adaptive noise covariance, chi-squared outlier rejection on every sensor, and map reinitialization recovery for GPS-denied operation. Drop-in robot_localization alternative. Benchmarked on 12 full-length NCLT sequences: wins 10 of 12 vs robot_localization EKF.</description>
+  <maintainer email="manan.kharwar@ansys.com">Manan Kharwar</maintainer>
   <license>Apache-2.0</license>
+  <url type="website">https://github.com/manankharwar/fusioncore</url>
+  <url type="repository">https://github.com/manankharwar/fusioncore</url>
+  <url type="bugtracker">https://github.com/manankharwar/fusioncore/issues</url>
+  <url type="documentation">https://manankharwar.github.io/fusioncore</url>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_auto</buildtool_depend>
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
   <depend>rosidl_default_runtime</depend>
   <depend>geographic_msgs</depend>
+  <depend>gps_msgs</depend>
+  <depend>std_msgs</depend>
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <depend>rclcpp</depend>
@@ -21,6 +27,7 @@
   <depend>geometry_msgs</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
+  <depend>compass_msgs</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>eigen3_cmake_module</depend>
   <depend>fusioncore_core</depend>

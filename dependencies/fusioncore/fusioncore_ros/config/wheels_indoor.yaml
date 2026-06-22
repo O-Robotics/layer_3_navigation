@@ -73,6 +73,7 @@ fusioncore:
     gnss.min_fix_type: 1
     gnss.fix2_topic: ""
     gnss.heading_topic: ""
+    gnss.azimuth_topic: ""
 
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
@@ -96,6 +97,11 @@ fusioncore:
     zupt.angular_threshold: 0.05      # rad/s
     zupt.noise_sigma: 0.01
 
+    # Flat-terrain Z position constraint: 0.0 = disabled (default).
+    # Indoor robots on flat floors can set this to ~0.3 if GPS altitude noise
+    # is causing Z drift. Rarely needed indoors since GPS is not active.
+    ground_constraint.z_position_sigma: 0.0
+
     # ── Startup bias init ─────────────────────────────────────────────────────
     # Recommended indoors: no GPS to correct early drift.
     # Robot must be stationary for 2 seconds after launch.
@@ -109,6 +115,10 @@ fusioncore:
     ukf.q_acceleration: 1.0
     ukf.q_gyro_bias: 1.0e-5
     ukf.q_accel_bias: 1.0e-5
+    ukf.q_encoder_wz_bias: 1.0e-7
+
+    outlier_threshold_vslam: 22.46
+    adaptive.ground_constraint: true
 
     input.gnss_crs: "EPSG:4326"
     output.crs: "EPSG:4978"
