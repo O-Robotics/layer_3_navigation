@@ -935,7 +935,8 @@ MappingNode::MappingNode()
     nav2_local_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNav2LocalCostmap, this, std::placeholders::_1));
-  nav2_local_costmap_updates_subscription_ = create_subscription<nav2_msgs::msg::CostmapUpdate>(
+  nav2_local_costmap_updates_subscription_ =
+    create_subscription<map_msgs::msg::OccupancyGridUpdate>(
     nav2_local_costmap_updates_topic_,
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNav2LocalCostmapUpdate, this, std::placeholders::_1));
@@ -1035,7 +1036,7 @@ void MappingNode::handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPt
 }
 
 void MappingNode::handleNav2LocalCostmapUpdate(
-  const nav2_msgs::msg::CostmapUpdate::SharedPtr message)
+  const map_msgs::msg::OccupancyGridUpdate::SharedPtr message)
 {
   latest_nav2_local_costmap_stamp_ = now();
   if (!nav2_local_costmap_ready_) {
@@ -1044,8 +1045,8 @@ void MappingNode::handleNav2LocalCostmapUpdate(
       get_logger(),
       "Nav2 local costmap updates are now publishing on %s with size=%ux%u.",
       nav2_local_costmap_updates_topic_.c_str(),
-      message->size_x,
-      message->size_y);
+      message->width,
+      message->height);
   }
 }
 

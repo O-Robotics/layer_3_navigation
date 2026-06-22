@@ -13,11 +13,11 @@
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <lifecycle_msgs/srv/get_state.hpp>
+#include <map_msgs/msg/occupancy_grid_update.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav2_msgs/action/follow_waypoints.hpp>
 #include <nav2_msgs/msg/costmap.hpp>
-#include <nav2_msgs/msg/costmap_update.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -104,7 +104,7 @@ private:
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
   void handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
-  void handleNav2LocalCostmapUpdate(const nav2_msgs::msg::CostmapUpdate::SharedPtr message);
+  void handleNav2LocalCostmapUpdate(const map_msgs::msg::OccupancyGridUpdate::SharedPtr message);
   void handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
@@ -266,7 +266,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_local_costmap_subscription_;
-  rclcpp::Subscription<nav2_msgs::msg::CostmapUpdate>::SharedPtr
+  rclcpp::Subscription<map_msgs::msg::OccupancyGridUpdate>::SharedPtr
     nav2_local_costmap_updates_subscription_;
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_global_costmap_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;

@@ -51,33 +51,37 @@ def _set_nested(mapping: dict, path: list[str], value) -> None:
 
 
 def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
+    nav2_params = params_data
+    if namespace_value and isinstance(params_data.get(namespace_value), dict):
+        nav2_params = params_data[namespace_value]
+
     _set_nested(
-        params_data,
+        nav2_params,
         ['global_costmap', 'global_costmap', 'ros__parameters', 'static_layer', 'map_topic'],
         _qualify_topic(namespace_value, 'mapping/global_costmap'),
     )
     _set_nested(
-        params_data,
+        nav2_params,
         ['local_costmap', 'local_costmap', 'ros__parameters', 'obstacle_layer', 'scan', 'topic'],
         _qualify_topic(namespace_value, 'depth_camera/scan'),
     )
     _set_nested(
-        params_data,
+        nav2_params,
         ['behavior_server', 'ros__parameters', 'local_costmap_topic'],
         _qualify_topic(namespace_value, 'local_costmap/costmap_raw'),
     )
     _set_nested(
-        params_data,
+        nav2_params,
         ['behavior_server', 'ros__parameters', 'global_costmap_topic'],
         _qualify_topic(namespace_value, 'global_costmap/costmap_raw'),
     )
     _set_nested(
-        params_data,
+        nav2_params,
         ['behavior_server', 'ros__parameters', 'local_footprint_topic'],
         _qualify_topic(namespace_value, 'local_costmap/published_footprint'),
     )
     _set_nested(
-        params_data,
+        nav2_params,
         ['behavior_server', 'ros__parameters', 'global_footprint_topic'],
         _qualify_topic(namespace_value, 'global_costmap/published_footprint'),
     )

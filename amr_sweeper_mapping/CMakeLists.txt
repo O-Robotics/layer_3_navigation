@@ -11,6 +11,7 @@ find_package(fusioncore_ros REQUIRED)
 find_package(geographic_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
+find_package(map_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
@@ -40,6 +41,7 @@ ament_target_dependencies(${PROJECT_NAME}
   geographic_msgs
   geometry_msgs
   lifecycle_msgs
+  map_msgs
   nav_msgs
   nav2_msgs
   rclcpp
@@ -86,6 +88,7 @@ ament_target_dependencies(
   geographic_msgs
   geometry_msgs
   lifecycle_msgs
+  map_msgs
   nav_msgs
   nav2_msgs
   rclcpp
@@ -147,6 +150,7 @@ ament_export_dependencies(
   geometry_msgs
   geographic_msgs
   lifecycle_msgs
+  map_msgs
   nav_msgs
   nav2_msgs
   rclcpp
