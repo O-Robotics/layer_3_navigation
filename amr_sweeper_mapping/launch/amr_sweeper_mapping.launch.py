@@ -83,6 +83,7 @@ def _build_nodes(context):
     builtin_local_pattern_mode = _uses_odom_only_runtime(mission_type)
     mission_id = configured_mission_id or mission_context.get("mission_id", "")
     mission_file = configured_mission_file or mission_context.get("mission_file", "")
+    execution_mode = str(mission_context.get("execution_mode", "")).strip()
     mission_route_file = mission_context.get("mission_route_file", "")
     mission_run_directory = mission_context.get("mission_run_directory", "")
     mission_window_start = mission_context.get("mission_window_start", "")
@@ -163,6 +164,10 @@ def _build_nodes(context):
         common_runtime_parameters["seeded_map_frame"] = "map"
     if mission_file:
         common_runtime_parameters["mission_file"] = mission_file
+    if mission_type:
+        common_runtime_parameters["mission_type"] = mission_type
+    if execution_mode:
+        common_runtime_parameters["execution_mode"] = execution_mode
     if mission_route_file:
         common_runtime_parameters["mission_route_file"] = mission_route_file
     if mission_id:

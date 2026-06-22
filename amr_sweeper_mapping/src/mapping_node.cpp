@@ -791,6 +791,8 @@ MappingNode::MappingNode()
 : Node("mapping_node")
 {
   declare_parameter("mission_file", std::string(""));
+  declare_parameter("mission_type", std::string(""));
+  declare_parameter("execution_mode", std::string(""));
   declare_parameter("mission_route_file", std::string(kDefaultMissionRoutePath));
   declare_parameter("mission_id", std::string(""));
   declare_parameter("mission_output_directory", std::string(""));
@@ -837,8 +839,11 @@ MappingNode::MappingNode()
 
   mission_file_ = get_parameter("mission_file").as_string();
   const MissionRuntimeProfile mission_profile = loadMissionRuntimeProfile(resolveRuntimePath(mission_file_));
-  mission_type_ = mission_profile.mission_type;
-  execution_mode_ = mission_profile.execution_mode;
+  const std::string configured_mission_type = get_parameter("mission_type").as_string();
+  const std::string configured_execution_mode = get_parameter("execution_mode").as_string();
+  mission_type_ = configured_mission_type.empty() ? mission_profile.mission_type : configured_mission_type;
+  execution_mode_ = configured_execution_mode.empty() ?
+    mission_profile.execution_mode : to_lower(configured_execution_mode);
   mission_route_file_ = get_parameter("mission_route_file").as_string();
   mission_id_ = get_parameter("mission_id").as_string();
   mission_output_directory_ = get_parameter("mission_output_directory").as_string();
