@@ -325,6 +325,8 @@ MapPoseNode::MapPoseNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MapPoseNode::handleNavSat, this, std::placeholders::_1),
     subscription_options);
+  const auto scan_qos = rclcpp::SensorDataQoS().keep_last(50);
+
   heading_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
     heading_topic_,
     rclcpp::SensorDataQoS(),
@@ -332,7 +334,7 @@ MapPoseNode::MapPoseNode()
     subscription_options);
   scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
     scan_topic_,
-    rclcpp::SensorDataQoS(),
+    scan_qos,
     std::bind(&MapPoseNode::handleScan, this, std::placeholders::_1),
     subscription_options);
   global_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
@@ -629,18 +631,18 @@ void MapPoseNode::loadCostmapGeoreference()
   }
 }
 
-void MapPoseNode::rebuildGlobalCostmapScoreFieldLocked()
+std::shared_ptr<std::vector<float>> MapPoseNode::buildGlobalCostmapScoreField(
+  const nav_msgs::msg::OccupancyGrid & map) const
 {
   if (
-    latest_global_costmap_.info.width == 0U || latest_global_costmap_.info.height == 0U ||
-    latest_global_costmap_.info.resolution <= 0.0F)
+    map.info.width == 0U || map.info.height == 0U ||
+    map.info.resolution <= 0.0F)
   {
-    latest_global_costmap_score_field_.reset();
-    return;
+    return nullptr;
   }
 
-  const std::size_t width = latest_global_costmap_.info.width;
-  const std::size_t height = latest_global_costmap_.info.height;
+  const std::size_t width = map.info.width;
+  const std::size_t height = map.info.height;
   const std::size_t cell_count = width * height;
   auto score_field = std::make_shared<std::vector<float>>(
     cell_count,
@@ -673,14 +675,14 @@ void MapPoseNode::rebuildGlobalCostmapScoreFieldLocked()
     };
 
   for (std::size_t index = 0U; index < cell_count; ++index) {
-    if (latest_global_costmap_.data.at(index) >= occupied_threshold_) {
+    if (map.data.at(index) >= occupied_threshold_) {
       const int x = static_cast<int>(index % width);
       const int y = static_cast<int>(index / width);
       enqueue_if_better(x, y, 0.0F);
     }
   }
 
-  const float resolution = latest_global_costmap_.info.resolution;
+  const float resolution = map.info.resolution;
   const float diagonal = resolution * static_cast<float>(std::sqrt(2.0));
   constexpr std::array<int, 8> delta_x{{-1, 0, 1, -1, 1, -1, 0, 1}};
   constexpr std::array<int, 8> delta_y{{-1, -1, -1, 0, 0, 1, 1, 1}};
@@ -704,7 +706,7 @@ void MapPoseNode::rebuildGlobalCostmapScoreFieldLocked()
 
   const double gaussian_denom = 2.0 * likelihood_field_sigma_m_ * likelihood_field_sigma_m_;
   for (std::size_t index = 0U; index < cell_count; ++index) {
-    const int8_t value = latest_global_costmap_.data.at(index);
+    const int8_t value = map.data.at(index);
     if (value < 0) {
       score_field->at(index) = static_cast<float>(unknown_space_score_);
       continue;
@@ -721,7 +723,7 @@ void MapPoseNode::rebuildGlobalCostmapScoreFieldLocked()
       std::exp(-(static_cast<double>(distance) * static_cast<double>(distance)) / gaussian_denom));
   }
 
-  latest_global_costmap_score_field_ = score_field;
+  return score_field;
 }
 
 void MapPoseNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message)
@@ -769,16 +771,26 @@ void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
 
 void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
 {
-  std::lock_guard<std::mutex> lock(state_mutex_);
-  latest_global_costmap_ = *message;
-  latest_global_costmap_stamp_ = now();
-  latest_global_costmap_ready_ =
+  const rclcpp::Time receipt_stamp = now();
+  const nav_msgs::msg::OccupancyGrid map = *message;
+  const bool costmap_ready =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;
-  if (latest_global_costmap_ready_) {
-    rebuildGlobalCostmapScoreFieldLocked();
-  } else {
-    latest_global_costmap_score_field_.reset();
+  std::shared_ptr<std::vector<float>> score_field;
+  if (costmap_ready) {
+    score_field = buildGlobalCostmapScoreField(map);
   }
+
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  if (
+    latest_global_costmap_stamp_.nanoseconds() > 0 &&
+    latest_global_costmap_stamp_ > receipt_stamp)
+  {
+    return;
+  }
+  latest_global_costmap_ = map;
+  latest_global_costmap_stamp_ = receipt_stamp;
+  latest_global_costmap_ready_ = costmap_ready;
+  latest_global_costmap_score_field_ = costmap_ready ? std::move(score_field) : nullptr;
 }
 
 float MapPoseNode::scoreCostmapCell(

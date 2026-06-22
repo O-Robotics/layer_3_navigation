@@ -73,7 +73,8 @@ private:
   void handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void publishMapToOdomTransform();
   void loadCostmapGeoreference();
-  void rebuildGlobalCostmapScoreFieldLocked();
+  [[nodiscard]] std::shared_ptr<std::vector<float>> buildGlobalCostmapScoreField(
+    const nav_msgs::msg::OccupancyGrid & map) const;
   void initializeMapToOdomFilter();
   void initializeMapToOdomFilterLocked();
   void predictMapToOdomFilter();
