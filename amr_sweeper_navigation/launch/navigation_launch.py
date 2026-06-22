@@ -15,6 +15,7 @@
 import os
 from pathlib import Path
 import tempfile
+import math
 
 from ament_index_python.packages import get_package_share_directory
 import yaml
@@ -97,9 +98,10 @@ def _load_mission_costmap_geometry(context):
     resolution_value = float(resolution)
     return {
         "resolution": resolution_value,
-        # Nav2 costmap width/height parameters are meters, not cell counts.
-        "width": float(width) * resolution_value,
-        "height": float(height) * resolution_value,
+        # Nav2 costmap width/height parameters are meters and are handled as integer
+        # sizes internally, so preserve meter semantics without changing parameter type.
+        "width": int(math.ceil(float(width) * resolution_value)),
+        "height": int(math.ceil(float(height) * resolution_value)),
         "origin_x": float(origin[0]),
         "origin_y": float(origin[1]),
     }

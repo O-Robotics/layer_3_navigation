@@ -70,6 +70,7 @@ public:
 
   // Get current state estimate
   const State& state() const { return state_; }
+  State& mutable_state() { return state_; }
 
   bool is_initialized() const { return initialized_; }
 

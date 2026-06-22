@@ -96,6 +96,7 @@ struct FusionCoreConfig {
   double max_measurement_delay = 0.5;
   double delayed_gnss_forward_covariance_scale = 25.0;
   double delayed_gnss_forward_covariance_scale_per_second = 25.0;
+  bool decouple_gnss_position_from_yaw = true;
 
   // How many state snapshots to keep. At 100Hz IMU, 50 = 0.5 seconds.
   int snapshot_buffer_size = 50;
