@@ -13,7 +13,7 @@
     costmap_yaml_path:                   ""                               # Optional static reference costmap YAML, preferably the mission-folder artifact; its embedded georeference metadata is used only to score pose consistency, not to move the live runtime costmap itself.
 
     # -- Publish behavior -----------------------------------------------------
-    publish_period_seconds:              0.5                              # Refresh period for the published map -> odom transform.
+    publish_period_seconds:              0.1                              # Refresh period for the published map -> odom transform.
     publish_identity_when_pose_missing:  true                             # Keep map and odom co-located at startup until the runtime pose estimator has enough evidence to stretch map -> odom.
 
     # -- Scan matching --------------------------------------------------------

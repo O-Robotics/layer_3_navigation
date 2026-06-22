@@ -231,7 +231,7 @@ behavior_server:
     # -- Frames and motion limits ---------------------------------------------
     global_frame:                    odom                                # Recovery behaviors should stay in the same odom frame as builtin local planning.
     robot_base_frame:                base_footprint                      # Robot body frame used by recovery behaviors. Common default is base_link.
-    transform_tolerance:             0.1                                 # TF lookup tolerance in seconds for behavior execution. Common examples use 0.1 s.
+    transform_tolerance:             1.0                                 # TF lookup tolerance in seconds for behavior execution. Keep recoveries tolerant of map -> odom correction cadence.
     use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
     simulate_ahead_time:             2.0                                 # Seconds to project motion ahead for some recovery behaviors. Common examples use 2.0 s.
     max_rotational_vel:              0.3                                 # Maximum rotational speed in rad/s for behavior server motions. Common examples are often higher, around 1.0.
