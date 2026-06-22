@@ -303,6 +303,7 @@ public:
     declare_parameter("replay.max_measurement_delay", 0.5);
     declare_parameter("replay.delayed_gnss_forward_covariance_scale", 25.0);
     declare_parameter("replay.delayed_gnss_forward_covariance_scale_per_second", 25.0);
+    declare_parameter("gnss.decouple_position_from_yaw", true);
     declare_parameter("replay.snapshot_buffer_size", 50);
     declare_parameter("replay.imu_buffer_size", 100);
 
@@ -338,17 +339,20 @@ public:
       std::max(1.0, get_parameter("replay.delayed_gnss_forward_covariance_scale").as_double());
     config.delayed_gnss_forward_covariance_scale_per_second =
       std::max(0.0, get_parameter("replay.delayed_gnss_forward_covariance_scale_per_second").as_double());
+    config.decouple_gnss_position_from_yaw =
+      get_parameter("gnss.decouple_position_from_yaw").as_bool();
     config.snapshot_buffer_size =
       static_cast<int>(std::max<int64_t>(1, get_parameter("replay.snapshot_buffer_size").as_int()));
     config.imu_buffer_size =
       static_cast<int>(std::max<int64_t>(1, get_parameter("replay.imu_buffer_size").as_int()));
     RCLCPP_INFO(
       get_logger(),
-      "Delayed measurement replay: enabled=%s max_delay=%.2fs forward_scale=%.1f forward_scale_per_s=%.1f snapshot_buffer_size=%d imu_buffer_size=%d",
+      "Delayed measurement replay: enabled=%s max_delay=%.2fs forward_scale=%.1f forward_scale_per_s=%.1f gnss_decouple_yaw=%s snapshot_buffer_size=%d imu_buffer_size=%d",
       config.enable_delayed_measurement_replay ? "true" : "false",
       config.max_measurement_delay,
       config.delayed_gnss_forward_covariance_scale,
       config.delayed_gnss_forward_covariance_scale_per_second,
+      config.decouple_gnss_position_from_yaw ? "true" : "false",
       config.snapshot_buffer_size,
       config.imu_buffer_size);
 
