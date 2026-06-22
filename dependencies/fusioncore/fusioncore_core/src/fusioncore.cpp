@@ -5,6 +5,17 @@
 
 namespace fusioncore {
 
+namespace {
+
+constexpr std::array<int, 11> kGnssPositionDecoupledStateIndices = {
+  QW, QX, QY, QZ,
+  WX, WY, WZ,
+  B_GX, B_GY, B_GZ,
+  B_EWZ
+};
+
+}  // namespace
+
 // ─── Adaptive noise covariance implementation ─────────────────────────────
 
 // ─── Mahalanobis outlier rejection ────────────────────────────────────────
@@ -1015,8 +1026,22 @@ bool FusionCore::apply_gnss_update(
   }
   gnss_consecutive_rejects_ = 0;
 
+  const State pre_gnss_state = ukf_.state();
   Eigen::Matrix<double, sensors::GNSS_POS_DIM, 1> innovation =
     ukf_.update<sensors::GNSS_POS_DIM>(z, h_gnss, R);
+
+  if (config_.decouple_gnss_position_from_yaw) {
+    State& post_gnss_state = ukf_.mutable_state();
+    for (int idx : kGnssPositionDecoupledStateIndices) {
+      post_gnss_state.x[idx] = pre_gnss_state.x[idx];
+    }
+    for (int frozen_idx : kGnssPositionDecoupledStateIndices) {
+      for (int j = 0; j < STATE_DIM; ++j) {
+        post_gnss_state.P(frozen_idx, j) = pre_gnss_state.P(frozen_idx, j);
+        post_gnss_state.P(j, frozen_idx) = pre_gnss_state.P(j, frozen_idx);
+      }
+    }
+  }
 
   // Update observability state for accepted fix
   gnss_debug_.accepted           = true;
