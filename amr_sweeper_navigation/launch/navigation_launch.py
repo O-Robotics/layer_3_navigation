@@ -86,7 +86,6 @@ def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
 def _rewrite_nav2_params(context) -> dict:
     rewritten_params_path = _materialize_nav2_params(context, include_root_key=False)
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
-    _qualify_nav2_topics(params_data, namespace_value)
     params_data["__rewritten_params_path__"] = rewritten_params_path
     params_data["__source_params_file__"] = LaunchConfiguration('params_file').perform(context)
     return params_data
@@ -110,6 +109,7 @@ def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
     ).perform(context)
 
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
+    _qualify_nav2_topics(params_data, namespace_value)
 
     temp_file = Path(tempfile.gettempdir()) / (
         f"amr_sweeper_nav2_params_{'namespaced' if include_root_key else 'flat'}_{os.getpid()}.yaml"
