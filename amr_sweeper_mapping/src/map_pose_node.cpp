@@ -325,7 +325,7 @@ MapPoseNode::MapPoseNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MapPoseNode::handleNavSat, this, std::placeholders::_1),
     subscription_options);
-  const auto scan_qos = rclcpp::SensorDataQoS().keep_last(50);
+  const auto scan_qos = rclcpp::QoS(rclcpp::KeepLast(50)).reliable();
 
   heading_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
     heading_topic_,
