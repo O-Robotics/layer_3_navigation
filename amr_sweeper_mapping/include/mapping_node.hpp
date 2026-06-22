@@ -134,6 +134,7 @@ private:
   void initializeMapFromArtifact(const LoadedCostmapArtifact & artifact);
   [[nodiscard]] std::optional<LoadedCostmapArtifact> projectArtifactIntoCurrentMap(
     const LoadedCostmapArtifact & artifact) const;
+  [[nodiscard]] bool useAuthoritativeMissionGeoreference() const;
   void tryInitializeSavedCostmapFromSensors();
   void pruneGeoreferenceSamples();
   [[nodiscard]] std::optional<RawNavSatSample> stabilizedNavSatSample() const;
@@ -249,6 +250,7 @@ private:
   nav_msgs::msg::OccupancyGrid seeded_runtime_map_;
   bool seeded_runtime_map_ready_{false};
   bool saved_costmap_initialized_{false};
+  std::optional<LoadedCostmapArtifact> authoritative_saved_costmap_artifact_;
   std::optional<LoadedCostmapArtifact> pending_saved_costmap_artifact_;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
   mutable std::mutex synchronized_path_mutex_;

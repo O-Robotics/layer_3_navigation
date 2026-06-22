@@ -35,6 +35,8 @@ namespace
 constexpr char kDefaultMissionRoutePath[] = "";
 constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
+constexpr char kScheduledMissionType[] = "vda5050_scheduled_mission";
+constexpr char kLocalScheduledMissionType[] = "vda5050_scheduled_mission_local";
 constexpr char kDefaultNavSatTopic[] = "gnss/navsat";
 constexpr char kDefaultScanTopic[] = "depth_camera/scan";
 
@@ -743,6 +745,7 @@ void saveOccupancyGridArtifact(
   if (!yaml_stream.is_open()) {
     throw std::runtime_error("Failed to write costmap yaml artifact: " + yaml_path.string());
   }
+  yaml_stream << std::setprecision(std::numeric_limits<double>::max_digits10);
   yaml_stream
     << "image: " << image_path.filename().string() << "\n"
     << "mode: trinary\n"
@@ -1215,6 +1218,20 @@ void MappingNode::loadSavedCostmapIfConfigured()
       artifact.height_cells,
       artifact.georeference_sample_count);
     if (artifact.georeference_valid) {
+      authoritative_saved_costmap_artifact_ = artifact;
+      if (useAuthoritativeMissionGeoreference()) {
+        initializeMapFromArtifact(artifact);
+        publishGlobalMaps();
+        saved_costmap_initialized_ = true;
+        georeferenced_costmap_locked_ = true;
+        pending_saved_costmap_artifact_.reset();
+        RCLCPP_INFO(
+          get_logger(),
+          "Loaded georeferenced VDA5050 mission costmap artifact from %s directly into %s without GNSS/IMU startup re-anchoring so it remains an exact overlay of the authored mission geometry.",
+          resolved_path.c_str(),
+          map_frame_id_.c_str());
+        return;
+      }
       pending_saved_costmap_artifact_ = artifact;
       tryInitializeSavedCostmapFromSensors();
       if (pending_saved_costmap_artifact_.has_value()) {
@@ -1251,6 +1268,11 @@ void MappingNode::loadSavedCostmapIfConfigured()
       resolved_path.c_str(),
       exception.what());
   }
+}
+
+bool MappingNode::useAuthoritativeMissionGeoreference() const
+{
+  return mission_type_ == kScheduledMissionType || mission_type_ == kLocalScheduledMissionType;
 }
 
 std::optional<LoadedCostmapArtifact> MappingNode::projectArtifactIntoCurrentMap(
@@ -1991,6 +2013,11 @@ void MappingNode::convertMissionRoute()
   const bool uses_base_footprint_anchor =
     coordinate_frame == "base_footprint" || coordinate_frame == "local";
   const bool uses_geographic_frame = !coordinates.front().use_local_frame;
+  const bool can_use_authoritative_georeference =
+    uses_geographic_frame &&
+    useAuthoritativeMissionGeoreference() &&
+    authoritative_saved_costmap_artifact_.has_value() &&
+    authoritative_saved_costmap_artifact_->georeference_valid;
   if (uses_base_footprint_anchor && !latest_odometry_pose_ready_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
@@ -2002,7 +2029,9 @@ void MappingNode::convertMissionRoute()
     return;
   }
 
-  if (uses_geographic_frame && !fromll_client_->wait_for_service(std::chrono::seconds(1))) {
+  if (uses_geographic_frame && !can_use_authoritative_georeference &&
+    !fromll_client_->wait_for_service(std::chrono::seconds(1)))
+  {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
@@ -2053,19 +2082,31 @@ void MappingNode::convertMissionRoute()
     }
 
     auto request = std::make_shared<fusioncore_ros::srv::FromLL::Request>();
-    request->ll_point.longitude = coordinate.x;
-    request->ll_point.latitude = coordinate.y;
-    request->ll_point.altitude = 0.0;
-    auto future = fromll_client_->async_send_request(request);
-    if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
-    {
-      RCLCPP_WARN(get_logger(), "Timed out converting mission waypoint through %s", fromll_service_name_.c_str());
-      return;
-    }
+    if (can_use_authoritative_georeference) {
+      RawNavSatSample waypoint_navsat;
+      waypoint_navsat.longitude = coordinate.x;
+      waypoint_navsat.latitude = coordinate.y;
+      waypoint_navsat.altitude = 0.0;
+      const geometry_msgs::msg::Point map_point = mapPointFromArtifactGeoreference(
+        *authoritative_saved_costmap_artifact_,
+        waypoint_navsat);
+      pose.pose.position.x = map_point.x;
+      pose.pose.position.y = map_point.y;
+    } else {
+      request->ll_point.longitude = coordinate.x;
+      request->ll_point.latitude = coordinate.y;
+      request->ll_point.altitude = 0.0;
+      auto future = fromll_client_->async_send_request(request);
+      if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+      {
+        RCLCPP_WARN(get_logger(), "Timed out converting mission waypoint through %s", fromll_service_name_.c_str());
+        return;
+      }
 
-    const auto response = future.get();
-    pose.pose.position.x = response->map_point.x;
-    pose.pose.position.y = response->map_point.y;
+      const auto response = future.get();
+      pose.pose.position.x = response->map_point.x;
+      pose.pose.position.y = response->map_point.y;
+    }
     mission_route_.push_back(pose);
   }
 
