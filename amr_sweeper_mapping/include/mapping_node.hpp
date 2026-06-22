@@ -17,6 +17,7 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav2_msgs/action/follow_waypoints.hpp>
 #include <nav2_msgs/msg/costmap.hpp>
+#include <nav2_msgs/msg/costmap_update.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -103,6 +104,7 @@ private:
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
   void handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
+  void handleNav2LocalCostmapUpdate(const nav2_msgs::msg::CostmapUpdate::SharedPtr message);
   void handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
@@ -187,6 +189,7 @@ private:
   std::string end_mission_service_name_;
   std::string waypoint_follower_state_service_name_;
   std::string nav2_local_costmap_topic_;
+  std::string nav2_local_costmap_updates_topic_;
   std::string nav2_global_costmap_topic_;
   double runtime_costmap_save_period_seconds_{10.0};
   double nav2_costmap_ready_timeout_seconds_{2.5};
@@ -263,6 +266,8 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_local_costmap_subscription_;
+  rclcpp::Subscription<nav2_msgs::msg::CostmapUpdate>::SharedPtr
+    nav2_local_costmap_updates_subscription_;
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_global_costmap_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_publisher_;

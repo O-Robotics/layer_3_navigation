@@ -833,6 +833,9 @@ MappingNode::MappingNode()
   declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
   declare_parameter("waypoint_follower_state_service", std::string("waypoint_follower/get_state"));
   declare_parameter("nav2_local_costmap_topic", std::string("local_costmap/costmap_raw"));
+  declare_parameter(
+    "nav2_local_costmap_updates_topic",
+    std::string("local_costmap/costmap_updates"));
   declare_parameter("nav2_global_costmap_topic", std::string("global_costmap/costmap_raw"));
   declare_parameter("nav2_costmap_ready_timeout_seconds", 2.5);
   declare_parameter("end_mission_service", std::string("end_mission"));
@@ -869,6 +872,8 @@ MappingNode::MappingNode()
   waypoint_follower_state_service_name_ =
     get_parameter("waypoint_follower_state_service").as_string();
   nav2_local_costmap_topic_ = get_parameter("nav2_local_costmap_topic").as_string();
+  nav2_local_costmap_updates_topic_ =
+    get_parameter("nav2_local_costmap_updates_topic").as_string();
   nav2_global_costmap_topic_ = get_parameter("nav2_global_costmap_topic").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
@@ -930,6 +935,10 @@ MappingNode::MappingNode()
     nav2_local_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNav2LocalCostmap, this, std::placeholders::_1));
+  nav2_local_costmap_updates_subscription_ = create_subscription<nav2_msgs::msg::CostmapUpdate>(
+    nav2_local_costmap_updates_topic_,
+    rclcpp::SystemDefaultsQoS(),
+    std::bind(&MappingNode::handleNav2LocalCostmapUpdate, this, std::placeholders::_1));
   nav2_global_costmap_subscription_ = create_subscription<nav2_msgs::msg::Costmap>(
     nav2_global_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
@@ -1022,6 +1031,21 @@ void MappingNode::handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPt
       message->metadata.size_x,
       message->metadata.size_y,
       static_cast<double>(message->metadata.resolution));
+  }
+}
+
+void MappingNode::handleNav2LocalCostmapUpdate(
+  const nav2_msgs::msg::CostmapUpdate::SharedPtr message)
+{
+  latest_nav2_local_costmap_stamp_ = now();
+  if (!nav2_local_costmap_ready_) {
+    nav2_local_costmap_ready_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Nav2 local costmap updates are now publishing on %s with size=%ux%u.",
+      nav2_local_costmap_updates_topic_.c_str(),
+      message->size_x,
+      message->size_y);
   }
 }
 

@@ -39,9 +39,54 @@ def _qualify_topic(namespace: str, relative_topic: str) -> str:
     return f'/{cleaned_namespace}/{cleaned_topic}'
 
 
+def _set_nested(mapping: dict, path: list[str], value) -> None:
+    current = mapping
+    for key in path[:-1]:
+        next_value = current.get(key)
+        if not isinstance(next_value, dict):
+            return
+        current = next_value
+    if path[-1] in current:
+        current[path[-1]] = value
+
+
+def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
+    _set_nested(
+        params_data,
+        ['global_costmap', 'global_costmap', 'ros__parameters', 'static_layer', 'map_topic'],
+        _qualify_topic(namespace_value, 'mapping/global_costmap'),
+    )
+    _set_nested(
+        params_data,
+        ['local_costmap', 'local_costmap', 'ros__parameters', 'obstacle_layer', 'scan', 'topic'],
+        _qualify_topic(namespace_value, 'depth_camera/scan'),
+    )
+    _set_nested(
+        params_data,
+        ['behavior_server', 'ros__parameters', 'local_costmap_topic'],
+        _qualify_topic(namespace_value, 'local_costmap/costmap_raw'),
+    )
+    _set_nested(
+        params_data,
+        ['behavior_server', 'ros__parameters', 'global_costmap_topic'],
+        _qualify_topic(namespace_value, 'global_costmap/costmap_raw'),
+    )
+    _set_nested(
+        params_data,
+        ['behavior_server', 'ros__parameters', 'local_footprint_topic'],
+        _qualify_topic(namespace_value, 'local_costmap/published_footprint'),
+    )
+    _set_nested(
+        params_data,
+        ['behavior_server', 'ros__parameters', 'global_footprint_topic'],
+        _qualify_topic(namespace_value, 'global_costmap/published_footprint'),
+    )
+
+
 def _rewrite_nav2_params(context) -> dict:
     rewritten_params_path = _materialize_nav2_params(context, include_root_key=False)
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
+    _qualify_nav2_topics(params_data, namespace_value)
     params_data["__rewritten_params_path__"] = rewritten_params_path
     params_data["__source_params_file__"] = LaunchConfiguration('params_file').perform(context)
     return params_data
