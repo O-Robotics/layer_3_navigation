@@ -210,9 +210,9 @@ TEST(FusionCoreTest, NineAxisIMUStationaryHeadingRemainsStable) {
   config.imu_has_magnetometer = true;
   config.adaptive_imu = false;
   config.outlier_rejection = false;
-  config.encoder.vx_noise = 1e-3;
-  config.encoder.vy_noise = 1e-3;
-  config.encoder.wz_noise = 1e-3;
+  config.encoder.vel_noise_x = 1e-3;
+  config.encoder.vel_noise_y = 1e-3;
+  config.encoder.vel_noise_wz = 1e-3;
 
   FusionCore fc(config);
 
