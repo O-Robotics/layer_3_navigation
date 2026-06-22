@@ -54,10 +54,27 @@ def _load_localization_parameters() -> dict:
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
     with open(config_path, "r", encoding="utf-8") as stream:
         config = yaml.safe_load(stream) or {}
+    if "fusioncore" in config:
+        return config.get("fusioncore", {}).get("ros__parameters", {})
     return config.get("/**", {}).get("ros__parameters", {})
 
 
 def _load_localization_defaults() -> dict[str, str]:
+    package_dir = get_package_share_directory("amr_sweeper_localization")
+    config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
+    with open(config_path, "r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream) or {}
+
+    defaults = config.get("launch_defaults", {}).get("ros__parameters")
+    if isinstance(defaults, dict):
+        return {
+            "use_imu": str(defaults.get("use_imu", True)).lower(),
+            "use_imu2": str(defaults.get("use_imu2", False)).lower(),
+            "use_encoder": str(defaults.get("use_encoder", True)).lower(),
+            "use_visual_odometry": str(defaults.get("use_visual_odometry", False)).lower(),
+            "use_gnss": str(defaults.get("use_gnss", True)).lower(),
+        }
+
     parameters = _load_localization_parameters()
     return {
         "use_imu": str(parameters.get("use_imu", True)).lower(),
@@ -305,6 +322,8 @@ def _build_launches(context):
             "gnss.fix2_topic": _topic_if_enabled(use_gnss, localization_parameters.get("gnss.fix2_topic", "")),
             "gnss.heading_topic": _topic_if_enabled(
                 use_gnss, localization_parameters.get("gnss.heading_topic", "")),
+            "gnss.azimuth_topic": _topic_if_enabled(
+                use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
         }
 
         fusioncore_node = LifecycleNode(
@@ -319,7 +338,12 @@ def _build_launches(context):
             ],
             remappings=[
                 ("/gnss/fix", "gnss/navsat" if use_gnss else "_gnss_disabled"),
+                ("/odom/wheels", "drive_controller/odom" if use_encoder else "_encoder_disabled"),
                 ("/fusion/odom", "localization/odometry_fused"),
+                ("/fusion/pose", "localization/pose"),
+                ("/fusion/debug/gnss_status", "localization/debug/gnss_status"),
+                ("/fusion/debug/filter_health", "localization/debug/filter_health"),
+                ("/diagnostics", "diagnostics"),
             ],
         )
 
