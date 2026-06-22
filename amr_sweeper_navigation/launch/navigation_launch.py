@@ -94,10 +94,12 @@ def _load_mission_costmap_geometry(context):
         return None
 
     width, height = _read_pgm_size(image_path)
+    resolution_value = float(resolution)
     return {
-        "resolution": float(resolution),
-        "width": int(width),
-        "height": int(height),
+        "resolution": resolution_value,
+        # Nav2 costmap width/height parameters are meters, not cell counts.
+        "width": float(width) * resolution_value,
+        "height": float(height) * resolution_value,
         "origin_x": float(origin[0]),
         "origin_y": float(origin[1]),
     }
