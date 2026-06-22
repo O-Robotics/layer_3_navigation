@@ -30,6 +30,8 @@ controller_server:
     failure_tolerance:               0.3                                 # Extra seconds of controller failure tolerance before aborting. Common examples often use 0.3.
     progress_checker_plugins:        ["progress_checker"]                # Progress checker plugins available to the controller. Jazzy expects this plural key.
     goal_checker_plugins:            ["general_goal_checker"]            # Goal checker plugins available to the controller. Common examples load one SimpleGoalChecker.
+    current_progress_checker:        "progress_checker"                  # Explicitly select the active progress checker so Nav2 does not warn while defaulting to the only loaded plugin.
+    current_goal_checker:            "general_goal_checker"              # Explicitly select the active goal checker so Nav2 does not warn while defaulting to the only loaded plugin.
     controller_plugins:              ["FollowPath"]                      # Builtin local missions now use Rotation Shim wrapping RPP so heading acquisition and exact path tracking are handled separately.
 
     # -- Progress checking -----------------------------------------------------
