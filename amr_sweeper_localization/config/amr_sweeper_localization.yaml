@@ -1,142 +1,148 @@
 /**:
   ros__parameters:
     # -- General settings ------------------------------------------------------    
-    base_frame:                            base_footprint  # Robot body frame used by FusionCore for state output and TF.
-    odom_frame:                            odom            # Local odometry frame FusionCore publishes against.
-    publish_rate:                          50.0            # Filter output publish rate in Hz.
-    publish.force_2d:                      true            # Ground robot mode: zero Z translation/velocity while keeping roll and pitch in the internal filter state.
-    publish.tf:                            true            # Broadcast the odom -> base_footprint transform.
-    publish.yaw_only:                      true            # Publish odom -> base_footprint with yaw only; layer 2 already drives roll/pitch via base_footprint -> base_link.
-    replay.enable_delayed_measurement_replay: false        # Bypass rollback/replay for delayed GNSS; instead fuse stale fixes softly at the current filter time with inflated covariance.
-    replay.max_measurement_delay:          2.0             # Retained for diagnostics and future replay experiments; ignored when delayed-measurement replay is disabled.
-    replay.delayed_gnss_forward_covariance_scale: 25.0     # Minimum covariance inflation applied when a GNSS fix is fused forward instead of replayed backward in time.
+    base_frame:                                   base_footprint   # Robot body frame used by FusionCore for state output and TF.
+    odom_frame:                                   odom             # Local odometry frame FusionCore publishes against.
+    publish_rate:                                 50.0             # Filter output publish rate in Hz.
+    publish.force_2d:                             true             # Ground robot mode: zero Z translation/velocity while keeping roll and pitch in the internal filter state.
+    publish.tf:                                   true             # Broadcast the odom -> base_footprint transform.
+    publish.yaw_only:                             true             # Publish odom -> base_footprint with yaw only; layer 2 already drives roll/pitch via base_footprint -> base_link.
+    replay.enable_delayed_measurement_replay:     false            # Bypass rollback/replay for delayed GNSS; instead fuse stale fixes softly at the current filter time with inflated covariance.
+    replay.max_measurement_delay:                 2.0              # Retained for diagnostics and future replay experiments; ignored when delayed-measurement replay is disabled.
+    replay.delayed_gnss_forward_covariance_scale: 25.0             # Minimum covariance inflation applied when a GNSS fix is fused forward instead of replayed backward in time.
     replay.delayed_gnss_forward_covariance_scale_per_second: 25.0  # Additional covariance inflation slope for stale GNSS fused at the current filter time.
-    replay.snapshot_buffer_size:           300             # Keep about 3-6 s of rollback snapshots, depending on the effective IMU/orientation callback rate, so 2 s delayed GNSS can still find a pre-fix state.
-    replay.imu_buffer_size:                300             # Retain enough IMU/encoder/orientation history to replay forward after applying a delayed GNSS update.
-
+    replay.snapshot_buffer_size:                  300              # Keep about 3-6 s of rollback snapshots, depending on the effective IMU/orientation callback rate, so 2 s delayed GNSS can still find a pre-fix state.
+    replay.imu_buffer_size:                       300              # Retain enough IMU/encoder/orientation history to replay forward after applying a delayed GNSS update.
+      
     # -- IMU -------------------------------------------------------------------
-    use_imu:                               true            # Default launch-time toggle for the primary IMU input.
-    imu.topic:                             imu/data_raw    # Primary IMU topic consumed by FusionCore; resolves under the selected robot namespace.
-    imu.has_magnetometer:                  true            # The physical IMU includes a magnetometer, and FusionCore now fuses that orientation directly from the configured IMU topic.
-    imu.gyro_noise:                        0.005           # Gyro measurement noise in rad/s.
-    imu.accel_noise:                       0.25            # Slightly looser accelerometer noise to stop small standstill vibration/residual gravity errors from looking like true motion.
-    imu.deadband.angular_velocity:         0.01            # rad/s: zero tiny IMU gyro chatter before the measurement reaches FusionCore.
-    imu.deadband.linear_acceleration:      0.02            # m/s^2: zero tiny IMU accel chatter in base_footprint before FusionCore sees it.
-    imu.orientation_deadband.roll:         0.001           # rad: hold the previous IMU roll sample when only jitter is changing.
-    imu.orientation_deadband.pitch:        0.001           # rad: hold the previous IMU pitch sample when only jitter is changing.
-    imu.orientation_deadband.yaw:          0.001           # rad: hold the previous IMU yaw sample when only jitter is changing.
-    imu.frame_id:                          imu_link        # Override IMU frame when the incoming message frame_id is missing or inconsistent.
-    imu.remove_gravitational_acceleration: false           # Driver publishes raw specific force, so gravity stays in the message.
+    use_imu:                                      true             # Default launch-time toggle for the primary IMU input.
+    imu.frame_id:                                 imu_link         # Override IMU frame when the incoming message frame_id is missing or inconsistent.
+    imu.topic:                                    imu/data_raw     # Primary IMU topic consumed by FusionCore; resolves under the selected robot namespace.
+    imu.has_magnetometer:                         true             # The physical IMU includes a magnetometer, and FusionCore now fuses that orientation directly from the configured IMU topic.
+    imu.remove_gravitational_acceleration:        false            # Driver publishes raw specific force, so gravity stays in the message.
+    imu.noise.gyro:                               0.005            # [rad/s] absolute gyro measurement noise used by FusionCore.
+    imu.noise.accel:                              0.25             # [m/s^2] absolute accelerometer measurement noise used by FusionCore.
+    imu.deadband.angular_velocity:                0.01             # [rad/s] zero tiny IMU gyro chatter before the measurement reaches FusionCore.
+    imu.deadband.linear_acceleration:             0.02             # [m/s^2] zero tiny stationary IMU accel residuals in base_footprint before FusionCore sees them.
+    imu.deadband.orientation_roll:                0.001            # [rad] hold the previous IMU roll sample when only jitter is changing.
+    imu.deadband.orientation_pitch:               0.001            # [rad] hold the previous IMU pitch sample when only jitter is changing.
+    imu.deadband.orientation_yaw:                 0.001            # [rad] hold the previous IMU yaw sample when only jitter is changing.
 
+       
     # -- Secondary IMU ---------------------------------------------------------
-    use_imu2:                              false           # Default launch-time toggle for the optional secondary IMU input.
-    imu2.topic:                            ""              # Optional second IMU topic; leave empty to disable the secondary IMU.
-    imu2.frame_id:                         ""              # Optional frame override for the second IMU. 
-    imu2.remove_gravitational_acceleration: false          # Same semantics as imu.remove_gravitational_acceleration for the second IMU.
-    imu2.deadband.angular_velocity:        0.01            # rad/s: same gyro deadband for the optional second IMU.
-    imu2.deadband.linear_acceleration:     0.02            # m/s^2: same accel deadband for the optional second IMU.
-    imu2.orientation_deadband.roll:        0.001           # rad: suppress tiny roll jitter from the second IMU orientation feed.
-    imu2.orientation_deadband.pitch:       0.001           # rad: suppress tiny pitch jitter from the second IMU orientation feed.
-    imu2.orientation_deadband.yaw:         0.001           # rad: suppress tiny yaw jitter from the second IMU orientation feed.
-
+    use_imu2:                                     false            # Default launch-time toggle for the optional secondary IMU input.
+    imu2.frame_id:                                ""               # Optional frame override for the second IMU. 
+    imu2.topic:                                   ""               # Optional second IMU topic; leave empty to disable the secondary IMU.
+    imu2.has_magnetometer:                        false            # The physical IMU includes a magnetometer, and FusionCore now fuses that orientation directly from the configured IMU topic.
+    imu2.remove_gravitational_acceleration:       false            # Same semantics as imu.remove_gravitational_acceleration for the second IMU.
+    imu2.noise.gyro:                              0.005            # [rad/s] absolute gyro measurement noise for the optional second IMU.
+    imu2.noise.accel:                             0.25             # [m/s^2] absolute accelerometer measurement noise for the optional second IMU.
+    imu2.deadband.angular_velocity:               0.01             # [rad/s] zero tiny gyro chatter from the optional second IMU.
+    imu2.deadband.linear_acceleration:            0.02             # [m/s^2] zero tiny stationary accel residuals from the optional second IMU before FusionCore sees them.
+    imu2.deadband.orientation_roll:               0.001            # [rad] suppress tiny roll jitter from the second IMU orientation feed.
+    imu2.deadband.orientation_pitch:              0.001            # [rad] suppress tiny pitch jitter from the second IMU orientation feed.
+    imu2.deadband.orientation_yaw:                0.001            # [rad] suppress tiny yaw jitter from the second IMU orientation feed.
+       
     # -- Wheel Odometry --------------------------------------------------------
-    use_encoder:                           true            # Default launch-time toggle for wheel odometry input.
-    encoder.topic:                         drive_controller/odom  # Primary wheel-odometry topic consumed by FusionCore; resolves under the selected robot namespace.
-    encoder.vel_noise:                     0.05            # Linear velocity measurement noise in m/s for wheel odometry.
-    encoder.yaw_noise:                     0.02            # Yaw-rate measurement noise in rad/s for wheel odometry.
-    encoder.deadband.linear_velocity:      0.002           # m/s: zero tiny wheel-speed chatter before fusion and ZUPT logic.
-    encoder.deadband.angular_velocity:     0.002           # rad/s: zero tiny wheel yaw-rate chatter before fusion and ZUPT logic.
-
+    use_encoder:                                  true             # Default launch-time toggle for wheel odometry input.
+    encoder.topic:                                drive_controller/odom  # Primary wheel-odometry topic consumed by FusionCore; resolves under the selected robot namespace.
+    encoder.noise.linear_velocity:                0.05             # [m/s] absolute wheel-odometry linear-velocity measurement noise.
+    encoder.noise.angular_velocity:               0.02             # [rad/s] absolute wheel-odometry yaw-rate measurement noise.
+    encoder.deadband.linear_velocity:             0.002            # [m/s] zero tiny wheel-speed chatter before fusion and ZUPT logic.
+    encoder.deadband.angular_velocity:            0.002            # [rad/s] zero tiny wheel yaw-rate chatter before fusion and ZUPT logic.
+       
     # -- Visual Odometry -------------------------------------------------------
-    use_visual_odometry:                   false           # Default launch-time toggle for FusionCore encoder2 visual-odometry input.
-    encoder2.topic:                        visual_odometry/odom  # Optional visual-odometry topic published by amr_sweeper_visual_odometry inside the robot namespace.
-    encoder2.vel_noise:                    0.03            # Visual-odometry linear-velocity measurement noise in m/s.
-    encoder2.yaw_noise:                    0.01            # Visual-odometry yaw-rate measurement noise in rad/s.
-    encoder2.deadband.linear_velocity:     0.002           # m/s: zero tiny visual-odometry velocity chatter before fusion.
-    encoder2.deadband.angular_velocity:    0.002           # rad/s: zero tiny visual-odometry yaw-rate chatter before fusion.
-    radar.deadband.linear_velocity:        0.01            # m/s: zero tiny radar Doppler ego-velocity jitter before fusion when radar velocity is enabled.
-
+    use_visual_odometry:                          false            # Default launch-time toggle for FusionCore encoder2 visual-odometry input.
+    encoder2.topic:                               visual_odometry/odom  # Optional visual-odometry topic published by amr_sweeper_visual_odometry inside the robot namespace.
+    encoder2.noise.linear_velocity:               0.03             # [m/s] absolute visual-odometry linear-velocity measurement noise.
+    encoder2.noise.angular_velocity:              0.01             # [rad/s] absolute visual-odometry yaw-rate measurement noise.
+    encoder2.deadband.linear_velocity:            0.002            # [m/s] zero tiny visual-odometry velocity chatter before fusion.
+    encoder2.deadband.angular_velocity:           0.002            # [rad/s] zero tiny visual-odometry yaw-rate chatter before fusion.
+    radar.deadband.linear_velocity:               0.01             # [m/s] zero tiny radar Doppler ego-velocity jitter before fusion when radar velocity is enabled.
+       
     # -- GNSS ------------------------------------------------------------------
-    use_gnss:                              true            # Default launch-time toggle for primary GNSS input.
-    gnss.base_noise_xy:                    1.5             # Baseline horizontal GNSS sigma in meters before HDOP/covariance scaling.
-    gnss.base_noise_z:                     3.0             # Baseline vertical GNSS sigma in meters.
-    gnss.heading_noise:                    0.02            # Heading measurement noise in radians for dual-antenna or azimuth inputs.
-    gnss.position_covariance_scale:        400.0           # Down-weight every GNSS position fix, including full-covariance RTK fixes, so GNSS only nudges the filter instead of steering a stationary robot.
-    gnss.min_horizontal_stddev_m:          0.5             # Match the upstream GNSS publisher floor so FusionCore never assumes tighter horizontal covariance than the NavSatFix source claims.
-    gnss.min_vertical_stddev_m:            1.0             # Match the upstream GNSS publisher vertical floor for consistent covariance handling across both packages.
-    gnss.position_deadband_xy:             0.02            # m: hold the previous GNSS XY fix when only centimeter-scale jitter is reported.
-    gnss.position_deadband_z:              0.05            # m: hold the previous GNSS altitude when only tiny jitter is reported.
-    gnss.max_hdop:                         4.0             # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
-    gnss.max_vdop:                         6.0             # Vertical dilution threshold used by FusionCore's GNSS quality gate.
-    gnss.min_satellites:                   4               # Minimum satellite count required before fusing GNSS.
-    gnss.suppress_position_while_stationary: true          # Hard-stop GNSS position fusion at standstill so stationary RTK jitter cannot walk the fused odom pose.
-    gnss.stationary_covariance_scale:      100.0           # When encoder + IMU agree the robot is standing still, inflate GNSS covariance by 100x so zero-motion encoder/IMU evidence dominates and GNSS only nudges pose slowly.
-    gnss.stationary_covariance_ramp_seconds: 3.0           # Ease the stationary GNSS covariance multiplier in and out over 3 s so replay jitter or the first movement sample does not cause one-frame weighting jumps.
-    gnss.stationary_encoder_timeout:       0.5             # Treat encoder samples within 0.5 s of the GNSS stamp as valid standstill evidence; delayed GNSS replay is allowed this same skew window.
-    gnss.stationary_imu_timeout:           0.5             # Require a reasonably fresh IMU sample before using IMU motion cues in the standstill covariance inflation logic.
-    gnss.stationary_imu_angular_threshold: 0.05            # rad/s: if IMU body-rate exceeds this, stop applying the standstill GNSS covariance inflation.
-    gnss.stationary_imu_accel_threshold:   0.2             # m/s^2 dynamic acceleration after gravity removal; above this, stop applying the standstill GNSS covariance inflation.
-    gnss.startup_delay_seconds:            5.0             # Let IMU + wheel odom settle first; GNSS still establishes the datum immediately but position fusion waits this long after filter init.
-    gnss.startup_ramp_seconds:             15.0            # After the delay, taper GNSS position covariance back down over this many seconds instead of letting the first fixes yank odom.
-    gnss.startup_initial_covariance_scale: 25.0            # Start the GNSS ramp with 25x covariance so the first accepted fixes are very soft corrections.
-    gnss.soft_position_reject_start_m:     0.5             # Once GNSS sits more than 0.5 m from the current fused pose, start distrusting it progressively instead of accepting it at full weight.
-    gnss.soft_position_reject_end_m:       3.0             # By 3 m XY innovation, treat the fix as heavily suspect and inflate its covariance to the configured cap.
-    gnss.soft_position_max_covariance_scale: 20.0          # Maximum extra covariance inflation for large reflected / multipath jumps during runtime.
-    gnss.min_fix_type:                     1               # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
-    gnss.fix2_topic:                       ""              # Optional second GNSS receiver topic; leave empty to disable.
-    gnss.heading_topic:                    ""              # Disabled because yaw is fused directly from the configured IMU topic.
-    gnss.heading_deadband:                 0.001           # rad: hold the previous GNSS heading when only tiny jitter is reported.
-    gnss.velocity_deadband.linear_velocity: 0.01          # m/s: zero tiny GNSS velocity jitter before it is fused as body-frame speed.
-    gnss.decouple_position_from_yaw:       true            # Freeze orientation and angular yaw-related states across GNSS position updates so position fixes cannot rotate a stationary robot.
-    gnss.lever_arm_x:                      0.0             # Lever arm disabled: use GNSS as if mounted at the base frame so stationary GNSS fixes cannot rotate yaw through the antenna-offset model.
-    gnss.lever_arm_y:                      0.0             # Lever arm disabled alongside X/Z for consistent GNSS position fusion.
-    gnss.lever_arm_z:                      0.0             # Lever arm disabled: removes the z-offset coupling that was letting centimeter-scale GNSS shifts produce large yaw jumps while stationary.
-
+    use_gnss:                                     true             # Default launch-time toggle for primary GNSS input.
+    gnss.noise.base_xy:                           1.5              # [m] absolute baseline horizontal GNSS sigma before HDOP/covariance scaling.
+    gnss.noise.base_z:                            3.0              # [m] absolute baseline vertical GNSS sigma.
+    gnss.noise.heading:                           0.02             # [rad] absolute GNSS heading measurement noise for dual-antenna or azimuth inputs.
+    gnss.position_covariance_scale:               400.0            # Down-weight every GNSS position fix, including full-covariance RTK fixes, so GNSS only nudges the filter instead of steering a stationary robot.
+    gnss.min_horizontal_stddev_m:                 0.5              # Match the upstream GNSS publisher floor so FusionCore never assumes tighter horizontal covariance than the NavSatFix source claims.
+    gnss.min_vertical_stddev_m:                   1.0              # Match the upstream GNSS publisher vertical floor for consistent covariance handling across both packages.
+    gnss.deadband.position_xy:                    0.02             # [m] hold the previous GNSS XY fix when only centimeter-scale jitter is reported.
+    gnss.deadband.position_z:                     0.05             # [m] hold the previous GNSS altitude when only tiny jitter is reported.
+    gnss.max_hdop:                                4.0              # Current RTK-fixed receiver behavior reaches ~7 HDOP during startup; accept those fixes instead of rejecting them outright.
+    gnss.max_vdop:                                6.0              # Vertical dilution threshold used by FusionCore's GNSS quality gate.
+    gnss.min_satellites:                          4                # Minimum satellite count required before fusing GNSS.
+    gnss.suppress_position_while_stationary:      true             # Hard-stop GNSS position fusion at standstill so stationary RTK jitter cannot walk the fused odom pose.
+    gnss.stationary_covariance_scale:             100.0            # When encoder + IMU agree the robot is standing still, inflate GNSS covariance by 100x so zero-motion encoder/IMU evidence dominates and GNSS only nudges pose slowly.
+    gnss.stationary_covariance_ramp_seconds:      3.0              # Ease the stationary GNSS covariance multiplier in and out over 3 s so replay jitter or the first movement sample does not cause one-frame weighting jumps.
+    gnss.stationary_encoder_timeout:              0.5              # Treat encoder samples within 0.5 s of the GNSS stamp as valid standstill evidence; delayed GNSS replay is allowed this same skew window.
+    gnss.stationary_imu_timeout:                  0.5              # Require a reasonably fresh IMU sample before using IMU motion cues in the standstill covariance inflation logic.
+    gnss.stationary_imu_angular_threshold:        0.05             # rad/s: if IMU body-rate exceeds this, stop applying the standstill GNSS covariance inflation.
+    gnss.stationary_imu_accel_threshold:          0.2              # m/s^2 dynamic acceleration after gravity removal; above this, stop applying the standstill GNSS covariance inflation.
+    gnss.startup_delay_seconds:                   5.0              # Let IMU + wheel odom settle first; GNSS still establishes the datum immediately but position fusion waits this long after filter init.
+    gnss.startup_ramp_seconds:                    15.0             # After the delay, taper GNSS position covariance back down over this many seconds instead of letting the first fixes yank odom.
+    gnss.startup_initial_covariance_scale:        25.0             # Start the GNSS ramp with 25x covariance so the first accepted fixes are very soft corrections.
+    gnss.soft_position_reject_start_m:            0.5              # Once GNSS sits more than 0.5 m from the current fused pose, start distrusting it progressively instead of accepting it at full weight.
+    gnss.soft_position_reject_end_m:              3.0              # By 3 m XY innovation, treat the fix as heavily suspect and inflate its covariance to the configured cap.
+    gnss.soft_position_max_covariance_scale:      20.0             # Maximum extra covariance inflation for large reflected / multipath jumps during runtime.
+    gnss.min_fix_type:                            1                # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED.
+    gnss.fix2_topic:                              ""               # Optional second GNSS receiver topic; leave empty to disable.
+    gnss.heading_topic:                           ""               # Disabled because yaw is fused directly from the configured IMU topic.
+    gnss.deadband.heading:                        0.001            # [rad] hold the previous GNSS heading when only tiny jitter is reported.
+    gnss.deadband.linear_velocity:                0.01             # [m/s] zero tiny GNSS velocity jitter before it is fused as body-frame speed.
+    gnss.decouple_position_from_yaw:              true             # Freeze orientation and angular yaw-related states across GNSS position updates so position fixes cannot rotate a stationary robot.
+    gnss.lever_arm_x:                             0.0              # Lever arm disabled: use GNSS as if mounted at the base frame so stationary GNSS fixes cannot rotate yaw through the antenna-offset model.
+    gnss.lever_arm_y:                             0.0              # Lever arm disabled alongside X/Z for consistent GNSS position fusion.
+    gnss.lever_arm_z:                             0.0              # Lever arm disabled: removes the z-offset coupling that was letting centimeter-scale GNSS shifts produce large yaw jumps while stationary.
+       
     # -- Outlier rejection -----------------------------------------------------
-    outlier_rejection:                     true
-    outlier_threshold_gnss:                16.27           # Mahalanobis gate for GNSS position innovations after the GNSS quality gate passes.
-    outlier_threshold_imu:                 15.09           # Chi-square gate for IMU innovations after startup orientation is seeded from the IMU.
-    outlier_threshold_enc:                 11.34           # Chi-square gate for encoder twist innovations.
-    outlier_threshold_hdg:                 10.83           # Chi-square gate for heading innovations.
-
+    outlier_rejection:                            true
+    outlier_threshold_gnss:                       16.27            # Mahalanobis gate for GNSS position innovations after the GNSS quality gate passes.
+    outlier_threshold_imu:                        15.09            # Chi-square gate for IMU innovations after startup orientation is seeded from the IMU.
+    outlier_threshold_enc:                        11.34            # Chi-square gate for encoder twist innovations.
+    outlier_threshold_hdg:                        10.83            # Chi-square gate for heading innovations.
+       
     # -- Adaptive noise --------------------------------------------------------
-    adaptive.imu:                          true
-    adaptive.encoder:                      true
-    adaptive.gnss:                         true
-    adaptive.window:                       50              # Number of recent samples tracked for online covariance adaptation.
-    adaptive.alpha:                        0.01            # Learning rate for adaptive covariance updates.
-    init.stationary_window:                2.0             # Seconds to observe a stationary robot for startup bias initialization.
-
+    adaptive.imu:                                 true
+    adaptive.encoder:                             true
+    adaptive.gnss:                                true
+    adaptive.window:                              50               # Number of recent samples tracked for online covariance adaptation.
+    adaptive.alpha:                               0.01             # Learning rate for adaptive covariance updates.
+    init.stationary_window:                       2.0              # Seconds to observe a stationary robot for startup bias initialization.
+       
     # -- Zero-velocity updates -------------------------------------------------
-    zupt.enabled:                          true
-    zupt.velocity_threshold:               0.05            # Treat the robot as stopped below this linear speed in m/s.
-    zupt.angular_threshold:                0.05            # Treat the robot as not rotating below this angular speed in rad/s.
-    zupt.noise_sigma:                      0.01            # ZUPT pseudo-measurement sigma in m/s.
-
+    zupt.enabled:                                 true
+    zupt.velocity_threshold:                      0.05             # Treat the robot as stopped below this linear speed in m/s.
+    zupt.angular_threshold:                       0.05             # Treat the robot as not rotating below this angular speed in rad/s.
+    zupt.noise_sigma:                             0.01             # ZUPT pseudo-measurement sigma in m/s.
+       
     # -- Motion model ----------------------------------------------------------
-    motion_model:                          "DifferentialDrive"  # Ground robot: constrain lateral velocity in prediction so GNSS corrections cannot as easily leak into sideways motion.
-
+    motion_model:                                 "DifferentialDrive"  # Ground robot: constrain lateral velocity in prediction so GNSS corrections cannot as easily leak into sideways motion.
+       
     # -- VSLAM deadbands -------------------------------------------------------
-    vslam.position_deadband_xy:            0.01            # m: hold the previous VSLAM XY pose when only tiny jitter is reported.
-    vslam.position_deadband_z:             0.01            # m: hold the previous VSLAM Z pose when only tiny jitter is reported.
-    vslam.orientation_deadband.roll:       0.001           # rad: hold the previous VSLAM roll when only tiny jitter is reported.
-    vslam.orientation_deadband.pitch:      0.001           # rad: hold the previous VSLAM pitch when only tiny jitter is reported.
-    vslam.orientation_deadband.yaw:        0.001           # rad: hold the previous VSLAM yaw when only tiny jitter is reported.
-
+    vslam.noise.position:                         0.10             # [m] absolute VSLAM position measurement noise.
+    vslam.noise.orientation:                      0.02             # [rad] absolute VSLAM orientation measurement noise.
+    vslam.deadband.position_xy:                   0.01             # [m] hold the previous VSLAM XY pose when only tiny jitter is reported.
+    vslam.deadband.position_z:                    0.01             # [m] hold the previous VSLAM Z pose when only tiny jitter is reported.
+    vslam.deadband.orientation_roll:              0.001            # [rad] hold the previous VSLAM roll when only tiny jitter is reported.
+    vslam.deadband.orientation_pitch:             0.001            # [rad] hold the previous VSLAM pitch when only tiny jitter is reported.
+    vslam.deadband.orientation_yaw:               0.001            # [rad] hold the previous VSLAM yaw when only tiny jitter is reported.
+       
     # -- UKF process noise -----------------------------------------------------
-    ukf.q_position:                        0.01
-    ukf.q_orientation:                     1.0e-9          # Quaternion regularization / orientation process noise floor.
-    ukf.q_velocity:                        0.01            # Much tighter velocity process noise for a sweeper that should remain still unless encoder/IMU evidence says otherwise.
-    ukf.q_angular_vel:                     0.01            # Reduce spurious body-rate growth between real measurements; helps keep stationary yaw stable.
-    ukf.q_acceleration:                    0.2             # Reduce how freely the filter lets acceleration states wander when the robot is actually stopped.
-    ukf.q_gyro_bias:                       1.0e-5
-    ukf.q_accel_bias:                      1.0e-4          # Let accel bias adapt faster so persistent small offsets are absorbed as bias instead of integrated into odom drift.
-
+    ukf.q_position:                               0.01
+    ukf.q_orientation:                            1.0e-9           # Quaternion regularization / orientation process noise floor.
+    ukf.q_velocity:                               0.01             # Much tighter velocity process noise for a sweeper that should remain still unless encoder/IMU evidence says otherwise.
+    ukf.q_angular_vel:                            0.01             # Reduce spurious body-rate growth between real measurements; helps keep stationary yaw stable.
+    ukf.q_acceleration:                           0.2              # Reduce how freely the filter lets acceleration states wander when the robot is actually stopped.
+    ukf.q_gyro_bias:                              1.0e-5 
+    ukf.q_accel_bias:                             1.0e-4           # Let accel bias adapt faster so persistent small offsets are absorbed as bias instead of integrated into odom drift.
+        
     # -- Coordinate systems ----------------------------------------------------
-    input.gnss_crs:                        "EPSG:4326"     # Incoming GNSS messages use WGS84 latitude/longitude.
-    output.crs:                            "EPSG:4978"     # Internal/global output CRS in ECEF XYZ.
-    output.convert_to_enu_at_reference:    true            # Convert ECEF output into a local ENU frame at the chosen reference.
-    reference.use_first_fix:               true            # Anchor the local ENU origin to the first accepted GNSS fix.
-    reference.x:                           0.0             # Manual reference X when not using first fix.
-    reference.y:                           0.0             # Manual reference Y when not using first fix.
-    reference.z:                           0.0             # Manual reference Z when not using first fix.
+    input.gnss_crs:                               "EPSG:4326"      # Incoming GNSS messages use WGS84 latitude/longitude.
+    output.crs:                                   "EPSG:4978"      # Internal/global output CRS in ECEF XYZ.
+    output.convert_to_enu_at_reference:           true             # Convert ECEF output into a local ENU frame at the chosen reference.
+    reference.use_first_fix:                      true             # Anchor the local ENU origin to the first accepted GNSS fix.
+    reference.x:                                  0.0              # Manual reference X when not using first fix.
+    reference.y:                                  0.0              # Manual reference Y when not using first fix.
+    reference.z:                                  0.0              # Manual reference Z when not using first fix.

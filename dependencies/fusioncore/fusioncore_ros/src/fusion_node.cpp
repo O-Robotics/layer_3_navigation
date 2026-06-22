@@ -128,16 +128,16 @@ public:
     // (e.g. Clearpath Microstrain at /sensors/imu_0/data, Realsense at /camera/imu).
     // Using a launch-time remap is equivalent and preferred for readability.
     declare_parameter("imu.topic", std::string("/imu/data"));
-    declare_parameter("imu.gyro_noise",  0.005);
+    declare_parameter("imu.noise.gyro",  0.005);
     // Set to true if IMU has a magnetometer (9-axis: BNO08x, VectorNav, Xsens)
     // Set to false for 6-axis IMUs: yaw from gyro integration drifts
     declare_parameter("imu.has_magnetometer", false);
-    declare_parameter("imu.accel_noise", 0.1);
+    declare_parameter("imu.noise.accel", 0.1);
     declare_parameter("imu.deadband.angular_velocity", 0.0);
     declare_parameter("imu.deadband.linear_acceleration", 0.0);
-    declare_parameter("imu.orientation_deadband.roll", 0.0);
-    declare_parameter("imu.orientation_deadband.pitch", 0.0);
-    declare_parameter("imu.orientation_deadband.yaw", 0.0);
+    declare_parameter("imu.deadband.orientation_roll", 0.0);
+    declare_parameter("imu.deadband.orientation_pitch", 0.0);
+    declare_parameter("imu.deadband.orientation_yaw", 0.0);
     // Override frame_id for IMU messages. When non-empty, FusionCore uses this
     // frame instead of msg->header.frame_id. Useful when the IMU driver publishes
     // with an empty or wrong frame_id. Leave empty to use the message frame_id
@@ -159,15 +159,17 @@ public:
     declare_parameter("imu2.topic",    std::string(""));
     declare_parameter("imu2.frame_id", std::string(""));
     declare_parameter("imu2.remove_gravitational_acceleration", false);
+    declare_parameter("imu2.noise.gyro", 0.005);
+    declare_parameter("imu2.noise.accel", 0.1);
     declare_parameter("imu2.deadband.angular_velocity", 0.0);
     declare_parameter("imu2.deadband.linear_acceleration", 0.0);
-    declare_parameter("imu2.orientation_deadband.roll", 0.0);
-    declare_parameter("imu2.orientation_deadband.pitch", 0.0);
-    declare_parameter("imu2.orientation_deadband.yaw", 0.0);
+    declare_parameter("imu2.deadband.orientation_roll", 0.0);
+    declare_parameter("imu2.deadband.orientation_pitch", 0.0);
+    declare_parameter("imu2.deadband.orientation_yaw", 0.0);
 
     declare_parameter("encoder.topic", std::string("/odom/wheels"));
-    declare_parameter("encoder.vel_noise", 0.05);
-    declare_parameter("encoder.yaw_noise", 0.02);
+    declare_parameter("encoder.noise.linear_velocity", 0.05);
+    declare_parameter("encoder.noise.angular_velocity", 0.02);
     declare_parameter("encoder.deadband.linear_velocity", 0.0);
     declare_parameter("encoder.deadband.angular_velocity", 0.0);
 
@@ -175,11 +177,11 @@ public:
     // When non-empty, FusionCore subscribes to this topic as nav_msgs/Odometry
     // and fuses twist.linear.x/y + twist.angular.z using the same update_encoder
     // path as the primary wheel encoder. Per-axis covariance is taken from the
-    // message twist.covariance when positive; otherwise encoder2.vel_noise and
-    // encoder2.yaw_noise are used as fallback. Leave empty to disable.
+    // message twist.covariance when positive; otherwise encoder2.noise.linear_velocity
+    // and encoder2.noise.angular_velocity are used as fallback. Leave empty to disable.
     declare_parameter("encoder2.topic",     std::string(""));
-    declare_parameter("encoder2.vel_noise", 0.05);
-    declare_parameter("encoder2.yaw_noise", 0.02);
+    declare_parameter("encoder2.noise.linear_velocity", 0.05);
+    declare_parameter("encoder2.noise.angular_velocity", 0.02);
     declare_parameter("encoder2.deadband.linear_velocity", 0.0);
     declare_parameter("encoder2.deadband.angular_velocity", 0.0);
 
@@ -197,12 +199,12 @@ public:
     // publishes here. Works indoors and outdoors, all weather conditions.
     // Leave empty to disable.
     declare_parameter("radar.velocity_topic", std::string(""));
-    declare_parameter("radar.vel_noise",      0.1);   // m/s fallback when msg cov <= 0
+    declare_parameter("radar.noise.linear_velocity", 0.1);   // m/s fallback when msg cov <= 0
     declare_parameter("radar.deadband.linear_velocity", 0.0);
 
-    declare_parameter("gnss.base_noise_xy",  1.0);
-    declare_parameter("gnss.base_noise_z",   2.0);
-    declare_parameter("gnss.heading_noise",  0.02);
+    declare_parameter("gnss.noise.base_xy",  1.0);
+    declare_parameter("gnss.noise.base_z",   2.0);
+    declare_parameter("gnss.noise.heading",  0.02);
     declare_parameter("gnss.position_covariance_scale", 1.0);
     declare_parameter("gnss.max_hdop",       4.0);
     declare_parameter("gnss.max_vdop",       6.0);
@@ -228,10 +230,10 @@ public:
     // The yaw component of orientation is the heading.
     // Set to empty string to disable dual antenna heading.
     declare_parameter("gnss.heading_topic", "");
-    declare_parameter("gnss.position_deadband_xy", 0.0);
-    declare_parameter("gnss.position_deadband_z", 0.0);
-    declare_parameter("gnss.heading_deadband", 0.0);
-    declare_parameter("gnss.velocity_deadband.linear_velocity", 0.0);
+    declare_parameter("gnss.deadband.position_xy", 0.0);
+    declare_parameter("gnss.deadband.position_z", 0.0);
+    declare_parameter("gnss.deadband.heading", 0.0);
+    declare_parameter("gnss.deadband.linear_velocity", 0.0);
 
     // Optional second GNSS receiver topic: set to empty string to disable
     declare_parameter("gnss.fix2_topic", "");
@@ -264,11 +266,13 @@ public:
     declare_parameter("reference.y",                       0.0);
     declare_parameter("reference.z",                       0.0);
 
-    declare_parameter("vslam.position_deadband_xy", 0.0);
-    declare_parameter("vslam.position_deadband_z", 0.0);
-    declare_parameter("vslam.orientation_deadband.roll", 0.0);
-    declare_parameter("vslam.orientation_deadband.pitch", 0.0);
-    declare_parameter("vslam.orientation_deadband.yaw", 0.0);
+    declare_parameter("vslam.noise.position", 0.1);
+    declare_parameter("vslam.noise.orientation", 0.05);
+    declare_parameter("vslam.deadband.position_xy", 0.0);
+    declare_parameter("vslam.deadband.position_z", 0.0);
+    declare_parameter("vslam.deadband.orientation_roll", 0.0);
+    declare_parameter("vslam.deadband.orientation_pitch", 0.0);
+    declare_parameter("vslam.deadband.orientation_yaw", 0.0);
 
     declare_parameter("outlier_rejection",      true);
     declare_parameter("outlier_threshold_gnss", 16.27);
@@ -278,8 +282,8 @@ public:
     declare_parameter("outlier_threshold_vslam", 22.46);
     // VSLAM pose input (ORB-SLAM3, RTAB-Map, Kimera, etc.)
     declare_parameter("vslam.topic",              std::string(""));
-    declare_parameter("vslam.position_noise",     0.1);
-    declare_parameter("vslam.orientation_noise",  0.02);
+    declare_parameter("vslam.noise.position",     0.1);
+    declare_parameter("vslam.noise.orientation",  0.02);
     declare_parameter("vslam.frame_id",           std::string(""));
     declare_parameter("vslam.reinit_n",           10);
 
@@ -389,10 +393,10 @@ public:
       config.snapshot_buffer_size,
       config.imu_buffer_size);
 
-    config.imu.gyro_noise_x  = get_parameter("imu.gyro_noise").as_double();
+    config.imu.gyro_noise_x  = get_parameter("imu.noise.gyro").as_double();
     config.imu.gyro_noise_y  = config.imu.gyro_noise_x;
     config.imu.gyro_noise_z  = config.imu.gyro_noise_x;
-    config.imu.accel_noise_x    = get_parameter("imu.accel_noise").as_double();
+    config.imu.accel_noise_x    = get_parameter("imu.noise.accel").as_double();
     config.imu_has_magnetometer = get_parameter("imu.has_magnetometer").as_bool();
     config.imu.accel_noise_y = config.imu.accel_noise_x;
     config.imu.accel_noise_z = config.imu.accel_noise_x;
@@ -402,11 +406,11 @@ public:
     imu_gyro_deadband_  = std::max(0.0, get_parameter("imu.deadband.angular_velocity").as_double());
     imu_accel_deadband_ = std::max(0.0, get_parameter("imu.deadband.linear_acceleration").as_double());
     imu_orientation_deadband_roll_ =
-      std::max(0.0, get_parameter("imu.orientation_deadband.roll").as_double());
+      std::max(0.0, get_parameter("imu.deadband.orientation_roll").as_double());
     imu_orientation_deadband_pitch_ =
-      std::max(0.0, get_parameter("imu.orientation_deadband.pitch").as_double());
+      std::max(0.0, get_parameter("imu.deadband.orientation_pitch").as_double());
     imu_orientation_deadband_yaw_ =
-      std::max(0.0, get_parameter("imu.orientation_deadband.yaw").as_double());
+      std::max(0.0, get_parameter("imu.deadband.orientation_yaw").as_double());
     RCLCPP_INFO(get_logger(), "IMU gravity removal: %s",
       imu_remove_gravity_ ? "ENABLED" : "disabled");
     if (!imu_frame_override_.empty())
@@ -418,39 +422,39 @@ public:
     imu2_gyro_deadband_  = std::max(0.0, get_parameter("imu2.deadband.angular_velocity").as_double());
     imu2_accel_deadband_ = std::max(0.0, get_parameter("imu2.deadband.linear_acceleration").as_double());
     imu2_orientation_deadband_roll_ =
-      std::max(0.0, get_parameter("imu2.orientation_deadband.roll").as_double());
+      std::max(0.0, get_parameter("imu2.deadband.orientation_roll").as_double());
     imu2_orientation_deadband_pitch_ =
-      std::max(0.0, get_parameter("imu2.orientation_deadband.pitch").as_double());
+      std::max(0.0, get_parameter("imu2.deadband.orientation_pitch").as_double());
     imu2_orientation_deadband_yaw_ =
-      std::max(0.0, get_parameter("imu2.orientation_deadband.yaw").as_double());
+      std::max(0.0, get_parameter("imu2.deadband.orientation_yaw").as_double());
 
     encoder_topic_          = get_parameter("encoder.topic").as_string();
-    config.encoder.vel_noise_x  = get_parameter("encoder.vel_noise").as_double();
+    config.encoder.vel_noise_x  = get_parameter("encoder.noise.linear_velocity").as_double();
     config.encoder.vel_noise_y  = config.encoder.vel_noise_x;
-    config.encoder.vel_noise_wz = get_parameter("encoder.yaw_noise").as_double();
+    config.encoder.vel_noise_wz = get_parameter("encoder.noise.angular_velocity").as_double();
     encoder_linear_deadband_ =
       std::max(0.0, get_parameter("encoder.deadband.linear_velocity").as_double());
     encoder_angular_deadband_ =
       std::max(0.0, get_parameter("encoder.deadband.angular_velocity").as_double());
 
     encoder2_topic_     = get_parameter("encoder2.topic").as_string();
-    enc2_vel_noise_     = get_parameter("encoder2.vel_noise").as_double();
-    enc2_yaw_noise_     = get_parameter("encoder2.yaw_noise").as_double();
+    enc2_vel_noise_     = get_parameter("encoder2.noise.linear_velocity").as_double();
+    enc2_yaw_noise_     = get_parameter("encoder2.noise.angular_velocity").as_double();
     encoder2_linear_deadband_ =
       std::max(0.0, get_parameter("encoder2.deadband.linear_velocity").as_double());
     encoder2_angular_deadband_ =
       std::max(0.0, get_parameter("encoder2.deadband.angular_velocity").as_double());
     gnss_vel_topic_    = get_parameter("gnss.velocity_topic").as_string();
     radar_vel_topic_   = get_parameter("radar.velocity_topic").as_string();
-    radar_vel_noise_   = get_parameter("radar.vel_noise").as_double();
+    radar_vel_noise_   = get_parameter("radar.noise.linear_velocity").as_double();
     gnss_velocity_linear_deadband_ =
-      std::max(0.0, get_parameter("gnss.velocity_deadband.linear_velocity").as_double());
+      std::max(0.0, get_parameter("gnss.deadband.linear_velocity").as_double());
     radar_linear_deadband_ =
       std::max(0.0, get_parameter("radar.deadband.linear_velocity").as_double());
 
-    config.gnss.base_noise_xy  = get_parameter("gnss.base_noise_xy").as_double();
-    config.gnss.base_noise_z   = get_parameter("gnss.base_noise_z").as_double();
-    config.gnss.heading_noise  = get_parameter("gnss.heading_noise").as_double();
+    config.gnss.base_noise_xy  = get_parameter("gnss.noise.base_xy").as_double();
+    config.gnss.base_noise_z   = get_parameter("gnss.noise.base_z").as_double();
+    config.gnss.heading_noise  = get_parameter("gnss.noise.heading").as_double();
     gnss_base_noise_xy_ = config.gnss.base_noise_xy;
     gnss_base_noise_z_ = config.gnss.base_noise_z;
     gnss_position_covariance_scale_ =
@@ -469,11 +473,11 @@ public:
     gnss_min_vertical_stddev_m_ =
       std::max(0.0, get_parameter("gnss.min_vertical_stddev_m").as_double());
     gnss_position_deadband_xy_ =
-      std::max(0.0, get_parameter("gnss.position_deadband_xy").as_double());
+      std::max(0.0, get_parameter("gnss.deadband.position_xy").as_double());
     gnss_position_deadband_z_ =
-      std::max(0.0, get_parameter("gnss.position_deadband_z").as_double());
+      std::max(0.0, get_parameter("gnss.deadband.position_z").as_double());
     gnss_heading_deadband_ =
-      std::max(0.0, get_parameter("gnss.heading_deadband").as_double());
+      std::max(0.0, get_parameter("gnss.deadband.heading").as_double());
     gnss_startup_delay_seconds_ =
       std::max(0.0, get_parameter("gnss.startup_delay_seconds").as_double());
     gnss_startup_ramp_seconds_ =
@@ -555,19 +559,19 @@ public:
 
     vslam_topic_          = get_parameter("vslam.topic").as_string();
     vslam_frame_override_ = get_parameter("vslam.frame_id").as_string();
-    config.vslam.position_noise    = get_parameter("vslam.position_noise").as_double();
-    config.vslam.orientation_noise = get_parameter("vslam.orientation_noise").as_double();
+    config.vslam.position_noise    = get_parameter("vslam.noise.position").as_double();
+    config.vslam.orientation_noise = get_parameter("vslam.noise.orientation").as_double();
     vslam_reinit_n_       = get_parameter("vslam.reinit_n").as_int();
     vslam_position_deadband_xy_ =
-      std::max(0.0, get_parameter("vslam.position_deadband_xy").as_double());
+      std::max(0.0, get_parameter("vslam.deadband.position_xy").as_double());
     vslam_position_deadband_z_ =
-      std::max(0.0, get_parameter("vslam.position_deadband_z").as_double());
+      std::max(0.0, get_parameter("vslam.deadband.position_z").as_double());
     vslam_orientation_deadband_roll_ =
-      std::max(0.0, get_parameter("vslam.orientation_deadband.roll").as_double());
+      std::max(0.0, get_parameter("vslam.deadband.orientation_roll").as_double());
     vslam_orientation_deadband_pitch_ =
-      std::max(0.0, get_parameter("vslam.orientation_deadband.pitch").as_double());
+      std::max(0.0, get_parameter("vslam.deadband.orientation_pitch").as_double());
     vslam_orientation_deadband_yaw_ =
-      std::max(0.0, get_parameter("vslam.orientation_deadband.yaw").as_double());
+      std::max(0.0, get_parameter("vslam.deadband.orientation_yaw").as_double());
 
     config.gnss_coast_n                    = get_parameter("gnss.coast_n").as_int();
     config.gnss_coast_q_factor             = get_parameter("gnss.coast_q_factor").as_double();
@@ -2010,7 +2014,7 @@ private:
 
     // Extract per-axis variances from the Odometry twist covariance (6x6, row-major).
     // Indices: vx=0, vy=7, wz=35 (diagonal elements for linear.x, linear.y, angular.z).
-    // Fall back to encoder2.vel_noise / encoder2.yaw_noise when the message
+    // Fall back to encoder2.noise.linear_velocity / encoder2.noise.angular_velocity when the message
     // reports zero or negative variance (e.g. KISS-ICP, RealSense T265).
     const auto& cov = msg->twist.covariance;
     double var_vx = (cov[0]  > 0.0) ? cov[0]  : enc2_vel_noise_ * enc2_vel_noise_;
