@@ -266,8 +266,6 @@ public:
     declare_parameter("reference.y",                       0.0);
     declare_parameter("reference.z",                       0.0);
 
-    declare_parameter("vslam.noise.position", 0.1);
-    declare_parameter("vslam.noise.orientation", 0.05);
     declare_parameter("vslam.deadband.position_xy", 0.0);
     declare_parameter("vslam.deadband.position_z", 0.0);
     declare_parameter("vslam.deadband.orientation_roll", 0.0);
