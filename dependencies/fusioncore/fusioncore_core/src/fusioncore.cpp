@@ -869,6 +869,31 @@ bool FusionCore::update_gnss(
   bool is_delayed = (last_timestamp_ - timestamp_seconds) > config_.min_dt;
 
   if (is_delayed) {
+    if (!config_.enable_delayed_measurement_replay) {
+      const double stale_age = std::max(0.0, last_timestamp_ - timestamp_seconds);
+      const double covariance_scale = std::max(
+        config_.delayed_gnss_forward_covariance_scale,
+        1.0 + stale_age * config_.delayed_gnss_forward_covariance_scale_per_second);
+
+      sensors::GnssFix forward_fix = fix;
+      if (forward_fix.has_full_covariance) {
+        forward_fix.full_covariance *= covariance_scale;
+      } else {
+        const double sigma_scale = std::sqrt(covariance_scale);
+        forward_fix.hdop *= sigma_scale;
+        forward_fix.vdop *= sigma_scale;
+      }
+
+      predict_to(last_timestamp_);
+      const double pre_update_speed = std::sqrt(
+        ukf_.state().x[VX] * ukf_.state().x[VX] +
+        ukf_.state().x[VY] * ukf_.state().x[VY]);
+      if (!apply_gnss_update(last_timestamp_, forward_fix)) return false;
+      update_distance_traveled(forward_fix.x, forward_fix.y, pre_update_speed);
+      last_gnss_time_ = timestamp_seconds;
+      ++update_count_;
+      return true;
+    }
     bool gnss_fused = false;
     double pre_update_speed_delayed = 0.0;
     bool applied = apply_delayed_measurement(timestamp_seconds, [&]() {

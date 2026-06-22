@@ -92,7 +92,10 @@ struct FusionCoreConfig {
   double adaptive_alpha = 0.01;
 
   // Max delay to compensate for (seconds). GNSS is typically 100-300ms late.
+  bool enable_delayed_measurement_replay = true;
   double max_measurement_delay = 0.5;
+  double delayed_gnss_forward_covariance_scale = 25.0;
+  double delayed_gnss_forward_covariance_scale_per_second = 25.0;
 
   // How many state snapshots to keep. At 100Hz IMU, 50 = 0.5 seconds.
   int snapshot_buffer_size = 50;

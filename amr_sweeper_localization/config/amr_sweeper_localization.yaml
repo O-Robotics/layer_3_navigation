@@ -7,7 +7,10 @@
     publish.force_2d:                      true            # Ground robot mode: zero Z translation/velocity while keeping roll and pitch in the internal filter state.
     publish.tf:                            true            # Broadcast the odom -> base_footprint transform.
     publish.yaw_only:                      true            # Publish odom -> base_footprint with yaw only; layer 2 already drives roll/pitch via base_footprint -> base_link.
-    replay.max_measurement_delay:          2.0             # Updated bag shows GNSS callbacks arriving up to 1.41 s late inside FusionCore; allow 2.0 s so those fixes can be replayed and fused instead of dropped.
+    replay.enable_delayed_measurement_replay: false        # Bypass rollback/replay for delayed GNSS; instead fuse stale fixes softly at the current filter time with inflated covariance.
+    replay.max_measurement_delay:          2.0             # Retained for diagnostics and future replay experiments; ignored when delayed-measurement replay is disabled.
+    replay.delayed_gnss_forward_covariance_scale: 25.0     # Minimum covariance inflation applied when a GNSS fix is fused forward instead of replayed backward in time.
+    replay.delayed_gnss_forward_covariance_scale_per_second: 25.0  # Additional covariance inflation slope for stale GNSS fused at the current filter time.
     replay.snapshot_buffer_size:           300             # Keep about 3-6 s of rollback snapshots, depending on the effective IMU/orientation callback rate, so 2 s delayed GNSS can still find a pre-fix state.
     replay.imu_buffer_size:                300             # Retain enough IMU/encoder/orientation history to replay forward after applying a delayed GNSS update.
 

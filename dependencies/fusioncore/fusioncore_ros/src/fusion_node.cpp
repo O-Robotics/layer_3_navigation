@@ -299,7 +299,10 @@ public:
     // ~/load_checkpoint restores state from this file (re-run from any point in a bag).
     declare_parameter("replay.checkpoint_path",
       std::string("/tmp/fusioncore_checkpoint.txt"));
+    declare_parameter("replay.enable_delayed_measurement_replay", true);
     declare_parameter("replay.max_measurement_delay", 0.5);
+    declare_parameter("replay.delayed_gnss_forward_covariance_scale", 25.0);
+    declare_parameter("replay.delayed_gnss_forward_covariance_scale_per_second", 25.0);
     declare_parameter("replay.snapshot_buffer_size", 50);
     declare_parameter("replay.imu_buffer_size", 100);
 
@@ -327,16 +330,25 @@ public:
     heading_topic_ = get_parameter("gnss.heading_topic").as_string();
     gnss2_topic_    = get_parameter("gnss.fix2_topic").as_string();
     fusioncore::FusionCoreConfig config;
+    config.enable_delayed_measurement_replay =
+      get_parameter("replay.enable_delayed_measurement_replay").as_bool();
     config.max_measurement_delay =
       std::max(0.0, get_parameter("replay.max_measurement_delay").as_double());
+    config.delayed_gnss_forward_covariance_scale =
+      std::max(1.0, get_parameter("replay.delayed_gnss_forward_covariance_scale").as_double());
+    config.delayed_gnss_forward_covariance_scale_per_second =
+      std::max(0.0, get_parameter("replay.delayed_gnss_forward_covariance_scale_per_second").as_double());
     config.snapshot_buffer_size =
       static_cast<int>(std::max<int64_t>(1, get_parameter("replay.snapshot_buffer_size").as_int()));
     config.imu_buffer_size =
       static_cast<int>(std::max<int64_t>(1, get_parameter("replay.imu_buffer_size").as_int()));
     RCLCPP_INFO(
       get_logger(),
-      "Delayed measurement replay: max_delay=%.2fs snapshot_buffer_size=%d imu_buffer_size=%d",
+      "Delayed measurement replay: enabled=%s max_delay=%.2fs forward_scale=%.1f forward_scale_per_s=%.1f snapshot_buffer_size=%d imu_buffer_size=%d",
+      config.enable_delayed_measurement_replay ? "true" : "false",
       config.max_measurement_delay,
+      config.delayed_gnss_forward_covariance_scale,
+      config.delayed_gnss_forward_covariance_scale_per_second,
       config.snapshot_buffer_size,
       config.imu_buffer_size);
 
