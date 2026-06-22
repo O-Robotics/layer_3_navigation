@@ -136,8 +136,8 @@ global_costmap:
   global_costmap:
     ros__parameters:
       # -- Global costmap core -------------------------------------------------
-      update_frequency:              1.0                                 # Global costmap update rate in Hz. Common example default is 1 Hz.
-      publish_frequency:             1.0                                 # Global costmap publish rate in Hz. Common example default is 1 Hz.
+      update_frequency:              4.0                                 # Keep the planner's global costmap well ahead of Nav2 freshness timeouts; 1 Hz was too close to the timeout boundary during clears and replans.
+      publish_frequency:             2.0                                 # Publish often enough for recoveries and diagnostics without making the planner wait on a near-1-second update cadence.
       global_frame:                  odom                                # Builtin local missions plan in odom instead of the SLAM map frame.
       rolling_window:                true                                # Keep the global planner centered on the robot for small local sweep patterns.
       robot_base_frame:              base_footprint                      # Robot body frame used to place the footprint in the costmap. Common default is base_link.
