@@ -12,6 +12,7 @@
 #include <deque>
 #include <functional>
 #include <array>
+#include <cstdint>
 
 namespace fusioncore {
 
@@ -493,13 +494,12 @@ private:
     double last_imu_time;
     double last_encoder_time;
     double last_gnss_time;
+    std::uint64_t replay_event_index;
   };
 
   std::deque<StateSnapshot> snapshot_buffer_;
 
-  // IMU message buffer for full replay retrodiction
-  // Every raw IMU message is stored so that when a delayed GNSS arrives,
-  // we replay all intermediate IMU updates instead of one big predict(dt).
+  // IMU message buffer for legacy replay bookkeeping.
   struct ImuBufferEntry {
     double timestamp;
     double wx, wy, wz;
@@ -507,6 +507,40 @@ private:
     sensors::ImuNoiseMatrix R;
   };
   std::deque<ImuBufferEntry> imu_buffer_;
+
+  enum class ReplayEventType : std::uint8_t {
+    IMU,
+    IMU_ORIENTATION,
+    IMU_RP,
+    ENCODER,
+    GROUND_CONSTRAINT,
+    ZUPT,
+  };
+
+  struct ReplayEvent {
+    std::uint64_t index{0};
+    double timestamp{0.0};
+    ReplayEventType type{ReplayEventType::IMU};
+
+    double a{0.0};
+    double b{0.0};
+    double c{0.0};
+    double d{0.0};
+    double e{0.0};
+    double f{0.0};
+
+    sensors::ImuNoiseMatrix imu_R = sensors::ImuNoiseMatrix::Zero();
+    sensors::ImuOrientationNoiseMatrix imu_orient_R =
+      sensors::ImuOrientationNoiseMatrix::Zero();
+    sensors::ImuRPNoiseMatrix imu_rp_R = sensors::ImuRPNoiseMatrix::Zero();
+    sensors::EncoderNoiseMatrix encoder_R = sensors::EncoderNoiseMatrix::Zero();
+    double ground_vz_var{0.0};
+    double ground_az_var{0.0};
+    bool   ground_has_z_position{false};
+    double ground_z_position_var{0.0};
+  };
+  std::deque<ReplayEvent> replay_buffer_;
+  std::uint64_t next_replay_event_index_{0};
 
   // Heading observability tracking
   bool          heading_validated_ = false;
@@ -543,6 +577,8 @@ private:
     double measurement_timestamp,
     const std::function<void()>& apply_fn
   );
+  void record_replay_event(ReplayEvent event);
+  void replay_event(const ReplayEvent& event);
   void update_distance_traveled(double x, double y, double pre_update_speed = -1.0);
 };
 

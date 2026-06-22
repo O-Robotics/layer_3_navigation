@@ -132,6 +132,8 @@ void FusionCore::init(const State& initial_state, double timestamp_seconds) {
   // Reset snapshot buffer
   snapshot_buffer_.clear();
   imu_buffer_.clear();
+  replay_buffer_.clear();
+  next_replay_event_index_ = 0;
 
   // Reset coast mode state
   gnss_consecutive_rejects_ = 0;
@@ -187,12 +189,112 @@ void FusionCore::save_snapshot() {
   snap.last_imu_time    = last_imu_time_;
   snap.last_encoder_time = last_encoder_time_;
   snap.last_gnss_time   = last_gnss_time_;
+  snap.replay_event_index = next_replay_event_index_;
 
   snapshot_buffer_.push_back(snap);
 
   // Keep buffer bounded
   while ((int)snapshot_buffer_.size() > config_.snapshot_buffer_size) {
     snapshot_buffer_.pop_front();
+  }
+}
+
+void FusionCore::record_replay_event(ReplayEvent event) {
+  event.index = next_replay_event_index_++;
+  replay_buffer_.push_back(std::move(event));
+
+  const int limit = std::max(
+    512,
+    std::max(config_.snapshot_buffer_size, config_.imu_buffer_size) * 8);
+  while ((int)replay_buffer_.size() > limit) {
+    replay_buffer_.pop_front();
+  }
+}
+
+void FusionCore::replay_event(const ReplayEvent& event) {
+  const double dt = event.timestamp - last_timestamp_;
+  if (dt > config_.min_dt && dt <= config_.max_dt) {
+    ukf_.predict(dt);
+    last_timestamp_ = event.timestamp;
+  }
+
+  switch (event.type) {
+    case ReplayEventType::IMU: {
+      sensors::ImuMeasurement z;
+      z[0] = event.a; z[1] = event.b; z[2] = event.c;
+      z[3] = event.d; z[4] = event.e; z[5] = event.f;
+      ukf_.update<sensors::IMU_DIM>(z, sensors::imu_measurement_function, event.imu_R);
+      last_imu_time_ = event.timestamp;
+      break;
+    }
+    case ReplayEventType::IMU_ORIENTATION: {
+      sensors::ImuOrientationMeasurement z;
+      z[0] = event.a; z[1] = event.b; z[2] = event.c;
+      constexpr unsigned int IMU_ORIENT_ANGLE_DIMS = 0b100;
+      ukf_.update<sensors::IMU_ORIENTATION_DIM>(
+        z, sensors::imu_orientation_measurement_function, event.imu_orient_R,
+        IMU_ORIENT_ANGLE_DIMS);
+      last_imu_time_ = event.timestamp;
+      break;
+    }
+    case ReplayEventType::IMU_RP: {
+      sensors::ImuRPMeasurement z;
+      z[0] = event.a; z[1] = event.b;
+      ukf_.update<sensors::IMU_RP_DIM>(
+        z, sensors::imu_rp_measurement_function, event.imu_rp_R);
+      last_imu_time_ = event.timestamp;
+      break;
+    }
+    case ReplayEventType::ENCODER: {
+      sensors::EncoderMeasurement z;
+      z[0] = event.a; z[1] = event.b; z[2] = event.c;
+      ukf_.update<sensors::ENCODER_DIM>(
+        z, sensors::encoder_measurement_function, event.encoder_R);
+      last_encoder_time_ = event.timestamp;
+      break;
+    }
+    case ReplayEventType::GROUND_CONSTRAINT: {
+      ukf_.predict(config_.min_dt);
+
+      sensors::GroundConstraintMeasurement z_vz;
+      z_vz[0] = 0.0;
+      Eigen::Matrix<double, 1, 1> R_vz;
+      R_vz(0,0) = event.ground_vz_var;
+      ukf_.update<sensors::GROUND_CONSTRAINT_DIM>(
+        z_vz, sensors::ground_constraint_measurement_function, R_vz);
+
+      Eigen::Matrix<double, 1, 1> z_az;
+      z_az[0] = 0.0;
+      Eigen::Matrix<double, 1, 1> R_az;
+      R_az(0,0) = event.ground_az_var;
+      auto h_az = [](const StateVector& x) -> Eigen::Matrix<double, 1, 1> {
+        Eigen::Matrix<double, 1, 1> m;
+        m[0] = x[AZ];
+        return m;
+      };
+      ukf_.update<1>(z_az, h_az, R_az);
+
+      if (event.ground_has_z_position) {
+        Eigen::Matrix<double, 1, 1> z_pos;
+        z_pos[0] = 0.0;
+        Eigen::Matrix<double, 1, 1> R_zpos;
+        R_zpos(0,0) = event.ground_z_position_var;
+        auto h_zpos = [](const StateVector& x) -> Eigen::Matrix<double, 1, 1> {
+          Eigen::Matrix<double, 1, 1> m;
+          m[0] = x[Z];
+          return m;
+        };
+        ukf_.update<1>(z_pos, h_zpos, R_zpos);
+      }
+      break;
+    }
+    case ReplayEventType::ZUPT: {
+      predict_to(event.timestamp);
+      sensors::EncoderMeasurement z = sensors::EncoderMeasurement::Zero();
+      ukf_.update<sensors::ENCODER_DIM>(
+        z, sensors::zupt_measurement_function, event.encoder_R);
+      break;
+    }
   }
 }
 
@@ -250,29 +352,18 @@ bool FusionCore::apply_delayed_measurement(
   // Apply the delayed measurement (predict_to inside apply_fn handles timing)
   apply_fn();
 
-  // ── Full IMU replay retrodiction ──────────────────────────────────────────
-  // Instead of one big predict(dt), replay every buffered IMU message
-  // between the snapshot time and current_time in chronological order.
-  // This correctly evolves the state through all intermediate dynamics.
-  double replay_start = last_timestamp_;
+  // Replay every accepted state-changing measurement after the rollback snapshot.
+  // Delayed GNSS must see the same IMU orientation, encoder, ZUPT, and ground
+  // constraint updates that the live filter saw, otherwise the replayed state
+  // diverges from the real stationary solution and can blow up yaw/XY.
   bool replayed_any   = false;
 
-  for (const auto& imu : imu_buffer_) {
-    if (imu.timestamp <= replay_start) continue;
-    if (imu.timestamp >  current_time) break;
-
-    double dt = imu.timestamp - last_timestamp_;
-    if (dt > config_.min_dt && dt <= config_.max_dt) {
-      ukf_.predict(dt);
-      last_timestamp_ = imu.timestamp;
-
-      // Re-apply the IMU measurement so the filter sees the real dynamics
-      sensors::ImuMeasurement z;
-      z[0] = imu.wx; z[1] = imu.wy; z[2] = imu.wz;
-      z[3] = imu.ax; z[4] = imu.ay; z[5] = imu.az;
-      ukf_.update<sensors::IMU_DIM>(z, sensors::imu_measurement_function, imu.R);
-      replayed_any = true;
-    }
+  for (const auto& event : replay_buffer_) {
+    if (event.index < best_snap.replay_event_index) continue;
+    if (event.timestamp < last_timestamp_ - config_.min_dt) continue;
+    if (event.timestamp > current_time) break;
+    replay_event(event);
+    replayed_any = true;
   }
 
   // If no IMU messages were in the buffer, fall back to single predict step
@@ -443,10 +534,16 @@ void FusionCore::update_imu(
   // Track innovation for adaptive noise estimation
   adapt_R<sensors::IMU_DIM>(R_imu_, R_imu_floor_, imu_innovations_, innovation, config_.adaptive_imu);
 
-  // Save snapshot for delay compensation
+  ReplayEvent replay;
+  replay.timestamp = timestamp_seconds;
+  replay.type = ReplayEventType::IMU;
+  replay.a = wx; replay.b = wy; replay.c = wz;
+  replay.d = ax; replay.e = ay; replay.f = az;
+  replay.imu_R = R;
+  record_replay_event(replay);
   save_snapshot();
 
-  // Save IMU message for full replay retrodiction
+  // Save IMU message for delay-compensation bookkeeping
   ImuBufferEntry entry;
   entry.timestamp = timestamp_seconds;
   entry.wx = wx; entry.wy = wy; entry.wz = wz;
@@ -476,6 +573,8 @@ void FusionCore::update_imu_orientation(
   z[2] = yaw;
 
   sensors::ImuOrientationParams fallback;
+  ReplayEvent replay;
+  replay.timestamp = timestamp_seconds;
 
   if (!config_.imu_has_magnetometer) {
     // 6-axis IMU: fuse roll and pitch only. Yaw is omitted (not estimated from gyro integral).
@@ -507,6 +606,10 @@ void FusionCore::update_imu_orientation(
     }
 
     ukf_.update<sensors::IMU_RP_DIM>(z_rp, sensors::imu_rp_measurement_function, R_rp);
+    replay.type = ReplayEventType::IMU_RP;
+    replay.a = roll;
+    replay.b = pitch;
+    replay.imu_rp_R = R_rp;
 
   } else {
     // 9-axis IMU with magnetometer: fuse roll, pitch, and yaw.
@@ -535,7 +638,14 @@ void FusionCore::update_imu_orientation(
 
     adapt_R<sensors::IMU_ORIENTATION_DIM>(
       R_imu_orient_, R_imu_orient_floor_, imu_orient_innovations_, imu_orient_innovation, config_.adaptive_imu);
+    replay.type = ReplayEventType::IMU_ORIENTATION;
+    replay.a = roll;
+    replay.b = pitch;
+    replay.c = yaw;
+    replay.imu_orient_R = R;
   }
+
+  record_replay_event(replay);
 
   // IMU orientation validates heading ONLY if the IMU has a magnetometer.
   // 6-axis IMUs integrate gyro for yaw: this drifts and is not a valid
@@ -597,6 +707,15 @@ void FusionCore::update_encoder(
   if (var_vx <= 0.0 && var_vy <= 0.0 && var_wz <= 0.0) {
     adapt_R<sensors::ENCODER_DIM>(R_encoder_, R_encoder_floor_, encoder_innovations_, innovation, config_.adaptive_encoder);
   }
+
+  ReplayEvent replay;
+  replay.timestamp = timestamp_seconds;
+  replay.type = ReplayEventType::ENCODER;
+  replay.a = vx;
+  replay.b = vy;
+  replay.c = wz;
+  replay.encoder_R = R;
+  record_replay_event(replay);
 
   last_encoder_time_ = timestamp_seconds;
   ++update_count_;
@@ -673,6 +792,17 @@ void FusionCore::update_ground_constraint(double timestamp_seconds) {
     };
     ukf_.update<1>(z_pos, h_zpos, R_zpos);
   }
+
+  ReplayEvent replay;
+  replay.timestamp = timestamp_seconds;
+  replay.type = ReplayEventType::GROUND_CONSTRAINT;
+  replay.ground_vz_var = R_vz(0,0);
+  replay.ground_az_var = R_az(0,0);
+  replay.ground_has_z_position = config_.ground_z_position_sigma > 0.0;
+  replay.ground_z_position_var = replay.ground_has_z_position
+    ? (config_.ground_z_position_sigma * config_.ground_z_position_sigma)
+    : 0.0;
+  record_replay_event(replay);
 }
 
 void FusionCore::update_zupt(double timestamp_seconds, double noise_sigma) {
@@ -694,6 +824,12 @@ void FusionCore::update_zupt(double timestamp_seconds, double noise_sigma) {
   R(2,2) = var;
 
   ukf_.update<sensors::ENCODER_DIM>(z, sensors::zupt_measurement_function, R);
+
+  ReplayEvent replay;
+  replay.timestamp = timestamp_seconds;
+  replay.type = ReplayEventType::ZUPT;
+  replay.encoder_R = R;
+  record_replay_event(replay);
 }
 
 bool FusionCore::update_gnss(
