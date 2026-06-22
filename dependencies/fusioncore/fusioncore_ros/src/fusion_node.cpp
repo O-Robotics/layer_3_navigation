@@ -26,6 +26,7 @@
 #include "fusioncore_ros/srv/get_datum.hpp"
 #include <mutex>
 #include <optional>
+#include <array>
 #include <set>
 #include <fstream>
 #include <sstream>
@@ -37,6 +38,13 @@ using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface
 
 namespace
 {
+
+double normalize_angle_local(double angle)
+{
+  while (angle > M_PI) angle -= 2.0 * M_PI;
+  while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
+}
 
 const char * gnssRejectReasonToString(const fusioncore::GnssRejectionReason reason)
 {
@@ -125,6 +133,11 @@ public:
     // Set to false for 6-axis IMUs: yaw from gyro integration drifts
     declare_parameter("imu.has_magnetometer", false);
     declare_parameter("imu.accel_noise", 0.1);
+    declare_parameter("imu.deadband.angular_velocity", 0.0);
+    declare_parameter("imu.deadband.linear_acceleration", 0.0);
+    declare_parameter("imu.orientation_deadband.roll", 0.0);
+    declare_parameter("imu.orientation_deadband.pitch", 0.0);
+    declare_parameter("imu.orientation_deadband.yaw", 0.0);
     // Override frame_id for IMU messages. When non-empty, FusionCore uses this
     // frame instead of msg->header.frame_id. Useful when the IMU driver publishes
     // with an empty or wrong frame_id. Leave empty to use the message frame_id
@@ -146,10 +159,17 @@ public:
     declare_parameter("imu2.topic",    std::string(""));
     declare_parameter("imu2.frame_id", std::string(""));
     declare_parameter("imu2.remove_gravitational_acceleration", false);
+    declare_parameter("imu2.deadband.angular_velocity", 0.0);
+    declare_parameter("imu2.deadband.linear_acceleration", 0.0);
+    declare_parameter("imu2.orientation_deadband.roll", 0.0);
+    declare_parameter("imu2.orientation_deadband.pitch", 0.0);
+    declare_parameter("imu2.orientation_deadband.yaw", 0.0);
 
     declare_parameter("encoder.topic", std::string("/odom/wheels"));
     declare_parameter("encoder.vel_noise", 0.05);
     declare_parameter("encoder.yaw_noise", 0.02);
+    declare_parameter("encoder.deadband.linear_velocity", 0.0);
+    declare_parameter("encoder.deadband.angular_velocity", 0.0);
 
     // Optional second encoder-twist source (e.g. KISS-ICP LiDAR odometry).
     // When non-empty, FusionCore subscribes to this topic as nav_msgs/Odometry
@@ -160,6 +180,8 @@ public:
     declare_parameter("encoder2.topic",     std::string(""));
     declare_parameter("encoder2.vel_noise", 0.05);
     declare_parameter("encoder2.yaw_noise", 0.02);
+    declare_parameter("encoder2.deadband.linear_velocity", 0.0);
+    declare_parameter("encoder2.deadband.angular_velocity", 0.0);
 
     // GPS velocity topic: fuses horizontal speed from any receiver that outputs
     // nav_msgs/Odometry with velocity in the ENU (world) frame.
@@ -176,6 +198,7 @@ public:
     // Leave empty to disable.
     declare_parameter("radar.velocity_topic", std::string(""));
     declare_parameter("radar.vel_noise",      0.1);   // m/s fallback when msg cov <= 0
+    declare_parameter("radar.deadband.linear_velocity", 0.0);
 
     declare_parameter("gnss.base_noise_xy",  1.0);
     declare_parameter("gnss.base_noise_z",   2.0);
@@ -205,6 +228,10 @@ public:
     // The yaw component of orientation is the heading.
     // Set to empty string to disable dual antenna heading.
     declare_parameter("gnss.heading_topic", "");
+    declare_parameter("gnss.position_deadband_xy", 0.0);
+    declare_parameter("gnss.position_deadband_z", 0.0);
+    declare_parameter("gnss.heading_deadband", 0.0);
+    declare_parameter("gnss.velocity_deadband.linear_velocity", 0.0);
 
     // Optional second GNSS receiver topic: set to empty string to disable
     declare_parameter("gnss.fix2_topic", "");
@@ -236,6 +263,12 @@ public:
     declare_parameter("reference.x",                       0.0);
     declare_parameter("reference.y",                       0.0);
     declare_parameter("reference.z",                       0.0);
+
+    declare_parameter("vslam.position_deadband_xy", 0.0);
+    declare_parameter("vslam.position_deadband_z", 0.0);
+    declare_parameter("vslam.orientation_deadband.roll", 0.0);
+    declare_parameter("vslam.orientation_deadband.pitch", 0.0);
+    declare_parameter("vslam.orientation_deadband.yaw", 0.0);
 
     declare_parameter("outlier_rejection",      true);
     declare_parameter("outlier_threshold_gnss", 16.27);
@@ -366,6 +399,14 @@ public:
     imu_topic_          = get_parameter("imu.topic").as_string();
     imu_remove_gravity_ = get_parameter("imu.remove_gravitational_acceleration").as_bool();
     imu_frame_override_ = get_parameter("imu.frame_id").as_string();
+    imu_gyro_deadband_  = std::max(0.0, get_parameter("imu.deadband.angular_velocity").as_double());
+    imu_accel_deadband_ = std::max(0.0, get_parameter("imu.deadband.linear_acceleration").as_double());
+    imu_orientation_deadband_roll_ =
+      std::max(0.0, get_parameter("imu.orientation_deadband.roll").as_double());
+    imu_orientation_deadband_pitch_ =
+      std::max(0.0, get_parameter("imu.orientation_deadband.pitch").as_double());
+    imu_orientation_deadband_yaw_ =
+      std::max(0.0, get_parameter("imu.orientation_deadband.yaw").as_double());
     RCLCPP_INFO(get_logger(), "IMU gravity removal: %s",
       imu_remove_gravity_ ? "ENABLED" : "disabled");
     if (!imu_frame_override_.empty())
@@ -374,18 +415,38 @@ public:
     imu2_topic_          = get_parameter("imu2.topic").as_string();
     imu2_frame_override_ = get_parameter("imu2.frame_id").as_string();
     imu2_remove_gravity_ = get_parameter("imu2.remove_gravitational_acceleration").as_bool();
+    imu2_gyro_deadband_  = std::max(0.0, get_parameter("imu2.deadband.angular_velocity").as_double());
+    imu2_accel_deadband_ = std::max(0.0, get_parameter("imu2.deadband.linear_acceleration").as_double());
+    imu2_orientation_deadband_roll_ =
+      std::max(0.0, get_parameter("imu2.orientation_deadband.roll").as_double());
+    imu2_orientation_deadband_pitch_ =
+      std::max(0.0, get_parameter("imu2.orientation_deadband.pitch").as_double());
+    imu2_orientation_deadband_yaw_ =
+      std::max(0.0, get_parameter("imu2.orientation_deadband.yaw").as_double());
 
     encoder_topic_          = get_parameter("encoder.topic").as_string();
     config.encoder.vel_noise_x  = get_parameter("encoder.vel_noise").as_double();
     config.encoder.vel_noise_y  = config.encoder.vel_noise_x;
     config.encoder.vel_noise_wz = get_parameter("encoder.yaw_noise").as_double();
+    encoder_linear_deadband_ =
+      std::max(0.0, get_parameter("encoder.deadband.linear_velocity").as_double());
+    encoder_angular_deadband_ =
+      std::max(0.0, get_parameter("encoder.deadband.angular_velocity").as_double());
 
     encoder2_topic_     = get_parameter("encoder2.topic").as_string();
     enc2_vel_noise_     = get_parameter("encoder2.vel_noise").as_double();
     enc2_yaw_noise_     = get_parameter("encoder2.yaw_noise").as_double();
+    encoder2_linear_deadband_ =
+      std::max(0.0, get_parameter("encoder2.deadband.linear_velocity").as_double());
+    encoder2_angular_deadband_ =
+      std::max(0.0, get_parameter("encoder2.deadband.angular_velocity").as_double());
     gnss_vel_topic_    = get_parameter("gnss.velocity_topic").as_string();
     radar_vel_topic_   = get_parameter("radar.velocity_topic").as_string();
     radar_vel_noise_   = get_parameter("radar.vel_noise").as_double();
+    gnss_velocity_linear_deadband_ =
+      std::max(0.0, get_parameter("gnss.velocity_deadband.linear_velocity").as_double());
+    radar_linear_deadband_ =
+      std::max(0.0, get_parameter("radar.deadband.linear_velocity").as_double());
 
     config.gnss.base_noise_xy  = get_parameter("gnss.base_noise_xy").as_double();
     config.gnss.base_noise_z   = get_parameter("gnss.base_noise_z").as_double();
@@ -407,6 +468,12 @@ public:
       std::max(0.0, get_parameter("gnss.min_horizontal_stddev_m").as_double());
     gnss_min_vertical_stddev_m_ =
       std::max(0.0, get_parameter("gnss.min_vertical_stddev_m").as_double());
+    gnss_position_deadband_xy_ =
+      std::max(0.0, get_parameter("gnss.position_deadband_xy").as_double());
+    gnss_position_deadband_z_ =
+      std::max(0.0, get_parameter("gnss.position_deadband_z").as_double());
+    gnss_heading_deadband_ =
+      std::max(0.0, get_parameter("gnss.heading_deadband").as_double());
     gnss_startup_delay_seconds_ =
       std::max(0.0, get_parameter("gnss.startup_delay_seconds").as_double());
     gnss_startup_ramp_seconds_ =
@@ -491,6 +558,16 @@ public:
     config.vslam.position_noise    = get_parameter("vslam.position_noise").as_double();
     config.vslam.orientation_noise = get_parameter("vslam.orientation_noise").as_double();
     vslam_reinit_n_       = get_parameter("vslam.reinit_n").as_int();
+    vslam_position_deadband_xy_ =
+      std::max(0.0, get_parameter("vslam.position_deadband_xy").as_double());
+    vslam_position_deadband_z_ =
+      std::max(0.0, get_parameter("vslam.position_deadband_z").as_double());
+    vslam_orientation_deadband_roll_ =
+      std::max(0.0, get_parameter("vslam.orientation_deadband.roll").as_double());
+    vslam_orientation_deadband_pitch_ =
+      std::max(0.0, get_parameter("vslam.orientation_deadband.pitch").as_double());
+    vslam_orientation_deadband_yaw_ =
+      std::max(0.0, get_parameter("vslam.orientation_deadband.yaw").as_double());
 
     config.gnss_coast_n                    = get_parameter("gnss.coast_n").as_int();
     config.gnss_coast_q_factor             = get_parameter("gnss.coast_q_factor").as_double();
@@ -1667,22 +1744,22 @@ private:
         ay += g_base.y();
         az += g_base.z();
       }
+      apply_zero_deadband_xyz(ax, ay, az, imu_accel_deadband_);
+      wx = apply_zero_deadband(msg->angular_velocity.x, imu_gyro_deadband_);
+      wy = apply_zero_deadband(msg->angular_velocity.y, imu_gyro_deadband_);
+      wz = apply_zero_deadband(msg->angular_velocity.z, imu_gyro_deadband_);
       fc_->update_imu(t,
-        msg->angular_velocity.x,
-        msg->angular_velocity.y,
-        msg->angular_velocity.z,
+        wx, wy, wz,
         ax, ay, az);
       remember_primary_imu_motion_sample(
-        t,
-        msg->angular_velocity.x,
-        msg->angular_velocity.y,
-        msg->angular_velocity.z,
-        ax,
-        ay,
-        az);
+        t, wx, wy, wz, ax, ay, az);
       return;
     }
 
+    apply_zero_deadband_xyz(ax, ay, az, imu_accel_deadband_);
+    wx = apply_zero_deadband(wx, imu_gyro_deadband_);
+    wy = apply_zero_deadband(wy, imu_gyro_deadband_);
+    wz = apply_zero_deadband(wz, imu_gyro_deadband_);
     fc_->update_imu(t, wx, wy, wz, ax, ay, az);
     remember_primary_imu_motion_sample(
       t,
@@ -1709,12 +1786,19 @@ private:
       double ax = msg->linear_acceleration.x;
       double ay = msg->linear_acceleration.y;
       double az = msg->linear_acceleration.z;
+      double wx = msg->angular_velocity.x;
+      double wy = msg->angular_velocity.y;
+      double wz = msg->angular_velocity.z;
       if (imu2_remove_gravity_) {
         tf2::Vector3 g_base = gravity_in_body_frame();
         ax += g_base.x(); ay += g_base.y(); az += g_base.z();
       }
+      apply_zero_deadband_xyz(ax, ay, az, imu2_accel_deadband_);
+      wx = apply_zero_deadband(wx, imu2_gyro_deadband_);
+      wy = apply_zero_deadband(wy, imu2_gyro_deadband_);
+      wz = apply_zero_deadband(wz, imu2_gyro_deadband_);
       fc_->update_imu(t,
-        msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z,
+        wx, wy, wz,
         ax, ay, az);
       fuse_imu_orientation_if_valid(t, msg, std::nullopt);
       return;
@@ -1738,8 +1822,12 @@ private:
         tf2::Vector3 g_base = gravity_in_body_frame();
         ax += g_base.x(); ay += g_base.y(); az += g_base.z();
       }
+      double wx = apply_zero_deadband(msg->angular_velocity.x, imu2_gyro_deadband_);
+      double wy = apply_zero_deadband(msg->angular_velocity.y, imu2_gyro_deadband_);
+      double wz = apply_zero_deadband(msg->angular_velocity.z, imu2_gyro_deadband_);
+      apply_zero_deadband_xyz(ax, ay, az, imu2_accel_deadband_);
       fc_->update_imu(t,
-        msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z,
+        wx, wy, wz,
         ax, ay, az);
       return;
     }
@@ -1765,10 +1853,17 @@ private:
       tf2::Vector3 g_base = gravity_in_body_frame();
       a_base += g_base;
     }
+    double wx_db = apply_zero_deadband(w_base.x(), imu2_gyro_deadband_);
+    double wy_db = apply_zero_deadband(w_base.y(), imu2_gyro_deadband_);
+    double wz_db = apply_zero_deadband(w_base.z(), imu2_gyro_deadband_);
+    double ax_db = a_base.x();
+    double ay_db = a_base.y();
+    double az_db = a_base.z();
+    apply_zero_deadband_xyz(ax_db, ay_db, az_db, imu2_accel_deadband_);
 
     fc_->update_imu(t,
-      w_base.x(), w_base.y(), w_base.z(),
-      a_base.x(), a_base.y(), a_base.z());
+      wx_db, wy_db, wz_db,
+      ax_db, ay_db, az_db);
     fuse_imu_orientation_if_valid(t, msg, q);
   }
 
@@ -1820,6 +1915,21 @@ private:
 
     double roll, pitch, yaw;
     tf2::Matrix3x3(q_base).getRPY(roll, pitch, yaw);
+    OrientationSample& sample = imu_to_base.has_value()
+      ? imu2_orientation_sample_
+      : imu_orientation_sample_;
+    const double roll_deadband = imu_to_base.has_value()
+      ? imu2_orientation_deadband_roll_
+      : imu_orientation_deadband_roll_;
+    const double pitch_deadband = imu_to_base.has_value()
+      ? imu2_orientation_deadband_pitch_
+      : imu_orientation_deadband_pitch_;
+    const double yaw_deadband = imu_to_base.has_value()
+      ? imu2_orientation_deadband_yaw_
+      : imu_orientation_deadband_yaw_;
+    apply_orientation_deadband(
+      roll, pitch, yaw, sample,
+      roll_deadband, pitch_deadband, yaw_deadband);
 
     fc_->update_imu_orientation(
       t, roll, pitch, yaw,
@@ -1855,12 +1965,16 @@ private:
 
     const double vx = msg->twist.twist.linear.x;
     const double vy = msg->twist.twist.linear.y;
-    const double wz = msg->twist.twist.angular.z;
-    last_primary_encoder_speed_ = std::sqrt(vx * vx + vy * vy);
+    double wz = msg->twist.twist.angular.z;
+    double vx_db = vx;
+    double vy_db = vy;
+    apply_zero_deadband_xy(vx_db, vy_db, encoder_linear_deadband_);
+    wz = apply_zero_deadband(wz, encoder_angular_deadband_);
+    last_primary_encoder_speed_ = std::sqrt(vx_db * vx_db + vy_db * vy_db);
     last_primary_encoder_wz_ = wz;
     last_primary_encoder_time_ = t;
 
-    fc_->update_encoder(t, vx, vy, wz, var_vx, var_vy, var_wz);
+    fc_->update_encoder(t, vx_db, vy_db, wz, var_vx, var_vy, var_wz);
 
     // Non-holonomic ground constraint: wheeled robots cannot move vertically.
     // Fuses VZ=0 as a pseudo-measurement to prevent altitude drift.
@@ -1873,7 +1987,7 @@ private:
     // per step, unscaled by dt) and can exceed the threshold even when the
     // robot is stationary, causing ZUPT to stop firing and yaw to drift.
     if (zupt_enabled_) {
-      double speed = std::sqrt(vx*vx + vy*vy);
+      double speed = std::sqrt(vx_db*vx_db + vy_db*vy_db);
       if (speed < zupt_velocity_threshold_ && std::abs(wz) < zupt_angular_threshold_) {
         fc_->update_zupt(t, zupt_noise_sigma_);
       }
@@ -1903,9 +2017,11 @@ private:
     double var_vy = (cov[7]  > 0.0) ? cov[7]  : enc2_vel_noise_ * enc2_vel_noise_;
     double var_wz = (cov[35] > 0.0) ? cov[35] : enc2_yaw_noise_ * enc2_yaw_noise_;
 
-    const double vx = msg->twist.twist.linear.x;
-    const double vy = msg->twist.twist.linear.y;
-    const double wz = msg->twist.twist.angular.z;
+    double vx = msg->twist.twist.linear.x;
+    double vy = msg->twist.twist.linear.y;
+    double wz = msg->twist.twist.angular.z;
+    apply_zero_deadband_xy(vx, vy, encoder2_linear_deadband_);
+    wz = apply_zero_deadband(wz, encoder2_angular_deadband_);
 
     fc_->update_encoder(t, vx, vy, wz, var_vx, var_vy, var_wz);
   }
@@ -1963,6 +2079,16 @@ private:
     pose.roll  = raw_roll;
     pose.pitch = raw_pitch;
     pose.yaw   = raw_yaw;
+    apply_position_deadband(
+      pose.x, pose.y, pose.z,
+      vslam_position_sample_,
+      vslam_position_deadband_xy_, vslam_position_deadband_z_);
+    apply_orientation_deadband(
+      pose.roll, pose.pitch, pose.yaw,
+      vslam_orientation_sample_,
+      vslam_orientation_deadband_roll_,
+      vslam_orientation_deadband_pitch_,
+      vslam_orientation_deadband_yaw_);
 
     // Extract covariance from pose.covariance (6x6, row-major, [x,y,z,rx,ry,rz]).
     // Diagonal indices: x=0, y=7, z=14, roll=21, pitch=28, yaw=35.
@@ -2030,8 +2156,9 @@ private:
     if (!fc_->is_initialized()) return;
 
     const double t  = rclcpp::Time(msg->header.stamp).seconds();
-    const double vx = msg->twist.twist.linear.x;
-    const double vy = msg->twist.twist.linear.y;
+    double vx = msg->twist.twist.linear.x;
+    double vy = msg->twist.twist.linear.y;
+    apply_zero_deadband_xy(vx, vy, radar_linear_deadband_);
 
     const auto& cov = msg->twist.covariance;
     const double var_vx = (cov[0] > 0.0) ? cov[0] : (radar_vel_noise_ * radar_vel_noise_);
@@ -2062,8 +2189,9 @@ private:
     const auto& s = fc_->get_state();
     double R[3][3];
     fusioncore::quat_to_rotation_matrix(s.quat_w(), s.quat_x(), s.quat_y(), s.quat_z(), R);
-    const double vx = R[0][0]*ve + R[1][0]*vn + R[2][0]*vu;
-    const double vy = R[0][1]*ve + R[1][1]*vn + R[2][1]*vu;
+    double vx = R[0][0]*ve + R[1][0]*vn + R[2][0]*vu;
+    double vy = R[0][1]*ve + R[1][1]*vn + R[2][1]*vu;
+    apply_zero_deadband_xy(vx, vy, gnss_velocity_linear_deadband_);
 
     const auto& cov = msg->twist.covariance;
     const double var_vx = (cov[0] > 0.0) ? cov[0] : -1.0;
@@ -2133,6 +2261,14 @@ private:
     fix.x = enu[0];
     fix.y = enu[1];
     fix.z = enu[2];
+    if (source_id >= 0 &&
+        source_id < static_cast<int>(gnss_position_samples_.size())) {
+      apply_position_deadband(
+        fix.x, fix.y, fix.z,
+        gnss_position_samples_[source_id],
+        gnss_position_deadband_xy_,
+        gnss_position_deadband_z_);
+    }
     // Map NavSatFix status to GnssFixType:
     //   -1 = STATUS_NO_FIX  (already rejected above)
     //    0 = STATUS_FIX      → GPS_FIX
@@ -2472,12 +2608,27 @@ private:
       return;
     }
 
-    latest_heading_yaw_rad_ = yaw;
-    latest_heading_valid_ = true;
-
-    if (!fc_->is_initialized()) return;
+    if (!fc_->is_initialized()) {
+      latest_heading_yaw_rad_ = yaw;
+      latest_heading_valid_ = true;
+      return;
+    }
 
     double t = rclcpp::Time(msg->header.stamp).seconds();
+    if (gnss_heading_deadband_ > 0.0) {
+      double roll_placeholder = 0.0;
+      double pitch_placeholder = 0.0;
+      apply_orientation_deadband(
+        roll_placeholder,
+        pitch_placeholder,
+        yaw,
+        gnss_heading_sample_,
+        0.0,
+        0.0,
+        gnss_heading_deadband_);
+    }
+    latest_heading_yaw_rad_ = yaw;
+    latest_heading_valid_ = true;
 
     // Extract heading accuracy from orientation covariance
     // covariance[8] is the yaw variance (3rd diagonal element)
@@ -2802,6 +2953,83 @@ private:
     lla.alt_m   = r.lpzt.z;
   }
 
+  struct OrientationSample {
+    bool valid = false;
+    double roll = 0.0;
+    double pitch = 0.0;
+    double yaw = 0.0;
+  };
+
+  struct PositionSample {
+    bool valid = false;
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+  };
+
+  static double apply_zero_deadband(double value, double deadband)
+  {
+    return (std::abs(value) <= deadband) ? 0.0 : value;
+  }
+
+  static void apply_zero_deadband_xy(double& x, double& y, double deadband)
+  {
+    x = apply_zero_deadband(x, deadband);
+    y = apply_zero_deadband(y, deadband);
+  }
+
+  static void apply_zero_deadband_xyz(double& x, double& y, double& z, double deadband)
+  {
+    x = apply_zero_deadband(x, deadband);
+    y = apply_zero_deadband(y, deadband);
+    z = apply_zero_deadband(z, deadband);
+  }
+
+  static void apply_orientation_deadband(
+    double& roll,
+    double& pitch,
+    double& yaw,
+    OrientationSample& sample,
+    double roll_deadband,
+    double pitch_deadband,
+    double yaw_deadband)
+  {
+    if (sample.valid) {
+      if (std::abs(roll - sample.roll) <= roll_deadband) roll = sample.roll;
+      if (std::abs(pitch - sample.pitch) <= pitch_deadband) pitch = sample.pitch;
+      if (std::abs(normalize_angle_local(yaw - sample.yaw)) <= yaw_deadband) yaw = sample.yaw;
+    }
+
+    sample.valid = true;
+    sample.roll = roll;
+    sample.pitch = pitch;
+    sample.yaw = yaw;
+  }
+
+  static void apply_position_deadband(
+    double& x,
+    double& y,
+    double& z,
+    PositionSample& sample,
+    double xy_deadband,
+    double z_deadband)
+  {
+    if (sample.valid) {
+      if (std::hypot(x - sample.x, y - sample.y) <= xy_deadband) {
+        x = sample.x;
+        y = sample.y;
+      }
+      if (std::abs(z - sample.z) <= z_deadband) {
+        z = sample.z;
+      }
+    }
+
+    sample.valid = true;
+    sample.x = x;
+    sample.y = y;
+    sample.z = z;
+  }
+
   // ─── Members ──────────────────────────────────────────────────────────────
 
   std::unique_ptr<fusioncore::FusionCore>        fc_;
@@ -2839,6 +3067,10 @@ private:
   std::string encoder2_topic_;
   double      enc2_vel_noise_ = 0.05;
   double      enc2_yaw_noise_ = 0.02;
+  double      encoder_linear_deadband_ = 0.0;
+  double      encoder_angular_deadband_ = 0.0;
+  double      encoder2_linear_deadband_ = 0.0;
+  double      encoder2_angular_deadband_ = 0.0;
   std::string vslam_topic_;
   std::string vslam_frame_override_;
   // VSLAM map-to-odom frame offset: applied to every VSLAM measurement.
@@ -2849,9 +3081,18 @@ private:
   double vslam_offset_z_           = 0.0;
   int    vslam_consecutive_rejects_ = 0;
   int    vslam_reinit_n_           = 10;
+  double vslam_position_deadband_xy_ = 0.0;
+  double vslam_position_deadband_z_ = 0.0;
+  double vslam_orientation_deadband_roll_ = 0.0;
+  double vslam_orientation_deadband_pitch_ = 0.0;
+  double vslam_orientation_deadband_yaw_ = 0.0;
+  PositionSample vslam_position_sample_;
+  OrientationSample vslam_orientation_sample_;
   std::string gnss_vel_topic_;
   std::string radar_vel_topic_;
   double      radar_vel_noise_ = 0.1;
+  double      gnss_velocity_linear_deadband_ = 0.0;
+  double      radar_linear_deadband_ = 0.0;
 
   bool        pending_init_        = false;
 
@@ -2878,6 +3119,18 @@ private:
   std::string imu_frame_resolved_;
   std::string imu2_topic_;
   std::string imu2_frame_override_;
+  double      imu_gyro_deadband_ = 0.0;
+  double      imu_accel_deadband_ = 0.0;
+  double      imu_orientation_deadband_roll_ = 0.0;
+  double      imu_orientation_deadband_pitch_ = 0.0;
+  double      imu_orientation_deadband_yaw_ = 0.0;
+  double      imu2_gyro_deadband_ = 0.0;
+  double      imu2_accel_deadband_ = 0.0;
+  double      imu2_orientation_deadband_roll_ = 0.0;
+  double      imu2_orientation_deadband_pitch_ = 0.0;
+  double      imu2_orientation_deadband_yaw_ = 0.0;
+  OrientationSample imu_orientation_sample_;
+  OrientationSample imu2_orientation_sample_;
   std::string encoder_topic_;
   bool        imu2_remove_gravity_ = false;
   double      last_imu_time_       = 0.0;   // timestamp of most recent IMU message
@@ -2893,6 +3146,9 @@ private:
   double                            gnss_base_noise_z_ = 2.0;
   double                            gnss_min_horizontal_stddev_m_ = 0.5;
   double                            gnss_min_vertical_stddev_m_ = 1.0;
+  double                            gnss_position_deadband_xy_ = 0.0;
+  double                            gnss_position_deadband_z_ = 0.0;
+  double                            gnss_heading_deadband_ = 0.0;
   double                            gnss_startup_delay_seconds_ = 0.0;
   double                            gnss_startup_ramp_seconds_ = 0.0;
   double                            gnss_startup_initial_covariance_scale_ = 1.0;
@@ -2909,6 +3165,8 @@ private:
   double                            stationary_imu_accel_threshold_ = 0.2;
   fusioncore::sensors::GnssLeverArm gnss_lever_arm_;    // primary receiver
   fusioncore::sensors::GnssLeverArm gnss_lever_arm2_;   // secondary receiver (fix2_topic)
+  std::array<PositionSample, 2>     gnss_position_samples_{};
+  OrientationSample                 gnss_heading_sample_;
   double                            last_primary_encoder_time_ = -1.0;
   double                            last_primary_encoder_speed_ = 0.0;
   double                            last_primary_encoder_wz_ = 0.0;
