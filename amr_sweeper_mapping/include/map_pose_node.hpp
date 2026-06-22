@@ -153,6 +153,8 @@ private:
   double prior_blend_weight_{0.7};
   double scan_timeout_seconds_{1.0};
   double costmap_timeout_seconds_{2.0};
+  double scan_match_period_seconds_{0.5};
+  double global_costmap_min_update_period_seconds_{0.5};
   int startup_ready_streak_required_{3};
   double max_translation_jump_m_{0.75};
   double max_yaw_jump_rad_{0.35};
@@ -177,6 +179,8 @@ private:
   rclcpp::Time latest_heading_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_scan_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_global_costmap_processed_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_scan_match_attempt_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_map_pose_stamp_{0, 0, RCL_ROS_TIME};
   std::array<double, 3> artifact_longitude_coefficients_{0.0, 0.0, 0.0};
   std::array<double, 3> artifact_latitude_coefficients_{0.0, 0.0, 0.0};

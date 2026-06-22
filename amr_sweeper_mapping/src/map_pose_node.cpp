@@ -177,6 +177,8 @@ MapPoseNode::MapPoseNode()
   declare_parameter("prior_blend_weight", 0.7);
   declare_parameter("scan_timeout_seconds", 1.0);
   declare_parameter("costmap_timeout_seconds", 2.0);
+  declare_parameter("scan_match_period_seconds", 0.5);
+  declare_parameter("global_costmap_min_update_period_seconds", 0.5);
   declare_parameter("startup_ready_streak_required", 3);
   declare_parameter("max_translation_jump_m", 0.75);
   declare_parameter("max_yaw_jump_rad", 0.35);
@@ -257,6 +259,12 @@ MapPoseNode::MapPoseNode()
   prior_blend_weight_ = std::clamp(get_parameter("prior_blend_weight").as_double(), 0.0, 1.0);
   scan_timeout_seconds_ = std::max(0.05, get_parameter("scan_timeout_seconds").as_double());
   costmap_timeout_seconds_ = std::max(0.05, get_parameter("costmap_timeout_seconds").as_double());
+  scan_match_period_seconds_ = std::max(
+    0.0,
+    get_parameter("scan_match_period_seconds").as_double());
+  global_costmap_min_update_period_seconds_ = std::max(
+    0.0,
+    get_parameter("global_costmap_min_update_period_seconds").as_double());
   startup_ready_streak_required_ = std::max(
     1,
     static_cast<int>(get_parameter("startup_ready_streak_required").as_int()));
@@ -772,25 +780,55 @@ void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
 void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
 {
   const rclcpp::Time receipt_stamp = now();
-  const nav_msgs::msg::OccupancyGrid map = *message;
   const bool costmap_ready =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;
-  std::shared_ptr<std::vector<float>> score_field;
-  if (costmap_ready) {
-    score_field = buildGlobalCostmapScoreField(map);
+
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (
+      latest_global_costmap_stamp_.nanoseconds() > 0 &&
+      latest_global_costmap_stamp_ > receipt_stamp)
+    {
+      return;
+    }
+    latest_global_costmap_stamp_ = receipt_stamp;
+    latest_global_costmap_ready_ = latest_global_costmap_ready_ || costmap_ready;
   }
+
+  const bool should_rebuild_score_field = [this, &receipt_stamp]() {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      if (!latest_global_costmap_ready_ || !latest_global_costmap_score_field_) {
+        return true;
+      }
+      if (global_costmap_min_update_period_seconds_ <= 0.0) {
+        return true;
+      }
+      if (latest_global_costmap_processed_stamp_.nanoseconds() == 0) {
+        return true;
+      }
+      return (receipt_stamp - latest_global_costmap_processed_stamp_).seconds() >=
+             global_costmap_min_update_period_seconds_;
+    }();
+
+  if (!costmap_ready || !should_rebuild_score_field) {
+    return;
+  }
+
+  const nav_msgs::msg::OccupancyGrid map = *message;
+  std::shared_ptr<std::vector<float>> score_field = buildGlobalCostmapScoreField(map);
 
   std::lock_guard<std::mutex> lock(state_mutex_);
   if (
-    latest_global_costmap_stamp_.nanoseconds() > 0 &&
-    latest_global_costmap_stamp_ > receipt_stamp)
+    latest_global_costmap_processed_stamp_.nanoseconds() > 0 &&
+    latest_global_costmap_processed_stamp_ > receipt_stamp)
   {
     return;
   }
   latest_global_costmap_ = map;
   latest_global_costmap_stamp_ = receipt_stamp;
   latest_global_costmap_ready_ = costmap_ready;
-  latest_global_costmap_score_field_ = costmap_ready ? std::move(score_field) : nullptr;
+  latest_global_costmap_processed_stamp_ = receipt_stamp;
+  latest_global_costmap_score_field_ = std::move(score_field);
 }
 
 float MapPoseNode::scoreCostmapCell(
@@ -1287,8 +1325,25 @@ void MapPoseNode::publishMapToOdomTransform()
   tf2::Transform map_to_odom = filteredMapToOdomTransform(prediction_snapshot.map_to_odom_filter_state);
   tf2::Transform map_to_base_prior = map_to_odom * odom_to_base;
 
-  const std::optional<MapMatchEstimate> map_match =
-    estimateMapToBaseFromPrior(prediction_snapshot, map_to_base_prior);
+  bool attempted_scan_match = false;
+  std::optional<MapMatchEstimate> map_match;
+  const rclcpp::Time scan_match_now = now();
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (
+      last_scan_match_attempt_stamp_.nanoseconds() == 0 ||
+      scan_match_period_seconds_ <= 0.0 ||
+      (scan_match_now - last_scan_match_attempt_stamp_).seconds() >= scan_match_period_seconds_)
+    {
+      last_scan_match_attempt_stamp_ = scan_match_now;
+      attempted_scan_match = true;
+    }
+  }
+
+  if (attempted_scan_match) {
+    map_match = estimateMapToBaseFromPrior(prediction_snapshot, map_to_base_prior);
+  }
+
   if (
     map_match.has_value() &&
     map_match->confidence >= minimum_confidence_for_filter_update_ &&
@@ -1322,7 +1377,7 @@ void MapPoseNode::publishMapToOdomTransform()
 
     std::lock_guard<std::mutex> lock(state_mutex_);
     updateMapToOdomFilterLocked(measured_map_to_odom, map_match->confidence);
-  } else {
+  } else if (attempted_scan_match) {
     std::lock_guard<std::mutex> lock(state_mutex_);
     decayMapToOdomFilterTowardsIdentityLocked();
   }

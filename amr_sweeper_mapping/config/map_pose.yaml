@@ -45,6 +45,8 @@
     prior_blend_weight:                  0.7                              # Reserved compatibility knob from the earlier prior-based matcher; the runtime filter now starts identity and tracks scan corrections.
     scan_timeout_seconds:                1.0                              # Ignore stale scans so the matcher does not back-calculate map -> odom from old sensor data.
     costmap_timeout_seconds:             2.0                              # Ignore stale global costmaps during scan correlation.
+    scan_match_period_seconds:           0.5                              # Run the expensive scan-to-map correction at a bounded cadence while still publishing map -> odom at publish_period_seconds.
+    global_costmap_min_update_period_seconds: 0.5                         # Rebuild the likelihood field from mapping/global_costmap at most at this cadence; freshness timestamps still update on every map message.
     startup_ready_streak_required:       3                                # Hold map -> odom at identity until scan freshness, TF connectivity, and the static reference map stay healthy for this many consecutive publish cycles.
 
     # -- Runtime correction filter -------------------------------------------
