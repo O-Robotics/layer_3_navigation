@@ -115,9 +115,12 @@ inline ImuOrientationNoiseMatrix imu_orientation_noise_matrix(const ImuOrientati
 // into yaw via atan2(qw*qz + qx*qy, ...). The 2D update leaves QZ unaffected.
 
 constexpr int IMU_RP_DIM = 2;
+constexpr int IMU_YAW_DIM = 1;
 
 using ImuRPMeasurement = Eigen::Matrix<double, IMU_RP_DIM, 1>;
 using ImuRPNoiseMatrix = Eigen::Matrix<double, IMU_RP_DIM, IMU_RP_DIM>;
+using ImuYawMeasurement = Eigen::Matrix<double, IMU_YAW_DIM, 1>;
+using ImuYawNoiseMatrix = Eigen::Matrix<double, IMU_YAW_DIM, IMU_YAW_DIM>;
 
 inline ImuRPMeasurement imu_rp_measurement_function(const StateVector& x) {
   ImuRPMeasurement z;
@@ -132,6 +135,20 @@ inline ImuRPNoiseMatrix imu_rp_noise_matrix(const ImuOrientationParams& p) {
   ImuRPNoiseMatrix R = ImuRPNoiseMatrix::Zero();
   R(0,0) = p.roll_noise  * p.roll_noise;
   R(1,1) = p.pitch_noise * p.pitch_noise;
+  return R;
+}
+
+inline ImuYawMeasurement imu_yaw_measurement_function(const StateVector& x) {
+  ImuYawMeasurement z;
+  double roll, pitch, yaw;
+  quat_to_euler(x[QW], x[QX], x[QY], x[QZ], roll, pitch, yaw);
+  z[0] = yaw;
+  return z;
+}
+
+inline ImuYawNoiseMatrix imu_yaw_noise_matrix(const ImuOrientationParams& p) {
+  ImuYawNoiseMatrix R = ImuYawNoiseMatrix::Zero();
+  R(0,0) = p.yaw_noise * p.yaw_noise;
   return R;
 }
 

@@ -239,12 +239,26 @@ void FusionCore::replay_event(const ReplayEvent& event) {
       break;
     }
     case ReplayEventType::IMU_ORIENTATION: {
-      sensors::ImuOrientationMeasurement z;
-      z[0] = event.a; z[1] = event.b; z[2] = event.c;
-      constexpr unsigned int IMU_ORIENT_ANGLE_DIMS = 0b100;
-      ukf_.update<sensors::IMU_ORIENTATION_DIM>(
-        z, sensors::imu_orientation_measurement_function, event.imu_orient_R,
-        IMU_ORIENT_ANGLE_DIMS);
+      sensors::ImuRPMeasurement z_rp;
+      z_rp[0] = event.a;
+      z_rp[1] = event.b;
+
+      sensors::ImuRPNoiseMatrix R_rp = sensors::ImuRPNoiseMatrix::Zero();
+      R_rp(0,0) = event.imu_orient_R(0,0);
+      R_rp(1,1) = event.imu_orient_R(1,1);
+
+      ukf_.update<sensors::IMU_RP_DIM>(
+        z_rp, sensors::imu_rp_measurement_function, R_rp);
+
+      sensors::ImuYawMeasurement z_yaw;
+      z_yaw[0] = event.c;
+
+      sensors::ImuYawNoiseMatrix R_yaw = sensors::ImuYawNoiseMatrix::Zero();
+      R_yaw(0,0) = event.imu_orient_R(2,2);
+
+      constexpr unsigned int IMU_YAW_ANGLE_DIMS = 0b1;
+      ukf_.update<sensors::IMU_YAW_DIM>(
+        z_yaw, sensors::imu_yaw_measurement_function, R_yaw, IMU_YAW_ANGLE_DIMS);
       last_imu_time_ = event.timestamp;
       break;
     }
@@ -623,7 +637,10 @@ void FusionCore::update_imu_orientation(
     replay.imu_rp_R = R_rp;
 
   } else {
-    // 9-axis IMU with magnetometer: fuse roll, pitch, and yaw.
+    // 9-axis IMU with magnetometer: fuse roll/pitch and yaw as separate updates.
+    // This avoids Euler cross-coupling where a full 3D orientation correction can
+    // kick the quaternion onto a different yaw branch even when the measured yaw
+    // itself is perfectly steady.
     sensors::ImuOrientationNoiseMatrix R;
     if (orientation_cov != nullptr) {
       R = sensors::imu_orientation_noise_from_covariance(orientation_cov, fallback);
@@ -631,21 +648,55 @@ void FusionCore::update_imu_orientation(
       R = adaptive_initialized_ ? R_imu_orient_ : sensors::imu_orientation_noise_matrix(fallback);
     }
 
+    sensors::ImuRPMeasurement z_rp;
+    z_rp[0] = roll;
+    z_rp[1] = pitch;
+
+    sensors::ImuRPNoiseMatrix R_rp = sensors::ImuRPNoiseMatrix::Zero();
+    R_rp(0,0) = R(0,0);
+    R_rp(1,1) = R(1,1);
+
+    sensors::ImuYawMeasurement z_yaw;
+    z_yaw[0] = yaw;
+
+    sensors::ImuYawNoiseMatrix R_yaw = sensors::ImuYawNoiseMatrix::Zero();
+    R_yaw(0,0) = R(2,2);
+
     if (config_.outlier_rejection) {
-      sensors::ImuOrientationMeasurement innovation_pre;
-      sensors::ImuOrientationNoiseMatrix S;
-      ukf_.predict_measurement<sensors::IMU_ORIENTATION_DIM>(
-        z, sensors::imu_orientation_measurement_function, R, innovation_pre, S);
-      if (is_outlier<sensors::IMU_ORIENTATION_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
+      sensors::ImuRPMeasurement innovation_rp_pre;
+      sensors::ImuRPNoiseMatrix S_rp;
+      ukf_.predict_measurement<sensors::IMU_RP_DIM>(
+        z_rp, sensors::imu_rp_measurement_function, R_rp, innovation_rp_pre, S_rp);
+      if (is_outlier<sensors::IMU_RP_DIM>(innovation_rp_pre, S_rp, config_.outlier_threshold_imu)) {
+        ++imu_outliers_;
+        last_imu_time_ = timestamp_seconds;
+        return;
+      }
+
+      sensors::ImuYawMeasurement innovation_yaw_pre;
+      sensors::ImuYawNoiseMatrix S_yaw;
+      constexpr unsigned int IMU_YAW_ANGLE_DIMS = 0b1;
+      ukf_.predict_measurement<sensors::IMU_YAW_DIM>(
+        z_yaw, sensors::imu_yaw_measurement_function, R_yaw,
+        innovation_yaw_pre, S_yaw, IMU_YAW_ANGLE_DIMS);
+      if (is_outlier<sensors::IMU_YAW_DIM>(innovation_yaw_pre, S_yaw, config_.outlier_threshold_imu)) {
         ++imu_outliers_;
         last_imu_time_ = timestamp_seconds;
         return;
       }
     }
 
-    constexpr unsigned int IMU_ORIENT_ANGLE_DIMS = 0b100;  // bit 2 = yaw
-    auto imu_orient_innovation = ukf_.update<sensors::IMU_ORIENTATION_DIM>(
-      z, sensors::imu_orientation_measurement_function, R, IMU_ORIENT_ANGLE_DIMS);
+    auto imu_rp_innovation = ukf_.update<sensors::IMU_RP_DIM>(
+      z_rp, sensors::imu_rp_measurement_function, R_rp);
+
+    constexpr unsigned int IMU_YAW_ANGLE_DIMS = 0b1;
+    auto imu_yaw_innovation = ukf_.update<sensors::IMU_YAW_DIM>(
+      z_yaw, sensors::imu_yaw_measurement_function, R_yaw, IMU_YAW_ANGLE_DIMS);
+
+    sensors::ImuOrientationMeasurement imu_orient_innovation;
+    imu_orient_innovation[0] = imu_rp_innovation[0];
+    imu_orient_innovation[1] = imu_rp_innovation[1];
+    imu_orient_innovation[2] = imu_yaw_innovation[0];
 
     adapt_R<sensors::IMU_ORIENTATION_DIM>(
       R_imu_orient_, R_imu_orient_floor_, imu_orient_innovations_, imu_orient_innovation, config_.adaptive_imu);
