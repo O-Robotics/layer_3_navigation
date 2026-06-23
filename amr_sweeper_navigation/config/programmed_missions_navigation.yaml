@@ -121,10 +121,10 @@ local_costmap:
           clearing:                  true
           marking:                   true
           obstacle_max_range:        4.0
-          obstacle_min_range:        0.0
+          obstacle_min_range:        0.45
           raytrace_max_range:        4.5
-          raytrace_min_range:        0.0
-          inf_is_valid:              false
+          raytrace_min_range:        0.45
+          inf_is_valid:              true
 
       # -- Inflation layer -----------------------------------------------------
       inflation_layer:
