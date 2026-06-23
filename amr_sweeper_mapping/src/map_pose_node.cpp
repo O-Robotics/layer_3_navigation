@@ -333,7 +333,7 @@ MapPoseNode::MapPoseNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MapPoseNode::handleNavSat, this, std::placeholders::_1),
     subscription_options);
-  const auto scan_qos = rclcpp::QoS(rclcpp::KeepLast(50)).reliable();
+  const auto scan_qos = rclcpp::SensorDataQoS().keep_last(5);
 
   heading_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
     heading_topic_,
@@ -1097,19 +1097,42 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     endpoints = std::move(reduced_endpoints);
   }
 
+  const auto sampleEndpoints = [&](const int requested_count) {
+      if (requested_count <= 0 || static_cast<int>(endpoints.size()) <= requested_count) {
+        return endpoints;
+      }
+      std::vector<ScanEndpoint> sampled_endpoints;
+      sampled_endpoints.reserve(static_cast<std::size_t>(requested_count));
+      const double endpoint_stride =
+        static_cast<double>(endpoints.size()) / static_cast<double>(requested_count);
+      for (int point_index = 0; point_index < requested_count; ++point_index) {
+        const std::size_t sample_index = std::min(
+          endpoints.size() - 1U,
+          static_cast<std::size_t>(std::floor(static_cast<double>(point_index) * endpoint_stride)));
+        sampled_endpoints.push_back(endpoints[sample_index]);
+      }
+      return sampled_endpoints;
+    };
+
+  const std::vector<ScanEndpoint> coarse_endpoints = sampleEndpoints(std::max(
+      min_valid_scan_points_,
+      max_scan_match_points_ / 2));
+
   double best_score = -std::numeric_limits<double>::infinity();
   tf2::Transform best_transform;
   bool best_transform_ready = false;
   bool search_timed_out = false;
   const tf2::Transform search_center = map_to_base_prior;
+  const double search_center_yaw = yawFromTransform(search_center);
 
-  auto scoreCandidate = [&](const double candidate_x, const double candidate_y, const double candidate_yaw) {
+  auto scoreCandidate = [&](const std::vector<ScanEndpoint> & candidate_endpoints,
+      const double candidate_x, const double candidate_y, const double candidate_yaw) {
       const double cos_yaw = std::cos(candidate_yaw);
       const double sin_yaw = std::sin(candidate_yaw);
       double endpoint_score_sum = 0.0;
       int valid_points = 0;
 
-      for (const auto & endpoint : endpoints) {
+      for (const auto & endpoint : candidate_endpoints) {
         const double world_x = candidate_x + endpoint.x * cos_yaw - endpoint.y * sin_yaw;
         const double world_y = candidate_y + endpoint.x * sin_yaw + endpoint.y * cos_yaw;
         int grid_x = 0;
@@ -1130,7 +1153,7 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
 
       const double center_dx = candidate_x - search_center.getOrigin().x();
       const double center_dy = candidate_y - search_center.getOrigin().y();
-      const double yaw_delta = normalizeAngle(candidate_yaw - yawFromTransform(search_center));
+      const double yaw_delta = normalizeAngle(candidate_yaw - search_center_yaw);
       return
         (endpoint_score_sum / static_cast<double>(valid_points)) -
         (translation_penalty_per_meter_ * std::hypot(center_dx, center_dy)) -
@@ -1155,7 +1178,8 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     (search_window_yaw_covariance_scale_ * yaw_sigma),
     min_search_yaw_window_rad_,
     search_yaw_window_rad_);
-  const auto runSearch = [&](const double translation_window, const double translation_step,
+  const auto runSearch = [&](const std::vector<ScanEndpoint> & candidate_endpoints,
+      const double translation_window, const double translation_step,
       const double yaw_window, const double yaw_step) {
       for (double dx = -translation_window; dx <= translation_window + 1.0e-6; dx += translation_step) {
         for (double dy = -translation_window; dy <= translation_window + 1.0e-6; dy += translation_step) {
@@ -1169,7 +1193,11 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
             const double candidate_x = center_x + dx;
             const double candidate_y = center_y + dy;
             const double candidate_yaw = normalizeAngle(center_yaw + yaw_delta);
-            const double candidate_score = scoreCandidate(candidate_x, candidate_y, candidate_yaw);
+            const double candidate_score = scoreCandidate(
+              candidate_endpoints,
+              candidate_x,
+              candidate_y,
+              candidate_yaw);
             if (candidate_score <= best_score) {
               continue;
             }
@@ -1186,6 +1214,7 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     };
 
   runSearch(
+    coarse_endpoints,
     translation_window,
     search_translation_step_m_,
     yaw_window,
@@ -1224,7 +1253,11 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
           const double candidate_x = fine_center_x + dx;
           const double candidate_y = fine_center_y + dy;
           const double candidate_yaw = normalizeAngle(fine_center_yaw + yaw_delta);
-          const double candidate_score = scoreCandidate(candidate_x, candidate_y, candidate_yaw);
+          const double candidate_score = scoreCandidate(
+            endpoints,
+            candidate_x,
+            candidate_y,
+            candidate_yaw);
           if (candidate_score <= best_score) {
             continue;
           }
