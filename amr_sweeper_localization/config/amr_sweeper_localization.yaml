@@ -126,7 +126,7 @@ fusioncore:
     ground_constraint.z_position_sigma: 0.0
 
     # -- Startup behavior ------------------------------------------------------
-    init.stationary_window: 0.0
+    init.stationary_window: 2.0
     init.wait_for_all_sensors: false
     init.sensor_wait_timeout: 10.0
 
