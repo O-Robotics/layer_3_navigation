@@ -29,6 +29,7 @@ topics:
   - /amr_sweeper/imu/data_raw
 
   - /amr_sweeper/gnss/navsat
+  - /amr_sweeper/gnss/fix
   - /amr_sweeper/gnss/ntrip_client/rtcm
 
   - /amr_sweeper/system_info/system_info
@@ -61,6 +62,9 @@ topics:
 # Layer 3 Navigation-specific topics. Adjust as needed for focused debugging.
   - /amr_sweeper/localization/fusioncore/transition_event 
   - /amr_sweeper/localization/odometry_fused
+  - /amr_sweeper/localization/pose
+  - /amr_sweeper/localization/debug/filter_health
+  - /amr_sweeper/localization/debug/gnss_status
 
   - /amr_sweeper/mapping/gaussian/world_points
   - /amr_sweeper/mapping/gaussian/status
