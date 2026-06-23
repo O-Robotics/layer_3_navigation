@@ -32,7 +32,7 @@ This package launches the official upstream FusionCore ROS 2 localization stack 
 The parameter file [config/amr_sweeper_localization.yaml](/mnt/c/home/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/amr_sweeper_localization.yaml) now follows the official FusionCore schema and uses the official `fusioncore:` YAML root, plus a small `launch_defaults:` section that is only consumed by this package's launch file.
 
 ## Sensor Inputs
-- Primary IMU: `imu.topic`, default `imu/data_raw`
+- Primary IMU: `imu.topic`, default `imu/data_heading`
 - Optional second IMU: `imu2.topic`
 - Primary wheel odometry: `encoder.topic`, default `drive_controller/odom`
 - Optional second velocity source: `encoder2.topic`, default `visual_odometry/odom`
@@ -44,6 +44,7 @@ The parameter file [config/amr_sweeper_localization.yaml](/mnt/c/home/dev/rob_ws
 - This package is intended to track the official upstream `fusioncore_core` and `fusioncore_ros` packages without local feature additions.
 - The config uses the current upstream parameter names such as `imu.gyro_noise`, `encoder.vel_noise`, `gnss.base_noise_xy`, `vslam.position_noise`, and `ukf.q_encoder_wz_bias`.
 - `base_frame` is configured as `base_footprint`, so the fused odometry output is published against `odom -> base_footprint`.
+- The localization default intentionally uses `imu/data_heading`, the yaw-only output from `amr_sweeper_imu`. This keeps FusionCore's `odom -> base_footprint` estimate level while the attitude controller independently publishes roll/pitch on `base_footprint -> base_link`.
 - `publish.yaw_only` is not part of the official upstream FusionCore package and is no longer used here.
 - `map -> odom` is not published by this package; that transform is expected to come from the mapping stack.
 
