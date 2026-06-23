@@ -62,6 +62,7 @@ def _launch_fusioncore(context, *args, **kwargs):
     use_visual_odometry = LaunchConfiguration("use_visual_odometry").perform(context).lower() == "true"
     use_gnss = LaunchConfiguration("use_gnss").perform(context).lower() == "true"
     parameters = _load_localization_parameters()
+    gnss_input_topic = "gnss/fix" if parameters.get("gnss.use_gps_fix", False) else "gnss/navsat"
 
     fusion_overrides = {
         "use_sim_time": use_sim_time,
@@ -88,7 +89,7 @@ def _launch_fusioncore(context, *args, **kwargs):
             fusion_overrides,
         ],
         remappings=[
-            ("/gnss/fix", "gnss/navsat" if use_gnss else "_gnss_disabled"),
+            ("/gnss/fix", gnss_input_topic if use_gnss else "_gnss_disabled"),
             ("/odom/wheels", "drive_controller/odom" if use_encoder else "_encoder_disabled"),
             ("/fusion/odom", "localization/odometry_fused"),
             ("/fusion/pose", "localization/pose"),

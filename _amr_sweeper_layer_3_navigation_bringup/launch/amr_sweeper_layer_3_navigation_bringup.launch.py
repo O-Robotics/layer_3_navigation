@@ -304,6 +304,7 @@ def _build_launches(context):
     if use_amr_sweeper_localization:
         use_sim_time_bool = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
         localization_parameters = _load_localization_parameters()
+        gnss_input_topic = "gnss/fix" if localization_parameters.get("gnss.use_gps_fix", False) else "gnss/navsat"
 
         fusion_overrides = {
             "use_sim_time": use_sim_time_bool,
@@ -334,7 +335,7 @@ def _build_launches(context):
                 fusion_overrides,
             ],
             remappings=[
-                ("/gnss/fix", "gnss/navsat" if use_gnss else "_gnss_disabled"),
+                ("/gnss/fix", gnss_input_topic if use_gnss else "_gnss_disabled"),
                 ("/odom/wheels", "drive_controller/odom" if use_encoder else "_encoder_disabled"),
                 ("/fusion/odom", "localization/odometry_fused"),
                 ("/fusion/pose", "localization/pose"),

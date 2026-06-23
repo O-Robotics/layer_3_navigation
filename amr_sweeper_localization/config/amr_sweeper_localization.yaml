@@ -45,7 +45,7 @@ fusioncore:
     encoder2.yaw_noise: 0.02
 
     # -- GNSS ------------------------------------------------------------------
-    gnss.use_gps_fix: false
+    gnss.use_gps_fix: true
     gnss.velocity_topic: ""
     gnss.base_noise_xy: 3.0
     gnss.base_noise_z: 6.0
