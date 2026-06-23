@@ -59,6 +59,11 @@ def _load_localization_parameters() -> dict:
     return config.get("/**", {}).get("ros__parameters", {})
 
 
+def _projection_config_path() -> str:
+    package_dir = get_package_share_directory("amr_sweeper_localization")
+    return os.path.join(package_dir, "config", "odometry_projection.yaml")
+
+
 def _load_localization_defaults() -> dict[str, str]:
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
@@ -308,7 +313,7 @@ def _build_launches(context):
 
         fusion_overrides = {
             "use_sim_time": use_sim_time_bool,
-            "base_frame": "base_footprint",
+            "base_frame": "base_link",
             "odom_frame": "odom",
             "imu.topic": _topic_if_enabled(use_imu, localization_parameters.get("imu.topic", "imu/data_raw")),
             "imu2.topic": _topic_if_enabled(use_imu2, localization_parameters.get("imu2.topic", "")),
@@ -322,7 +327,22 @@ def _build_launches(context):
                 use_gnss, localization_parameters.get("gnss.heading_topic", "")),
             "gnss.azimuth_topic": _topic_if_enabled(
                 use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
+            "publish.tf": False,
         }
+
+        odometry_projection_node = Node(
+            package="amr_sweeper_localization",
+            executable="odometry_projection_node",
+            name="odometry_projection",
+            namespace=LaunchConfiguration("namespace").perform(context),
+            output="screen",
+            parameters=[
+                _projection_config_path(),
+                {
+                    "use_sim_time": use_sim_time_bool,
+                },
+            ],
+        )
 
         fusioncore_node = LifecycleNode(
             package="fusioncore_ros",
@@ -337,7 +357,7 @@ def _build_launches(context):
             remappings=[
                 ("/gnss/fix", gnss_input_topic if use_gnss else "_gnss_disabled"),
                 ("/odom/wheels", "drive_controller/odom" if use_encoder else "_encoder_disabled"),
-                ("/fusion/odom", "localization/odometry_fused"),
+                ("/fusion/odom", "localization/odometry_body"),
                 ("/fusion/pose", "localization/pose"),
                 ("/fusion/debug/gnss_status", "localization/debug/gnss_status"),
                 ("/fusion/debug/filter_health", "localization/debug/filter_health"),
@@ -369,7 +389,7 @@ def _build_launches(context):
             ],
         )
 
-        actions.extend([fusioncore_node, configure_fusioncore, activate_fusioncore])
+        actions.extend([odometry_projection_node, fusioncore_node, configure_fusioncore, activate_fusioncore])
 
         gated_entities = []
         if effective_use_amr_sweeper_mapping:

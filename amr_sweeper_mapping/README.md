@@ -30,7 +30,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including globa
 - `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
-- REP-105 ownership in this workspace is now: FusionCore publishes `odom -> base_footprint`, and `map_pose_node` inside `amr_sweeper_mapping` publishes the `map -> odom` alignment.
+- REP-105 ownership in this workspace is now: `amr_sweeper_localization` runs FusionCore on `base_link`, projects that estimate to `odom -> base_footprint`, and `map_pose_node` inside `amr_sweeper_mapping` publishes the `map -> odom` alignment.
 - The mapping coordinator publishes the Nav2-facing runtime global map on `mapping/global_costmap`.
 - Nav2 now owns the rolling local costmap directly from live sensor observations; `amr_sweeper_mapping` no longer publishes a local costmap topic.
 - The planned mission waypoints loaded from the active run folder's copied `<mission_id>_<run_timestamp>_path_planned.geojson` are visualized on `mapping/waypoint_path`.

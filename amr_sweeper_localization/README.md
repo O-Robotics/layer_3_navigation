@@ -27,9 +27,16 @@ This package launches the official upstream FusionCore ROS 2 localization stack 
 ## Overview
 `amr_sweeper_localization` launches the upstream `fusioncore_ros` lifecycle node and remaps:
 - `/gnss/fix` to `gnss/navsat`
-- `/fusion/odom` to `localization/odometry_fused`
+- `/fusion/odom` to `localization/odometry_body`
+
+It also launches a local `odometry_projection_node` that projects the body-frame
+FusionCore output onto the leveled `base_footprint` plane:
+- `localization/odometry_body`: `odom -> base_link` body estimate from FusionCore
+- `localization/odometry_fused`: projected planar `odom -> base_footprint` odometry for downstream consumers
+- `localization/pose`: FusionCore body-frame pose aligned with `localization/odometry_body`
 
 The parameter file [config/amr_sweeper_localization.yaml](/mnt/c/home/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/amr_sweeper_localization.yaml) now follows the official FusionCore schema and uses the official `fusioncore:` YAML root, plus a small `launch_defaults:` section that is only consumed by this package's launch file.
+The odometry projector tunables live in [config/odometry_projection.yaml](/mnt/c/home/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/odometry_projection.yaml).
 
 ## Sensor Inputs
 - Primary IMU: `imu.topic`, default `imu/data_raw`
@@ -43,7 +50,9 @@ The parameter file [config/amr_sweeper_localization.yaml](/mnt/c/home/dev/rob_ws
 ## Notes
 - This package is intended to track the official upstream `fusioncore_core` and `fusioncore_ros` packages without local feature additions.
 - The config uses the current upstream parameter names such as `imu.gyro_noise`, `encoder.vel_noise`, `gnss.base_noise_xy`, `vslam.position_noise`, and `ukf.q_encoder_wz_bias`.
-- `base_frame` is configured as `base_footprint`, so the fused odometry output is published against `odom -> base_footprint`.
+- `base_frame` is configured as `base_link`, which matches the upstream FusionCore expectation for IMU/body-frame fusion.
+- FusionCore TF publishing is disabled locally; the package projects `odom -> base_footprint` itself while the attitude controller continues to publish `base_footprint -> base_link`.
+- The projector keeps the public odometry topic stable for the rest of the workspace by publishing the existing `localization/odometry_fused` name from the internal `localization/odometry_body` topic.
 - `publish.yaw_only` is not part of the official upstream FusionCore package and is no longer used here.
 - `map -> odom` is not published by this package; that transform is expected to come from the mapping stack.
 

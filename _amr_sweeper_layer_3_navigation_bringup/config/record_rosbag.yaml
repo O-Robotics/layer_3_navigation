@@ -61,6 +61,7 @@ topics:
 
 # Layer 3 Navigation-specific topics. Adjust as needed for focused debugging.
   - /amr_sweeper/localization/fusioncore/transition_event 
+  - /amr_sweeper/localization/odometry_body
   - /amr_sweeper/localization/odometry_fused
   - /amr_sweeper/localization/pose
   - /amr_sweeper/localization/debug/filter_health

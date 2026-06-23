@@ -7,7 +7,9 @@
 #include <memory>
 #include <optional>
 #include <array>
+#include <condition_variable>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <fusioncore_ros/srv/from_ll.hpp>
@@ -31,6 +33,7 @@ class MapPoseNode : public rclcpp::Node
 {
 public:
   MapPoseNode();
+  ~MapPoseNode() override;
 
 private:
   struct MapMatchEstimate
@@ -71,6 +74,7 @@ private:
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
   void handleScan(const sensor_msgs::msg::LaserScan::SharedPtr message);
   void handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
+  void globalCostmapWorkerLoop();
   void publishMapToOdomTransform();
   void loadCostmapGeoreference();
   [[nodiscard]] std::shared_ptr<std::vector<float>> buildGlobalCostmapScoreField(
@@ -174,12 +178,14 @@ private:
   sensor_msgs::msg::Imu latest_heading_;
   sensor_msgs::msg::LaserScan latest_scan_;
   nav_msgs::msg::OccupancyGrid latest_global_costmap_;
+  nav_msgs::msg::OccupancyGrid pending_global_costmap_;
   std::shared_ptr<std::vector<float>> latest_global_costmap_score_field_;
   rclcpp::Time latest_odometry_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_heading_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_scan_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_global_costmap_processed_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time pending_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_scan_match_attempt_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_map_pose_stamp_{0, 0, RCL_ROS_TIME};
   std::array<double, 3> artifact_longitude_coefficients_{0.0, 0.0, 0.0};
@@ -188,6 +194,11 @@ private:
   std::array<double, 3> map_to_odom_filter_covariance_{1.0, 1.0, 0.5};
   tf2::Transform last_map_to_odom_;
   mutable std::mutex state_mutex_;
+  std::condition_variable global_costmap_worker_cv_;
+  bool pending_global_costmap_ready_{false};
+  bool pending_global_costmap_dirty_{false};
+  bool shutdown_global_costmap_worker_{false};
+  std::thread global_costmap_worker_;
   rclcpp::CallbackGroup::SharedPtr subscription_callback_group_;
   rclcpp::CallbackGroup::SharedPtr publish_callback_group_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;

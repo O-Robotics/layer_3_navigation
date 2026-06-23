@@ -10,7 +10,11 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>fusioncore_ros</depend>
-  <exec_depend>tf2_ros</exec_depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ament_index_python</exec_depend>

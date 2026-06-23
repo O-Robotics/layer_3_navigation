@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import LifecycleNode
+from launch_ros.actions import LifecycleNode, Node
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from lifecycle_msgs.msg import Transition
@@ -25,6 +25,11 @@ def _load_localization_parameters() -> dict:
     if "fusioncore" in config:
         return config.get("fusioncore", {}).get("ros__parameters", {})
     return config.get("/**", {}).get("ros__parameters", {})
+
+
+def _projection_config_path() -> str:
+    package_dir = get_package_share_directory("amr_sweeper_localization")
+    return os.path.join(package_dir, "config", "odometry_projection.yaml")
 
 
 def _load_launch_defaults() -> dict[str, str]:
@@ -66,7 +71,7 @@ def _launch_fusioncore(context, *args, **kwargs):
 
     fusion_overrides = {
         "use_sim_time": use_sim_time,
-        "base_frame": "base_footprint",
+        "base_frame": "base_link",
         "odom_frame": "odom",
         "imu.topic": _topic_if_enabled(use_imu, parameters.get("imu.topic", "imu/data_raw")),
         "imu2.topic": _topic_if_enabled(use_imu2, parameters.get("imu2.topic", "")),
@@ -76,7 +81,22 @@ def _launch_fusioncore(context, *args, **kwargs):
         "gnss.fix2_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.fix2_topic", "")),
         "gnss.heading_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.heading_topic", "")),
         "gnss.azimuth_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.azimuth_topic", "")),
+        "publish.tf": False,
     }
+
+    projection_node = Node(
+        package="amr_sweeper_localization",
+        executable="odometry_projection_node",
+        name="odometry_projection",
+        namespace=namespace,
+        output="screen",
+        parameters=[
+            _projection_config_path(),
+            {
+                "use_sim_time": use_sim_time,
+            },
+        ],
+    )
 
     node = LifecycleNode(
         package="fusioncore_ros",
@@ -91,7 +111,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         remappings=[
             ("/gnss/fix", gnss_input_topic if use_gnss else "_gnss_disabled"),
             ("/odom/wheels", "drive_controller/odom" if use_encoder else "_encoder_disabled"),
-            ("/fusion/odom", "localization/odometry_fused"),
+            ("/fusion/odom", "localization/odometry_body"),
             ("/fusion/pose", "localization/pose"),
             ("/fusion/debug/gnss_status", "localization/debug/gnss_status"),
             ("/fusion/debug/filter_health", "localization/debug/filter_health"),
@@ -126,7 +146,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         )
     )
 
-    return [node, configure, activate]
+    return [projection_node, node, configure, activate]
 
 
 def generate_launch_description():

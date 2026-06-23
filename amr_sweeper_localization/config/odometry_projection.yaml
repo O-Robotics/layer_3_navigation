@@ -1,0 +1,8 @@
+odometry_projection:
+  ros__parameters:
+    input_odom_topic:  localization/odometry_body   # Full-attitude body-frame odometry produced by FusionCore.
+    output_odom_topic: localization/odometry_fused  # Public planar odometry after yaw-only projection.
+    odom_frame:        odom                         # Parent local frame for the projected planar odometry.
+    body_frame:        base_link                    # Full 3D body frame used internally by FusionCore.
+    projected_frame:   base_footprint              # Planar root frame that stays on the world XY plane.
+    publish_tf:        true                         # Publish the odom -> base_footprint TF alongside the projected odometry.

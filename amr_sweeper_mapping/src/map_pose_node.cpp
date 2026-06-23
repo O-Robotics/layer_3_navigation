@@ -358,6 +358,19 @@ MapPoseNode::MapPoseNode()
     std::chrono::duration<double>(get_parameter("publish_period_seconds").as_double()),
     std::bind(&MapPoseNode::publishMapToOdomTransform, this),
     publish_callback_group_);
+  global_costmap_worker_ = std::thread(&MapPoseNode::globalCostmapWorkerLoop, this);
+}
+
+MapPoseNode::~MapPoseNode()
+{
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    shutdown_global_costmap_worker_ = true;
+  }
+  global_costmap_worker_cv_.notify_all();
+  if (global_costmap_worker_.joinable()) {
+    global_costmap_worker_.join();
+  }
 }
 
 void MapPoseNode::initializeMapToOdomFilter()
@@ -786,49 +799,73 @@ void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::Shared
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (
-      latest_global_costmap_stamp_.nanoseconds() > 0 &&
-      latest_global_costmap_stamp_ > receipt_stamp)
+      pending_global_costmap_stamp_.nanoseconds() > 0 &&
+      pending_global_costmap_stamp_ > receipt_stamp)
     {
       return;
     }
-    latest_global_costmap_stamp_ = receipt_stamp;
-    latest_global_costmap_ready_ = latest_global_costmap_ready_ || costmap_ready;
+    pending_global_costmap_ = *message;
+    pending_global_costmap_stamp_ = receipt_stamp;
+    pending_global_costmap_ready_ = costmap_ready;
+    pending_global_costmap_dirty_ = true;
   }
+  global_costmap_worker_cv_.notify_one();
+}
 
-  const bool should_rebuild_score_field = [this, &receipt_stamp]() {
-      std::lock_guard<std::mutex> lock(state_mutex_);
-      if (!latest_global_costmap_ready_ || !latest_global_costmap_score_field_) {
-        return true;
-      }
-      if (global_costmap_min_update_period_seconds_ <= 0.0) {
-        return true;
-      }
-      if (latest_global_costmap_processed_stamp_.nanoseconds() == 0) {
-        return true;
-      }
-      return (receipt_stamp - latest_global_costmap_processed_stamp_).seconds() >=
-             global_costmap_min_update_period_seconds_;
-    }();
+void MapPoseNode::globalCostmapWorkerLoop()
+{
+  while (true) {
+    nav_msgs::msg::OccupancyGrid pending_map;
+    rclcpp::Time pending_stamp{0, 0, get_clock()->get_clock_type()};
+    bool pending_ready = false;
 
-  if (!costmap_ready || !should_rebuild_score_field) {
-    return;
+    {
+      std::unique_lock<std::mutex> lock(state_mutex_);
+      global_costmap_worker_cv_.wait(lock, [this]() {
+        return shutdown_global_costmap_worker_ || pending_global_costmap_dirty_;
+      });
+      if (shutdown_global_costmap_worker_) {
+        return;
+      }
+
+      if (
+        global_costmap_min_update_period_seconds_ > 0.0 &&
+        latest_global_costmap_processed_stamp_.nanoseconds() > 0 &&
+        (pending_global_costmap_stamp_ - latest_global_costmap_processed_stamp_).seconds() <
+        global_costmap_min_update_period_seconds_)
+      {
+        pending_global_costmap_dirty_ = false;
+        continue;
+      }
+
+      pending_map = pending_global_costmap_;
+      pending_stamp = pending_global_costmap_stamp_;
+      pending_ready = pending_global_costmap_ready_;
+      pending_global_costmap_dirty_ = false;
+    }
+
+    if (!pending_ready) {
+      continue;
+    }
+
+    std::shared_ptr<std::vector<float>> score_field = buildGlobalCostmapScoreField(pending_map);
+
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (shutdown_global_costmap_worker_) {
+      return;
+    }
+    if (
+      latest_global_costmap_processed_stamp_.nanoseconds() > 0 &&
+      latest_global_costmap_processed_stamp_ > pending_stamp)
+    {
+      continue;
+    }
+    latest_global_costmap_ = std::move(pending_map);
+    latest_global_costmap_stamp_ = pending_stamp;
+    latest_global_costmap_ready_ = pending_ready;
+    latest_global_costmap_processed_stamp_ = pending_stamp;
+    latest_global_costmap_score_field_ = std::move(score_field);
   }
-
-  const nav_msgs::msg::OccupancyGrid map = *message;
-  std::shared_ptr<std::vector<float>> score_field = buildGlobalCostmapScoreField(map);
-
-  std::lock_guard<std::mutex> lock(state_mutex_);
-  if (
-    latest_global_costmap_processed_stamp_.nanoseconds() > 0 &&
-    latest_global_costmap_processed_stamp_ > receipt_stamp)
-  {
-    return;
-  }
-  latest_global_costmap_ = map;
-  latest_global_costmap_stamp_ = receipt_stamp;
-  latest_global_costmap_ready_ = costmap_ready;
-  latest_global_costmap_processed_stamp_ = receipt_stamp;
-  latest_global_costmap_score_field_ = std::move(score_field);
 }
 
 float MapPoseNode::scoreCostmapCell(
@@ -1131,6 +1168,13 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       const double sin_yaw = std::sin(candidate_yaw);
       double endpoint_score_sum = 0.0;
       int valid_points = 0;
+      const int total_points = static_cast<int>(candidate_endpoints.size());
+      const double center_dx = candidate_x - search_center.getOrigin().x();
+      const double center_dy = candidate_y - search_center.getOrigin().y();
+      const double yaw_delta = normalizeAngle(candidate_yaw - search_center_yaw);
+      const double candidate_penalty =
+        (translation_penalty_per_meter_ * std::hypot(center_dx, center_dy)) +
+        (yaw_penalty_per_rad_ * std::abs(yaw_delta));
 
       for (const auto & endpoint : candidate_endpoints) {
         const double world_x = candidate_x + endpoint.x * cos_yaw - endpoint.y * sin_yaw;
@@ -1145,19 +1189,24 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
 
         endpoint_score_sum += static_cast<double>(scoreCostmapCell(snapshot, grid_x, grid_y));
         ++valid_points;
+
+        const int remaining_points = total_points - valid_points;
+        const double optimistic_score =
+          ((endpoint_score_sum +
+          static_cast<double>(remaining_points) * occupied_reward_) /
+          static_cast<double>(total_points)) - candidate_penalty;
+        if (optimistic_score <= best_score) {
+          return -std::numeric_limits<double>::infinity();
+        }
       }
 
       if (valid_points < min_valid_scan_points_) {
         return -std::numeric_limits<double>::infinity();
       }
 
-      const double center_dx = candidate_x - search_center.getOrigin().x();
-      const double center_dy = candidate_y - search_center.getOrigin().y();
-      const double yaw_delta = normalizeAngle(candidate_yaw - search_center_yaw);
       return
         (endpoint_score_sum / static_cast<double>(valid_points)) -
-        (translation_penalty_per_meter_ * std::hypot(center_dx, center_dy)) -
-        (yaw_penalty_per_rad_ * std::abs(yaw_delta));
+        candidate_penalty;
     };
 
   const double center_x = search_center.getOrigin().x();
@@ -1230,7 +1279,10 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     return std::nullopt;
   }
 
-  if (best_transform_ready) {
+  const bool should_run_fine_search =
+    best_transform_ready && best_score >= (minimum_match_score_ - 0.05);
+
+  if (should_run_fine_search) {
     const double fine_center_x = best_transform.getOrigin().x();
     const double fine_center_y = best_transform.getOrigin().y();
     const double fine_center_yaw = yawFromTransform(best_transform);
@@ -1411,8 +1463,8 @@ void MapPoseNode::publishMapToOdomTransform()
     std::lock_guard<std::mutex> lock(state_mutex_);
     updateMapToOdomFilterLocked(measured_map_to_odom, map_match->confidence);
   } else if (attempted_scan_match) {
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    decayMapToOdomFilterTowardsIdentityLocked();
+    // Keep the last corrected map -> odom estimate when scan matching is stale
+    // or low confidence instead of drifting the global alignment back to identity.
   }
 
   StateSnapshot final_snapshot = snapshotState();

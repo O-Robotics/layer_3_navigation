@@ -102,7 +102,6 @@ local_costmap:
             reliability:             best_effort
             history:                 keep_last
             depth:                   5
-
       obstacle_layer:
         plugin:                      "nav2_costmap_2d::ObstacleLayer"
         enabled:                     true
