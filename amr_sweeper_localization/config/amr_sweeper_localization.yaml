@@ -20,7 +20,7 @@ fusioncore:
     imu.topic: "imu/data_raw"
     imu.gyro_noise: 0.005
     imu.accel_noise: 0.1
-    imu.has_magnetometer: true
+    imu.has_magnetometer: false
     imu.remove_gravitational_acceleration: false
     imu.frame_id: "imu_link"
     imu.lever_arm_x: 0.0
@@ -47,12 +47,12 @@ fusioncore:
     # -- GNSS ------------------------------------------------------------------
     gnss.use_gps_fix: true
     gnss.velocity_topic: ""
-    gnss.base_noise_xy: 3.0
-    gnss.base_noise_z: 6.0
+    gnss.base_noise_xy: 2.0
+    gnss.base_noise_z: 4.0
     gnss.heading_noise: 0.02
     gnss.max_hdop: 2.5
     gnss.min_satellites: 6
-    gnss.min_fix_type: 1
+    gnss.min_fix_type: 3
     gnss.fix2_topic: ""
     gnss.heading_topic: ""
     gnss.azimuth_topic: ""
@@ -69,9 +69,9 @@ fusioncore:
     gnss.track_heading_min_speed: 0.2
     gnss.track_heading_max_yaw_rate: 0.3
     gnss.lever_arm_max_heading_sigma_deg: 20.0
-    gnss.coast_n: 5
-    gnss.coast_q_factor: 20.0
-    gnss.coast_timeout_s: 0.0
+    gnss.coast_n: 3
+    gnss.coast_q_factor: 10.0
+    gnss.coast_timeout_s: 30.0
     gnss.coast_q_bias_factor: 100.0
     gnss.coast_imu_wz_scale: 1.0
     gnss.recovery_rejection_n: 0
@@ -100,7 +100,7 @@ fusioncore:
 
     # -- Outlier rejection -----------------------------------------------------
     outlier_rejection: true
-    outlier_threshold_gnss: 7.81
+    outlier_threshold_gnss: 16.27
     outlier_threshold_imu: 15.09
     outlier_threshold_enc: 11.34
     outlier_threshold_hdg: 10.83
@@ -111,8 +111,8 @@ fusioncore:
     adaptive.encoder: true
     adaptive.gnss: true
     adaptive.ground_constraint: true
-    adaptive.window: 100
-    adaptive.alpha: 0.005
+    adaptive.window: 50
+    adaptive.alpha: 0.01
 
     # -- Zero-velocity updates -------------------------------------------------
     zupt.enabled: true
@@ -126,8 +126,8 @@ fusioncore:
     ground_constraint.z_position_sigma: 0.0
 
     # -- Startup behavior ------------------------------------------------------
-    init.stationary_window: 2.0
-    init.wait_for_all_sensors: false
+    init.stationary_window: 4.0
+    init.wait_for_all_sensors: true
     init.sensor_wait_timeout: 10.0
 
     # -- Replay ----------------------------------------------------------------
