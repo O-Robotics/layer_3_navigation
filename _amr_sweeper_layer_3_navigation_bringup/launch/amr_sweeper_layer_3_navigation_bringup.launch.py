@@ -302,9 +302,6 @@ def _build_launches(context):
     )
 
     if use_amr_sweeper_localization:
-        localization_package_dir = get_package_share_directory("amr_sweeper_localization")
-        localization_config_path = os.path.join(
-            localization_package_dir, "config", "amr_sweeper_localization.yaml")
         use_sim_time_bool = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
         localization_parameters = _load_localization_parameters()
 
@@ -333,7 +330,7 @@ def _build_launches(context):
             namespace=LaunchConfiguration("namespace").perform(context),
             output="screen",
             parameters=[
-                localization_config_path,
+                localization_parameters,
                 fusion_overrides,
             ],
             remappings=[

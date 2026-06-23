@@ -61,8 +61,6 @@ def _launch_fusioncore(context, *args, **kwargs):
     use_encoder = LaunchConfiguration("use_encoder").perform(context).lower() == "true"
     use_visual_odometry = LaunchConfiguration("use_visual_odometry").perform(context).lower() == "true"
     use_gnss = LaunchConfiguration("use_gnss").perform(context).lower() == "true"
-    package_dir = get_package_share_directory("amr_sweeper_localization")
-    config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
     parameters = _load_localization_parameters()
 
     fusion_overrides = {
@@ -86,7 +84,7 @@ def _launch_fusioncore(context, *args, **kwargs):
         namespace=namespace,
         output="screen",
         parameters=[
-            config_path,
+            parameters,
             fusion_overrides,
         ],
         remappings=[
