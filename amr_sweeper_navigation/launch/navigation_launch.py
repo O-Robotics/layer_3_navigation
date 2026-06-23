@@ -204,6 +204,10 @@ def _build_nav2_group(context):
 
     actions = []
 
+    nav2_cmd_vel_output_topic = (
+        'navigation/cmd_vel_raw' if enable_velocity_smoother else 'navigation/cmd_vel'
+    )
+
     if enable_controller_server:
         actions.append(Node(
                 namespace=namespace_value,
@@ -214,7 +218,7 @@ def _build_nav2_group(context):
                 respawn=use_respawn,
                 respawn_delay=2.0,
                 parameters=[configured_params],
-                remappings=[('cmd_vel', 'navigation/cmd_vel_raw'),
+                remappings=[('cmd_vel', nav2_cmd_vel_output_topic),
                             ('odom', 'localization/odometry_fused'),
                             ('local_plan', 'navigation/controller_server/local_plan'),
                             ('cost_cloud', 'navigation/controller_server/cost_cloud'),
