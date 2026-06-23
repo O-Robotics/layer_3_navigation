@@ -17,7 +17,7 @@ fusioncore:
     publish.tf: true
 
     # -- IMU -------------------------------------------------------------------
-    imu.topic: "imu/data_heading"  # Use the IMU driver's yaw-only orientation so FusionCore keeps odom->base_footprint level while the attitude controller owns base_footprint->base_link roll/pitch.
+    imu.topic: "imu/data_raw"
     imu.gyro_noise: 0.005
     imu.accel_noise: 0.1
     imu.has_magnetometer: true
