@@ -111,6 +111,8 @@ local_costmap:
         scan:
           topic:                     depth_camera/scan
           data_type:                 "LaserScan"
+          min_obstacle_height:       0.0
+          max_obstacle_height:       0.5
           clearing:                  true
           marking:                   true
           obstacle_max_range:        4.0
