@@ -140,19 +140,13 @@ def _launch_fusioncore(context, *args, **kwargs):
     activate = RegisterEventHandler(
         OnStateTransition(
             target_lifecycle_node=node,
-            start_state="configuring",
             goal_state="inactive",
             entities=[
-                TimerAction(
-                    period=0.5,
-                    actions=[
-                        EmitEvent(
-                            event=ChangeState(
-                                lifecycle_node_matcher=lambda action: action is node,
-                                transition_id=Transition.TRANSITION_ACTIVATE,
-                            )
-                        )
-                    ],
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda action: action is node,
+                        transition_id=Transition.TRANSITION_ACTIVATE,
+                    )
                 )
             ],
         )
