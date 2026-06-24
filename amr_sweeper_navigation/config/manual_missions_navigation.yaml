@@ -23,11 +23,11 @@ controller_server:
   ros__parameters:
     # -- Controller runtime ----------------------------------------------------
     use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    controller_frequency:            10.0                                # Controller update rate in Hz. Common Nav2 default is 20 Hz.
+    controller_frequency:            15.0                                # Match the default-missions controller cadence so all mission types use the same control family and update rate.
     min_x_velocity_threshold:        0.001                               # Linear X deadband below which motion is treated as zero. Default is commonly 0.001 m/s.
     min_y_velocity_threshold:        0.001                               # Linear Y deadband below which motion is treated as zero. Default is commonly 0.5 for holonomic robots; near-zero fits diff drive.
     min_theta_velocity_threshold:    0.001                               # Angular deadband below which rotation is treated as zero. Default is commonly 0.001 rad/s.
-    failure_tolerance:               0.6                                 # Extra seconds of controller failure tolerance before aborting. Was 0.3; Nav2 examples often use 0.3.
+    failure_tolerance:               0.3                                 # Match the default-missions controller failure tolerance so stalled tracks fault consistently.
     progress_checker_plugins:        ["progress_checker"]                # Progress checker plugins available to the controller. Jazzy expects this plural key.
     goal_checker_plugins:            ["general_goal_checker"]            # Goal checker plugins available to the controller. Common examples load one SimpleGoalChecker.
     current_progress_checker:        "progress_checker"                  # Explicitly select the active progress checker so Nav2 does not warn while defaulting to the only loaded plugin.
@@ -37,61 +37,49 @@ controller_server:
     # -- Progress checking -----------------------------------------------------
     progress_checker:
       plugin:                        "nav2_controller::SimpleProgressChecker"  # Progress checker implementation. Common default/example plugin is SimpleProgressChecker.
-      required_movement_radius:      0.05                                # Robot must move at least this far in meters to count as progress. Common examples use 0.5 m.
-      movement_time_allowance:       60.0                                # Seconds allowed without required motion before declaring no progress. Common examples use 10.0 s.
+      required_movement_radius:      0.05                                # Match the default-missions progress threshold across mission types.
+      movement_time_allowance:       20.0                                # Match the default-missions progress timeout across mission types.
 
     # -- Goal checking ---------------------------------------------------------
     general_goal_checker:
       stateful:                      true                                # Goal checker remembers once the robot has entered tolerance. Nav2 example default is typically true.
       plugin:                        "nav2_controller::SimpleGoalChecker"  # Goal checker implementation. Common default/example plugin is SimpleGoalChecker.
-      xy_goal_tolerance:             0.5                                 # Position tolerance in meters at the goal. Common examples also use 0.25 to 0.5 m.
-      yaw_goal_tolerance:            0.35                                # Heading tolerance in radians at the goal. Was 0.785 rad; tighter heading helps chunk-to-chunk alignment.
+      xy_goal_tolerance:             0.30                                # Match the default-missions outer goal tolerance so all mission types converge with the same controller family behavior.
+      yaw_goal_tolerance:            0.20                                # Match the default-missions heading tolerance so chunk-to-chunk alignment stays consistent.
 
     # -- Local planner ---------------------------------------------------------
     FollowPath:
-      plugin:                        "dwb_core::DWBLocalPlanner"         # Local planner implementation used to follow the path. Common Nav2 example plugin is DWBLocalPlanner.
-      debug_trajectory_details:      false                               # Publish extra trajectory scoring debug info. Default is typically false.
+      plugin:                        "nav2_rotation_shim_controller::RotationShimController"  # Match the default-missions controller family so heading acquisition is handled by the shim before path tracking.
+      angular_dist_threshold:        0.785                               # Match the default-missions shim engagement threshold.
+      angular_disengage_threshold:   0.3925                              # Match the default-missions shim handoff threshold.
+      forward_sampling_distance:     0.5                                 # Match the default-missions path-heading sampling distance.
+      rotate_to_heading_angular_vel: 0.65                                # Match the default-missions practical turn rate.
+      max_angular_accel:             1.2                                 # Match the default-missions angular acceleration envelope.
+      simulate_ahead_time:           1.0                                 # Match the default-missions collision-check horizon for shim motions.
+      rotate_to_goal_heading:        true                                # Match the default-missions goal-heading alignment behavior.
 
-      min_vel_x:                     0.0                                 # Minimum forward linear velocity in m/s. Common examples use 0.0.
-      min_vel_y:                     0.0                                 # Minimum lateral linear velocity in m/s. Diff-drive default stays 0.0.
-      max_vel_x:                     0.26                                # Maximum forward linear velocity in m/s. Common examples are often around 0.26 m/s.
-      max_vel_y:                     0.0                                 # Maximum lateral linear velocity in m/s. Diff-drive robots keep this at 0.0.
-      max_vel_theta:                 0.35                                # Maximum angular speed in rad/s. Was 0.15; common examples are closer to 1.0 rad/s.
-                                       
-      min_speed_xy:                  0.0                                 # Minimum translational speed magnitude in m/s. Common default/example is 0.0.
-      max_speed_xy:                  0.26                                # Maximum translational speed magnitude in m/s. Usually matched to max_vel_x for diff-drive robots.
-      min_speed_theta:               0.0                                 # Minimum angular speed magnitude in rad/s. Common examples use 0.0.
-                                       
-      acc_lim_x:                     1.0                                 # Forward acceleration limit in m/s^2. Was 2.5; common examples often use 2.5.
-      acc_lim_y:                     0.0                                 # Lateral acceleration limit in m/s^2. Diff-drive robots keep this at 0.0.
-      acc_lim_theta:                 0.8                                 # Angular acceleration limit in rad/s^2. Common examples are often around 3.2.
-                                       
-      decel_lim_x:                   -1.0                                # Forward deceleration limit in m/s^2. Was -2.5; common examples often use -2.5.
-      decel_lim_y:                   0.0                                 # Lateral deceleration limit in m/s^2. Diff-drive robots keep this at 0.0.
-      decel_lim_theta:               -0.8                                # Angular deceleration limit in rad/s^2. Common examples are often around -3.2.
-                                       
-      vx_samples:                    5                                   # Number of forward velocity samples considered per control cycle. Common examples use 20.
-      vy_samples:                    1                                   # Number of lateral velocity samples. Diff-drive robots use 1 because y velocity is fixed at zero.
-      vtheta_samples:                10                                  # Number of angular velocity samples considered per cycle. Common examples use 20.
-                                       
-      sim_time:                      0.8                                 # Seconds to forward-simulate each candidate trajectory. Common examples use 1.7 s.
-      linear_granularity:            0.05                                # Distance step in meters when discretizing trajectories. Common examples use 0.05 m.
-      angular_granularity:           0.025                               # Angular step in radians when discretizing trajectories. Common examples use 0.025 rad.
-      transform_tolerance:           1.0                                 # TF lookup tolerance in seconds for controller transforms. Common examples use 0.2 s.
-
-      xy_goal_tolerance:                   0.25                          # Position tolerance in meters used internally by DWB near the goal. Common examples use 0.25 m.
-      trans_stopped_velocity:              0.05                          # Translational speed below which the robot is considered stopped. Common examples use 0.25 m/s.
-      short_circuit_trajectory_evaluation: true                          # Stop scoring once a clearly best trajectory is found. Common examples usually enable this.
-      stateful:                            true                          # Preserve planner state across cycles for smoother behavior. Common example configs often set true.
-
-      critics:                       ["Oscillation", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]  # Trajectory scoring critics loaded by DWB. This is a trimmed set versus larger example critic lists.
-   
-      PathAlign.scale:                     4.0                           # Weight for staying aligned with the path heading. Common examples often use 32.0.
-      PathAlign.forward_point_distance:    0.1                           # Forward projection distance in meters for path alignment scoring. Common examples use 0.1 m.
-      GoalAlign.scale:                     2.0                           # Weight for aligning robot heading with the goal heading. Common examples often use 24.0.
-      GoalAlign.forward_point_distance:    0.1                           # Forward projection distance in meters for goal alignment scoring. Common examples use 0.1 m.
-      PathDist.scale:                      16.0                          # Weight for staying close to the global path. Common examples often use 32.0.
-      GoalDist.scale:                      20.0                          # Weight for reducing distance to the goal. Was 12.0; common examples often use 24.0.
+      primary_controller:           "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"  # Use the same RPP child controller as default missions.
+      primary_controller.desired_linear_vel: 0.18                        # Match the default-missions starting cruise speed.
+      primary_controller.lookahead_dist: 0.55                            # Match the default-missions base lookahead distance.
+      primary_controller.min_lookahead_dist: 0.30                        # Match the default-missions minimum lookahead.
+      primary_controller.max_lookahead_dist: 0.90                        # Match the default-missions maximum lookahead.
+      primary_controller.lookahead_time: 1.5                             # Match the default-missions velocity-scaled lookahead timing.
+      primary_controller.transform_tolerance: 0.2                        # Match the default-missions TF tolerance for the controller family.
+      primary_controller.use_velocity_scaled_lookahead_dist: true        # Match the default-missions adaptive lookahead behavior.
+      primary_controller.min_approach_linear_velocity: 0.05              # Match the default-missions approach crawl speed.
+      primary_controller.approach_velocity_scaling_dist: 0.8             # Match the default-missions early slowdown distance.
+      primary_controller.use_collision_detection: true                   # Keep the standard RPP collision checking enabled across mission types.
+      primary_controller.max_allowed_time_to_collision_up_to_carrot: 1.0 # Match the default-missions near-term collision-check horizon.
+      primary_controller.use_regulated_linear_velocity_scaling: true     # Match the default-missions curvature-based speed regulation.
+      primary_controller.use_fixed_curvature_lookahead: false            # Match the default-missions adaptive curvature handling.
+      primary_controller.curvature_lookahead_dist: 0.25                  # Match the default-missions curvature probe distance.
+      primary_controller.use_cost_regulated_linear_velocity_scaling: false  # Match the default-missions current cost-regulation setting.
+      primary_controller.regulated_linear_scaling_min_radius: 0.8        # Match the default-missions slowdown radius threshold.
+      primary_controller.regulated_linear_scaling_min_speed: 0.05        # Match the default-missions minimum regulated speed.
+      primary_controller.use_rotate_to_heading: false                    # Rotation Shim owns heading acquisition in this controller family.
+      primary_controller.allow_reversing: false                          # Match the default-missions forward-only tracking behavior.
+      primary_controller.max_angular_accel: 1.2                          # Match the default-missions RPP angular acceleration envelope.
+      primary_controller.stateful: true                                  # Match the default-missions stateful controller behavior.
 
 local_costmap:
   local_costmap:
