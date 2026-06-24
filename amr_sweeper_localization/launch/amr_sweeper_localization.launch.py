@@ -17,6 +17,10 @@ def _topic_if_enabled(enabled: bool, topic: str) -> str:
     return topic if enabled else ""
 
 
+def _primary_topic_or_disabled(enabled: bool, topic: str, disabled_topic: str) -> str:
+    return topic if enabled else disabled_topic
+
+
 def _load_localization_parameters() -> dict:
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
@@ -73,9 +77,11 @@ def _launch_fusioncore(context, *args, **kwargs):
         "use_sim_time": use_sim_time,
         "base_frame": "base_link",
         "odom_frame": "odom",
-        "imu.topic": _topic_if_enabled(use_imu, parameters.get("imu.topic", "imu/data_raw")),
+        "imu.topic": _primary_topic_or_disabled(
+            use_imu, parameters.get("imu.topic", "imu/data_raw"), "_imu_disabled"),
         "imu2.topic": _topic_if_enabled(use_imu2, parameters.get("imu2.topic", "")),
-        "encoder.topic": _topic_if_enabled(use_encoder, parameters.get("encoder.topic", "drive_controller/odom")),
+        "encoder.topic": _primary_topic_or_disabled(
+            use_encoder, parameters.get("encoder.topic", "drive_controller/odom"), "_encoder_disabled"),
         "encoder2.topic": _topic_if_enabled(
             use_visual_odometry, parameters.get("encoder2.topic", "visual_odometry/odom")),
         "gnss.fix2_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.fix2_topic", "")),
