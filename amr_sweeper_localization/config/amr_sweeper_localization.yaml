@@ -17,11 +17,11 @@ fusioncore:
     publish.tf:                      false                 # Disable native TF publication because the projector owns odom -> base_footprint.
 
     # -- IMU -------------------------------------------------------------------
-    imu.topic:                         "imu/data_raw"      # Primary IMU topic consumed by FusionCore.
+    imu.topic:                         "imu/data_acc_gyro"      # Primary IMU topic consumed by FusionCore.
     imu.gyro_noise:                    0.005               # Gyroscope white-noise sigma used by the filter model.
     imu.accel_noise:                   0.1                 # Accelerometer white-noise sigma used by the filter model.
-    imu.has_magnetometer:              false                # Tell FusionCore the IMU includes magnetometer-backed orientation information.
-    imu.remove_gravitational_acceleration: false          # Keep raw acceleration intact because the driver/controller handle gravity conventions.
+    imu.has_magnetometer:              false               # Tell FusionCore the IMU includes magnetometer-backed orientation information.
+    imu.remove_gravitational_acceleration: false           # Keep raw acceleration intact because the driver/controller handle gravity conventions.
     imu.frame_id:                      "imu_link"          # Physical frame in which the IMU measurements are expressed.
     imu.lever_arm_x:                   0.0                 # IMU X offset from the fused body origin in meters.
     imu.lever_arm_y:                   0.0                 # IMU Y offset from the fused body origin in meters.
