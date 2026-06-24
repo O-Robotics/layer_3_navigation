@@ -1138,13 +1138,48 @@ private:
             "Collecting %.1fs bias window before init...", init_window_duration_);
         }
 
-        // Accumulate gyro and accel
-        init_win_wx_ += msg->angular_velocity.x;
-        init_win_wy_ += msg->angular_velocity.y;
-        init_win_wz_ += msg->angular_velocity.z;
-        init_win_ax_ += msg->linear_acceleration.x;
-        init_win_ay_ += msg->linear_acceleration.y;
-        init_win_az_ += msg->linear_acceleration.z;
+        std::string init_imu_frame = imu_frame_override_.empty()
+          ? (msg->header.frame_id.empty() ? "imu_link" : msg->header.frame_id)
+          : imu_frame_override_;
+
+        tf2::Vector3 init_w_base(
+          msg->angular_velocity.x,
+          msg->angular_velocity.y,
+          msg->angular_velocity.z);
+        tf2::Vector3 init_a_base(
+          msg->linear_acceleration.x,
+          msg->linear_acceleration.y,
+          msg->linear_acceleration.z);
+        std::optional<tf2::Quaternion> init_imu_to_base = std::nullopt;
+
+        if (init_imu_frame != base_frame_) {
+          try {
+            auto init_tf = tf_buffer_->lookupTransform(
+              base_frame_, init_imu_frame, tf2::TimePointZero);
+            tf2::Quaternion q_init(
+              init_tf.transform.rotation.x,
+              init_tf.transform.rotation.y,
+              init_tf.transform.rotation.z,
+              init_tf.transform.rotation.w);
+            tf2::Matrix3x3 init_r(q_init);
+            init_w_base = init_r * init_w_base;
+            init_a_base = init_r * init_a_base;
+            init_imu_to_base = q_init;
+          } catch (const tf2::TransformException & ex) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+              "Cannot transform IMU from %s to %s during startup bias window: %s. "
+              "Falling back to raw IMU-frame samples for initialization.",
+              init_imu_frame.c_str(), base_frame_.c_str(), ex.what());
+          }
+        }
+
+        // Accumulate gyro and accel in the same base frame used by runtime fusion.
+        init_win_wx_ += init_w_base.x();
+        init_win_wy_ += init_w_base.y();
+        init_win_wz_ += init_w_base.z();
+        init_win_ax_ += init_a_base.x();
+        init_win_ay_ += init_a_base.y();
+        init_win_az_ += init_a_base.z();
         ++init_win_n_;
 
         // Accumulate orientation if available. Align quaternion signs into a
@@ -1153,10 +1188,18 @@ private:
         const auto& ocov = msg->orientation_covariance;
         bool has_orient = (ocov[0] > 0.0 || ocov[4] > 0.0 || ocov[8] > 0.0);
         if (has_orient) {
-          double qw = msg->orientation.w;
-          double qx = msg->orientation.x;
-          double qy = msg->orientation.y;
-          double qz = msg->orientation.z;
+          tf2::Quaternion q_init(
+            msg->orientation.x,
+            msg->orientation.y,
+            msg->orientation.z,
+            msg->orientation.w);
+          tf2::Quaternion q_base = init_imu_to_base.has_value()
+            ? (init_imu_to_base.value() * q_init).normalized()
+            : q_init;
+          double qw = q_base.w();
+          double qx = q_base.x();
+          double qy = q_base.y();
+          double qz = q_base.z();
 
           if (init_win_orient_n_ > 0) {
             double dot = init_win_qw_ * qw + init_win_qx_ * qx +
