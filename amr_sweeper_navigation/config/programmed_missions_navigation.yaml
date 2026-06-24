@@ -59,7 +59,7 @@ controller_server:
       rotate_to_goal_heading:        true                                # Match the default-missions goal-heading alignment behavior.
 
       primary_controller:           "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"  # Use the same RPP child controller as default missions.
-      primary_controller.desired_linear_vel: 0.18                        # Match the default-missions starting cruise speed.
+      primary_controller.desired_linear_vel: 0.14                        # Match the reduced shared mission cruise speed from default missions.
       primary_controller.lookahead_dist: 0.55                            # Match the default-missions base lookahead distance.
       primary_controller.min_lookahead_dist: 0.30                        # Match the default-missions minimum lookahead.
       primary_controller.max_lookahead_dist: 0.90                        # Match the default-missions maximum lookahead.

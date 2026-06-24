@@ -1147,14 +1147,32 @@ private:
         init_win_az_ += msg->linear_acceleration.z;
         ++init_win_n_;
 
-        // Accumulate orientation if available
+        // Accumulate orientation if available. Align quaternion signs into a
+        // common hemisphere first so startup samples do not cancel each other
+        // out when the IMU flips between q and -q representations.
         const auto& ocov = msg->orientation_covariance;
         bool has_orient = (ocov[0] > 0.0 || ocov[4] > 0.0 || ocov[8] > 0.0);
         if (has_orient) {
-          init_win_qw_ += msg->orientation.w;
-          init_win_qx_ += msg->orientation.x;
-          init_win_qy_ += msg->orientation.y;
-          init_win_qz_ += msg->orientation.z;
+          double qw = msg->orientation.w;
+          double qx = msg->orientation.x;
+          double qy = msg->orientation.y;
+          double qz = msg->orientation.z;
+
+          if (init_win_orient_n_ > 0) {
+            double dot = init_win_qw_ * qw + init_win_qx_ * qx +
+                         init_win_qy_ * qy + init_win_qz_ * qz;
+            if (dot < 0.0) {
+              qw = -qw;
+              qx = -qx;
+              qy = -qy;
+              qz = -qz;
+            }
+          }
+
+          init_win_qw_ += qw;
+          init_win_qx_ += qx;
+          init_win_qy_ += qy;
+          init_win_qz_ += qz;
           ++init_win_orient_n_;
         }
 
@@ -1180,18 +1198,37 @@ private:
               double qw = init_win_qw_ / on, qx = init_win_qx_ / on;
               double qy = init_win_qy_ / on, qz = init_win_qz_ / on;
               double norm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
-              qw /= norm; qx /= norm; qy /= norm; qz /= norm;
-              const double g = 9.80665;
-              double gx = 2.0*(qx*qz - qy*qw)*g;
-              double gy = 2.0*(qy*qz + qx*qw)*g;
-              double gz = (1.0 - 2.0*(qx*qx + qy*qy))*g;
-              initial.x[fusioncore::B_AX] = init_win_ax_ / n - gx;
-              initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
-              initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
-              RCLCPP_INFO(get_logger(),
-                "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] rad/s, m/s²",
-                initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
-                initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
+              if (norm > 1e-9) {
+                qw /= norm; qx /= norm; qy /= norm; qz /= norm;
+
+                // Seed the startup attitude from the same stationary IMU
+                // samples already used for bias estimation. This keeps the
+                // change local to initialization and leaves all downstream
+                // fusion logic unchanged.
+                initial.x[fusioncore::QW] = qw;
+                initial.x[fusioncore::QX] = qx;
+                initial.x[fusioncore::QY] = qy;
+                initial.x[fusioncore::QZ] = qz;
+
+                const double g = 9.80665;
+                double gx = 2.0*(qx*qz - qy*qw)*g;
+                double gy = 2.0*(qy*qz + qx*qw)*g;
+                double gz = (1.0 - 2.0*(qx*qx + qy*qy))*g;
+                initial.x[fusioncore::B_AX] = init_win_ax_ / n - gx;
+                initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
+                initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
+
+                double roll, pitch, yaw;
+                fusioncore::quat_to_euler(qw, qx, qy, qz, roll, pitch, yaw);
+                RCLCPP_INFO(get_logger(),
+                  "Bias window done: seeded attitude rpy=[%.2f, %.2f, %.2f] deg gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f]",
+                  roll * 180.0 / M_PI, pitch * 180.0 / M_PI, yaw * 180.0 / M_PI,
+                  initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
+                  initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
+              } else {
+                RCLCPP_WARN(get_logger(),
+                  "Bias window orientation average was degenerate; leaving initial attitude at identity.");
+              }
             } else {
               RCLCPP_INFO(get_logger(),
                 "Bias window done (gyro only, no orientation): gyro=[%.4f,%.4f,%.4f]",

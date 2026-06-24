@@ -59,7 +59,7 @@ controller_server:
       rotate_to_goal_heading:        true                                # Also align at the end of short sweep chunks so chunk-to-chunk transitions stay predictable.
 
       primary_controller:           "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"  # The shim expects this as a string-valued child controller plugin parameter in Jazzy.
-      primary_controller.desired_linear_vel: 0.18                        # Start conservatively while we verify tracking on the real platform.
+      primary_controller.desired_linear_vel: 0.14                        # Reduce the shared mission cruise speed so waypoint tracking stays more controlled near obstacles.
       primary_controller.lookahead_dist: 0.55                            # Keep the carrot close so the robot tracks compact local patterns instead of smoothing them away.
       primary_controller.min_lookahead_dist: 0.30                        # Preserve responsiveness on short legs and near reversals in path heading.
       primary_controller.max_lookahead_dist: 0.90                        # Avoid looking too far ahead on the small builtin mission workspace.
