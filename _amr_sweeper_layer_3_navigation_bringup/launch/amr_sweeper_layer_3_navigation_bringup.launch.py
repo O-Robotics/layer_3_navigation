@@ -212,6 +212,9 @@ def _build_launches(context):
     use_gaussian = LaunchConfiguration('use_gaussian').perform(context)
     use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
     test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
+    run_layer_3_system_check = (
+        LaunchConfiguration('run_layer_3_system_check').perform(context).lower() == 'true'
+    )
     mission_context = _resolve_execution_context(mission_execution_directory)
     use_amr_sweeper_localization = _bool_override(
         mission_context,
@@ -280,6 +283,20 @@ def _build_launches(context):
             'use_sim_time': use_sim_time,
             'mission_costmap_yaml': effective_mission_costmap_yaml,
         }.items(),
+    )
+    layer_3_system_check = Node(
+        package='amr_sweeper_layer_3_navigation_bringup',
+        executable='layer_3_system_check.py',
+        name='layer_3_system_check',
+        namespace=LaunchConfiguration('namespace').perform(context),
+        output='screen',
+        parameters=[{
+            'global_frame': 'map' if navigation_launch_filename == 'programmed_missions_navigation.launch.py' else 'odom',
+            'robot_frame': 'base_footprint',
+            'action_name': 'follow_waypoints',
+            'passed_topic': 'layer_3/system_check_passed',
+        }],
+        condition=IfCondition(LaunchConfiguration('run_layer_3_system_check')),
     )
     mapping_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -404,6 +421,8 @@ def _build_launches(context):
                 gated_entities.append(delayed_navigation_launch)
         elif use_amr_sweeper_navigation:
             gated_entities.append(navigation_launch)
+        if use_amr_sweeper_navigation and run_layer_3_system_check:
+            gated_entities.append(layer_3_system_check)
 
         if gated_entities:
             actions.append(
@@ -423,6 +442,8 @@ def _build_launches(context):
                 actions.append(delayed_navigation_launch)
         elif use_amr_sweeper_navigation:
             actions.append(navigation_launch)
+        if use_amr_sweeper_navigation and run_layer_3_system_check:
+            actions.append(layer_3_system_check)
 
     return actions
 
@@ -471,5 +492,6 @@ def generate_launch_description():
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('use_test', default_value='false'),
         DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
+        DeclareLaunchArgument('run_layer_3_system_check', default_value='false'),
         OpaqueFunction(function=_build_launches),
     ])

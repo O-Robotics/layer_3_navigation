@@ -1,153 +1,153 @@
 launch_defaults:
   ros__parameters:
-    use_imu:                          true                  # Re-enable the primary IMU by default for FusionCore startup and heading fusion tests.
-    use_imu2:                         false                 # Disable the optional secondary IMU unless a second sensor is wired in.
-    use_encoder:                      false                 # Enable wheel odometry input for planar velocity constraints.
-    use_visual_odometry:              false                 # Keep visual odometry disabled in the default sweeper configuration.
-    use_gnss:                         false                 # Disable GNSS by default so FusionCore runs on IMU + wheel odometry unless explicitly re-enabled at launch.
+    use_imu:                                true                  # Re-enable the primary IMU by default for FusionCore startup and heading fusion tests.
+    use_imu2:                               false                 # Disable the optional secondary IMU unless a second sensor is wired in.
+    use_encoder:                            false                 # Enable wheel odometry input for planar velocity constraints.
+    use_visual_odometry:                    false                 # Keep visual odometry disabled in the default sweeper configuration.
+    use_gnss:                               false                 # Disable GNSS by default so FusionCore runs on IMU + wheel odometry unless explicitly re-enabled at launch  .
 
 fusioncore:
   ros__parameters:
     # -- General settings ------------------------------------------------------
-    motion_model:                    "DifferentialDrive"   # Use the differential-drive process model expected by the sweeper chassis.
-    base_frame:                      base_link             # Fuse the full 3D body state in base_link before planar projection.
-    odom_frame:                      odom                  # Publish the local drift frame in odom.
-    publish_rate:                    50.0                  # Emit fused state outputs at 50 Hz.
-    publish.force_2d:                true                  # Keep FusionCore's published pose constrained to planar odometry semantics.
-    publish.tf:                      false                 # Disable native TF publication because the projector owns odom -> base_footprint.
+    motion_model:                           "DifferentialDrive"   # Use the differential-drive process model expected by the sweeper chassis.
+    base_frame:                             base_link             # Fuse the full 3D body state in base_link before planar projection.
+    odom_frame:                             odom                  # Publish the local drift frame in odom.
+    publish_rate:                           50.0                  # Emit fused state outputs at 50 Hz.
+    publish.force_2d:                       true                  # Keep FusionCore's published pose constrained to planar odometry semantics.
+    publish.tf:                             false                 # Disable native TF publication because the projector owns odom -> base_footprint.
 
     # -- IMU -------------------------------------------------------------------
-    imu.topic:                         "imu/data_raw"      # Primary IMU topic consumed by FusionCore.
-    imu.gyro_noise:                    0.005               # Gyroscope white-noise sigma used by the filter model.
-    imu.accel_noise:                   0.1                 # Accelerometer white-noise sigma used by the filter model.
-    imu.has_magnetometer:              true                # Tell FusionCore the IMU includes magnetometer-backed orientation information.
-    imu.remove_gravitational_acceleration: false           # Keep raw acceleration intact because the driver/controller handle gravity conventions.
-    imu.frame_id:                      "imu_link"          # Physical frame in which the IMU measurements are expressed.
-    imu.lever_arm_x:                   0.0                 # IMU X offset from the fused body origin in meters.
-    imu.lever_arm_y:                   0.0                 # IMU Y offset from the fused body origin in meters.
-    imu.lever_arm_z:                   0.0                 # IMU Z offset from the fused body origin in meters.
+    imu.topic:                              "imu/data_raw"        # Primary IMU topic consumed by FusionCore.
+    imu.gyro_noise:                         0.005                 # Gyroscope white-noise sigma used by the filter model.
+    imu.accel_noise:                        0.1                   # Accelerometer white-noise sigma used by the filter model.
+    imu.has_magnetometer:                   true                  # Tell FusionCore the IMU includes magnetometer-backed orientation information.
+    imu.remove_gravitational_acceleration:  false                 # Keep raw acceleration intact because the driver/controller handle gravity conventions.
+    imu.frame_id:                           "imu_link"            # Physical frame in which the IMU measurements are expressed.
+    imu.lever_arm_x:                        0.0                   # IMU X offset from the fused body origin in meters.
+    imu.lever_arm_y:                        0.0                   # IMU Y offset from the fused body origin in meters.
+    imu.lever_arm_z:                        0.0                   # IMU Z offset from the fused body origin in meters.
 
     # -- Secondary IMU ---------------------------------------------------------
-    imu2.topic:                        ""                    # Leave empty to disable the optional second IMU stream.
-    imu2.frame_id:                     ""                    # No secondary IMU frame is configured by default.
-    imu2.remove_gravitational_acceleration: false           # Match the primary IMU handling if a second IMU is enabled later.
+    imu2.topic:                             ""                    # Leave empty to disable the optional second IMU stream.
+    imu2.frame_id:                          ""                    # No secondary IMU frame is configured by default.
+    imu2.remove_gravitational_acceleration: false                 # Match the primary IMU handling if a second IMU is enabled later.
 
     # -- Wheel Odometry --------------------------------------------------------
-    encoder.topic:                     "drive_controller/odom" # Wheel-odometry topic providing planar velocity and yaw cues.
-    encoder.vel_noise:                 0.05                  # Linear velocity measurement sigma for wheel odometry.
-    encoder.yaw_noise:                 0.02                  # Heading-rate measurement sigma for wheel odometry.
-    encoder.nhc_vy_sigma:              0.05                  # Non-holonomic lateral-velocity constraint sigma.
-    encoder.nhc_auto_detect:           true                  # Let FusionCore auto-enable the non-holonomic constraint logic.
+    encoder.topic:                          "drive_controller/odom" # Wheel-odometry topic providing planar velocity and yaw cues.
+    encoder.vel_noise:                      0.05                  # Linear velocity measurement sigma for wheel odometry.
+    encoder.yaw_noise:                      0.02                  # Heading-rate measurement sigma for wheel odometry.
+    encoder.nhc_vy_sigma:                   0.05                  # Non-holonomic lateral-velocity constraint sigma.
+    encoder.nhc_auto_detect:                true                  # Let FusionCore auto-enable the non-holonomic constraint logic.
 
     # -- Visual Odometry -------------------------------------------------------
-    encoder2.topic:                    "visual_odometry/odom" # Reserved visual-odometry topic, currently disabled by launch defaults.
-    encoder2.vel_noise:                0.05                  # Velocity sigma to use if the visual odometry stream is enabled.
-    encoder2.yaw_noise:                0.02                  # Yaw sigma to use if the visual odometry stream is enabled.
+    encoder2.topic:                         "visual_odometry/odom" # Reserved visual-odometry topic, currently disabled by launch defaults.
+    encoder2.vel_noise:                     0.05                  # Velocity sigma to use if the visual odometry stream is enabled.
+    encoder2.yaw_noise:                     0.02                  # Yaw sigma to use if the visual odometry stream is enabled.
 
     # -- GNSS ------------------------------------------------------------------
-    gnss.use_gps_fix:                  true                  # Consume NavSatFix-quality data from the GNSS pipeline.
-    gnss.velocity_topic:               ""                    # No standalone GNSS velocity topic is configured.
-    gnss.base_noise_xy:                2.0                   # Baseline horizontal GNSS position sigma in meters.
-    gnss.base_noise_z:                 4.0                   # Baseline vertical GNSS position sigma in meters.
-    gnss.heading_noise:                0.02                  # GNSS-derived heading sigma in radians.
-    gnss.max_hdop:                     2.5                   # Reject fixes whose HDOP exceeds this threshold.
-    gnss.min_satellites:               6                     # Require at least this many satellites before accepting a fix.
-    gnss.min_fix_type:                 3                     # Require a 3D-quality fix or better before fusion.
-    gnss.fix2_topic:                   ""                    # No second GNSS receiver is configured by default.
-    gnss.heading_topic:                ""                    # No dedicated GNSS heading topic is configured.
-    gnss.azimuth_topic:                ""                    # No GNSS azimuth topic is configured.
-    gnss.lever_arm_x:                  0.0                   # Primary GNSS antenna X offset from the fused body origin in meters.
-    gnss.lever_arm_y:                  0.0                   # Primary GNSS antenna Y offset from the fused body origin in meters.
-    gnss.lever_arm_z:                  0.0                   # Primary GNSS antenna Z offset from the fused body origin in meters.
-    gnss.apply_lever_arm_pre_heading:  false                 # Apply lever-arm compensation after heading alignment in this setup.
-    gnss.lever_arm2_x:                 0.0                   # Secondary GNSS antenna X offset, unused unless a dual-antenna setup is enabled.
-    gnss.lever_arm2_y:                 0.0                   # Secondary GNSS antenna Y offset, unused unless a dual-antenna setup is enabled.
-    gnss.lever_arm2_z:                 0.0                   # Secondary GNSS antenna Z offset, unused unless a dual-antenna setup is enabled.
-    gnss.track_heading_enabled:        true                  # Allow track-based heading estimation from GNSS motion.
-    gnss.track_heading_min_dist:       5.0                   # Minimum travel distance before deriving track heading from motion.
-    gnss.track_heading_max_sigma:      0.4                   # Reject track heading estimates noisier than this sigma.
-    gnss.track_heading_min_speed:      0.2                   # Minimum speed required before track heading is considered trustworthy.
-    gnss.track_heading_max_yaw_rate:   0.3                   # Reject track-heading updates during aggressive turning.
-    gnss.lever_arm_max_heading_sigma_deg: 20.0              # Maximum heading uncertainty allowed when compensating GNSS lever arms.
-    gnss.coast_n:                      3                     # Number of prediction steps allowed before GNSS coast handling activates.
-    gnss.coast_q_factor:               10.0                  # Process-noise inflation factor during GNSS coast periods.
-    gnss.coast_timeout_s:              30.0                  # Maximum time to continue coasting after GNSS loss.
-    gnss.coast_q_bias_factor:          100.0                 # Extra inflation applied to bias states while coasting GNSS.
-    gnss.coast_imu_wz_scale:           1.0                   # Scaling applied to IMU yaw-rate cues during GNSS coast mode.
-    gnss.recovery_rejection_n:         0                     # Accept GNSS immediately after recovery instead of forcing extra rejects.
-    gnss.p_inflate_sigma:              50.0                  # Covariance inflation applied when GNSS consistency checks fail.
-    gnss.recovery_timeout_s:           0.0                   # No extra recovery timeout is enforced after GNSS returns.
+    gnss.use_gps_fix:                       true                  # Consume NavSatFix-quality data from the GNSS pipeline.
+    gnss.velocity_topic:                    ""                    # No standalone GNSS velocity topic is configured.
+    gnss.base_noise_xy:                     2.0                   # Baseline horizontal GNSS position sigma in meters.
+    gnss.base_noise_z:                      4.0                   # Baseline vertical GNSS position sigma in meters.
+    gnss.heading_noise:                     0.02                  # GNSS-derived heading sigma in radians.
+    gnss.max_hdop:                          2.5                   # Reject fixes whose HDOP exceeds this threshold.
+    gnss.min_satellites:                    6                     # Require at least this many satellites before accepting a fix.
+    gnss.min_fix_type:                      3                     # Require a 3D-quality fix or better before fusion.
+    gnss.fix2_topic:                        ""                    # No second GNSS receiver is configured by default.
+    gnss.heading_topic:                     ""                    # No dedicated GNSS heading topic is configured.
+    gnss.azimuth_topic:                     ""                    # No GNSS azimuth topic is configured.
+    gnss.lever_arm_x:                       0.0                   # Primary GNSS antenna X offset from the fused body origin in meters.
+    gnss.lever_arm_y:                       0.0                   # Primary GNSS antenna Y offset from the fused body origin in meters.
+    gnss.lever_arm_z:                       0.0                   # Primary GNSS antenna Z offset from the fused body origin in meters.
+    gnss.apply_lever_arm_pre_heading:       false                 # Apply lever-arm compensation after heading alignment in this setup.
+    gnss.lever_arm2_x:                      0.0                   # Secondary GNSS antenna X offset, unused unless a dual-antenna setup is enabled.
+    gnss.lever_arm2_y:                      0.0                   # Secondary GNSS antenna Y offset, unused unless a dual-antenna setup is enabled.
+    gnss.lever_arm2_z:                      0.0                   # Secondary GNSS antenna Z offset, unused unless a dual-antenna setup is enabled.
+    gnss.track_heading_enabled:             true                  # Allow track-based heading estimation from GNSS motion.
+    gnss.track_heading_min_dist:            5.0                   # Minimum travel distance before deriving track heading from motion.
+    gnss.track_heading_max_sigma:           0.4                   # Reject track heading estimates noisier than this sigma.
+    gnss.track_heading_min_speed:           0.2                   # Minimum speed required before track heading is considered trustworthy.
+    gnss.track_heading_max_yaw_rate:        0.3                   # Reject track-heading updates during aggressive turning.
+    gnss.lever_arm_max_heading_sigma_deg:   20.0                  # Maximum heading uncertainty allowed when compensating GNSS lever arms.
+    gnss.coast_n:                           3                     # Number of prediction steps allowed before GNSS coast handling activates.
+    gnss.coast_q_factor:                    10.0                  # Process-noise inflation factor during GNSS coast periods.
+    gnss.coast_timeout_s:                   30.0                  # Maximum time to continue coasting after GNSS loss.
+    gnss.coast_q_bias_factor:               100.0                 # Extra inflation applied to bias states while coasting GNSS.
+    gnss.coast_imu_wz_scale:                1.0                   # Scaling applied to IMU yaw-rate cues during GNSS coast mode.
+    gnss.recovery_rejection_n:              0                     # Accept GNSS immediately after recovery instead of forcing extra rejects.
+    gnss.p_inflate_sigma:                   50.0                  # Covariance inflation applied when GNSS consistency checks fail.
+    gnss.recovery_timeout_s:                0.0                   # No extra recovery timeout is enforced after GNSS returns.
 
     # -- Magnetometer ----------------------------------------------------------
-    magnetometer.enabled:               false                 # Disable direct magnetometer fusion in this localization profile.
-    magnetometer.topic:                 "/imu/mag"            # Default topic to use if magnetometer fusion is enabled later.
-    magnetometer.noise_rad:             0.05                  # Magnetometer heading sigma in radians.
-    magnetometer.chi2_threshold:        9.21                  # Chi-squared gate used to reject inconsistent magnetometer updates.
-    magnetometer.declination_rad:       0.0                   # Local magnetic declination correction in radians.
-    magnetometer.hard_iron:             [0.0, 0.0, 0.0]       # Hard-iron bias vector applied before magnetometer fusion.
-    magnetometer.soft_iron:             [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] # Row-major 3x3 soft-iron correction matrix.
+    magnetometer.enabled:                  false                  # Disable direct magnetometer fusion in this localization profile.
+    magnetometer.topic:                    "/imu/mag"             # Default topic to use if magnetometer fusion is enabled later.
+    magnetometer.noise_rad:                0.05                   # Magnetometer heading sigma in radians.
+    magnetometer.chi2_threshold:           9.21                   # Chi-squared gate used to reject inconsistent magnetometer updates.
+    magnetometer.declination_rad:          0.0                    # Local magnetic declination correction in radians.
+    magnetometer.hard_iron:                [0.0, 0.0, 0.0]        # Hard-iron bias vector applied before magnetometer fusion.
+    magnetometer.soft_iron:                [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] # Row-major 3x3 soft-iron correction matrix.
 
     # -- Radar -----------------------------------------------------------------
-    radar.velocity_topic:               ""                    # No radar velocity source is wired into the sweeper localization stack.
-    radar.vel_noise:                    0.1                   # Default radar velocity sigma if that sensor is enabled later.
+    radar.velocity_topic:                  ""                     # No radar velocity source is wired into the sweeper localization stack.
+    radar.vel_noise:                       0.1                    # Default radar velocity sigma if that sensor is enabled later.
 
     # -- VSLAM -----------------------------------------------------------------
-    vslam.topic:                      ""                    # No VSLAM pose source is configured by default.
-    vslam.position_noise:             0.1                   # Position sigma to use if a VSLAM source is enabled.
-    vslam.orientation_noise:          0.02                  # Orientation sigma to use if a VSLAM source is enabled.
-    vslam.frame_id:                   ""                    # No VSLAM frame is configured by default.
-    vslam.reinit_n:                   10                    # Number of rejected VSLAM updates before FusionCore considers reinitialization.
+    vslam.topic:                           ""                     # No VSLAM pose source is configured by default.
+    vslam.position_noise:                  0.1                    # Position sigma to use if a VSLAM source is enabled.
+    vslam.orientation_noise:               0.02                   # Orientation sigma to use if a VSLAM source is enabled.
+    vslam.frame_id:                        ""                     # No VSLAM frame is configured by default.
+    vslam.reinit_n:                        10                     # Number of rejected VSLAM updates before FusionCore considers reinitialization.
 
     # -- Outlier rejection -----------------------------------------------------
-    outlier_rejection:                true                  # Enable chi-squared innovation gating across sensor updates.
-    outlier_threshold_gnss:           16.27                 # GNSS innovation threshold used for rejection.
-    outlier_threshold_imu:            15.09                 # IMU innovation threshold used for rejection.
-    outlier_threshold_enc:            11.34                 # Wheel-odometry innovation threshold used for rejection.
-    outlier_threshold_hdg:            10.83                 # Heading innovation threshold used for rejection.
-    outlier_threshold_vslam:          22.46                 # VSLAM innovation threshold used for rejection.
+    outlier_rejection:                     true                   # Enable chi-squared innovation gating across sensor updates.
+    outlier_threshold_gnss:                16.27                  # GNSS innovation threshold used for rejection.
+    outlier_threshold_imu:                 15.09                  # IMU innovation threshold used for rejection.
+    outlier_threshold_enc:                 11.34                  # Wheel-odometry innovation threshold used for rejection.
+    outlier_threshold_hdg:                 10.83                  # Heading innovation threshold used for rejection.
+    outlier_threshold_vslam:               22.46                  # VSLAM innovation threshold used for rejection.
 
     # -- Adaptive noise --------------------------------------------------------
-    adaptive.imu:                    true                  # Let FusionCore adapt IMU measurement noise online.
-    adaptive.encoder:                true                  # Let FusionCore adapt wheel-odometry noise online.
-    adaptive.gnss:                   true                  # Let FusionCore adapt GNSS noise online.
-    adaptive.ground_constraint:      true                  # Let FusionCore adapt ground-constraint noise online.
-    adaptive.window:                 50                    # Number of samples used by the adaptive noise estimator.
-    adaptive.alpha:                  0.01                  # Exponential smoothing factor for adaptive noise updates.
+    adaptive.imu:                          true                   # Let FusionCore adapt IMU measurement noise online.
+    adaptive.encoder:                      true                   # Let FusionCore adapt wheel-odometry noise online.
+    adaptive.gnss:                         true                   # Let FusionCore adapt GNSS noise online.
+    adaptive.ground_constraint:            true                   # Let FusionCore adapt ground-constraint noise online.
+    adaptive.window:                       50                     # Number of samples used by the adaptive noise estimator.
+    adaptive.alpha:                        0.01                   # Exponential smoothing factor for adaptive noise updates.
 
     # -- Zero-velocity updates -------------------------------------------------
-    zupt.enabled:                   true                  # Apply zero-velocity updates when the robot is detected as stationary.
-    zupt.velocity_threshold:        0.05                  # Linear-speed threshold below which ZUPT can trigger.
-    zupt.angular_threshold:         0.05                  # Angular-speed threshold below which ZUPT can trigger.
-    zupt.noise_sigma:               0.01                  # Measurement sigma used for stationary ZUPT updates.
+    zupt.enabled:                          true                   # Apply zero-velocity updates when the robot is detected as stationary.
+    zupt.velocity_threshold:               0.05                   # Linear-speed threshold below which ZUPT can trigger.
+    zupt.angular_threshold:                0.05                   # Angular-speed threshold below which ZUPT can trigger.
+    zupt.noise_sigma:                      0.01                   # Measurement sigma used for stationary ZUPT updates.
 
     # -- Ground constraints ----------------------------------------------------
-    ground_constraint.vz_sigma:        0.1                   # Sigma for constraining vertical body velocity near zero.
-    ground_constraint.az_sigma:        0.5                   # Sigma for constraining vertical acceleration on nominally flat ground.
-    ground_constraint.z_position_sigma: 0.0                  # Sigma for constraining vertical position drift when planar assumptions hold.
+    ground_constraint.vz_sigma:            0.1                    # Sigma for constraining vertical body velocity near zero.
+    ground_constraint.az_sigma:            0.5                    # Sigma for constraining vertical acceleration on nominally flat ground.
+    ground_constraint.z_position_sigma:    0.0                    # Sigma for constraining vertical position drift when planar assumptions hold.
 
     # -- Startup behavior ------------------------------------------------------
-    init.stationary_window:           4.0                   # Seconds of startup data used to estimate a stable initial state.
-    init.wait_for_all_sensors:        true                  # Delay initialization until all enabled sensor streams have appeared.
-    init.sensor_wait_timeout:         10.0                  # Maximum time to wait for enabled sensors before startup proceeds.
+    init.stationary_window:                4.0                    # Seconds of startup data used to estimate a stable initial state.
+    init.wait_for_all_sensors:             true                   # Delay initialization until all enabled sensor streams have appeared.
+    init.sensor_wait_timeout:              10.0                   # Maximum time to wait for enabled sensors before startup proceeds.
 
     # -- Replay ----------------------------------------------------------------
-    replay.checkpoint_path:           "/tmp/fusioncore_checkpoint.txt" # Checkpoint file used when replay/debug features are enabled.
+    replay.checkpoint_path:                "/tmp/fusioncore_checkpoint.txt" # Checkpoint file used when replay/debug features are enabled.
 
     # -- UKF process noise -----------------------------------------------------
-    ukf.q_position:                 0.01                  # Process noise for position state propagation.
-    ukf.q_orientation:              1.0e-9                # Process noise for orientation state propagation.
-    ukf.q_velocity:                 0.1                   # Process noise for linear velocity state propagation.
-    ukf.q_angular_vel:              0.1                   # Process noise for angular velocity state propagation.
-    ukf.q_acceleration:             1.0                   # Process noise for linear acceleration state propagation.
-    ukf.q_gyro_bias:                1.0e-5                # Process noise for gyroscope bias estimation.
-    ukf.q_accel_bias:               1.0e-5                # Process noise for accelerometer bias estimation.
-    ukf.q_encoder_wz_bias:          1.0e-7                # Process noise for encoder-derived yaw-rate bias estimation.
+    ukf.q_position:                        0.01                   # Process noise for position state propagation.
+    ukf.q_orientation:                     1.0e-9                 # Process noise for orientation state propagation.
+    ukf.q_velocity:                        0.1                    # Process noise for linear velocity state propagation.
+    ukf.q_angular_vel:                     0.1                    # Process noise for angular velocity state propagation.
+    ukf.q_acceleration:                    1.0                    # Process noise for linear acceleration state propagation.
+    ukf.q_gyro_bias:                       1.0e-5                 # Process noise for gyroscope bias estimation.
+    ukf.q_accel_bias:                      1.0e-5                 # Process noise for accelerometer bias estimation.
+    ukf.q_encoder_wz_bias:                 1.0e-7                 # Process noise for encoder-derived yaw-rate bias estimation.
 
     # -- Coordinate systems ----------------------------------------------------
-    input.gnss_crs:                  "EPSG:4326"           # Interpret incoming GNSS fixes as WGS84 latitude/longitude/altitude.
-    output.crs:                      "EPSG:4978"           # Internal FusionCore output frame expressed in ECEF coordinates.
-    output.convert_to_enu_at_reference: true              # Convert outputs to a local ENU frame anchored at the reference.
-    reference.use_first_fix:         true                  # Seed the local ENU reference from the first accepted GNSS fix.
-    reference.x:                     0.0                   # Manual reference X, unused while first-fix seeding remains enabled.
-    reference.y:                     0.0                   # Manual reference Y, unused while first-fix seeding remains enabled.
-    reference.z:                     0.0                   # Manual reference Z, unused while first-fix seeding remains enabled.
+    input.gnss_crs:                        "EPSG:4326"            # Interpret incoming GNSS fixes as WGS84 latitude/longitude/altitude.
+    output.crs:                            "EPSG:4978"            # Internal FusionCore output frame expressed in ECEF coordinates.
+    output.convert_to_enu_at_reference:    true                   # Convert outputs to a local ENU frame anchored at the reference.
+    reference.use_first_fix:               true                   # Seed the local ENU reference from the first accepted GNSS fix.
+    reference.x:                           0.0                    # Manual reference X, unused while first-fix seeding remains enabled.
+    reference.y:                           0.0                    # Manual reference Y, unused while first-fix seeding remains enabled.
+    reference.z:                           0.0                    # Manual reference Z, unused while first-fix seeding remains enabled.
