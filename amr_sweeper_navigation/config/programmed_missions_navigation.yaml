@@ -23,7 +23,7 @@ controller_server:
   ros__parameters:
     # -- Controller runtime ----------------------------------------------------
     use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    controller_frequency:            15.0                                # Match the default-missions controller cadence so all mission types use the same control family and update rate.
+    controller_frequency:            5.0                                 # Reduced controller cadence to ease controller load and keep all mission types aligned.
     min_x_velocity_threshold:        0.001                               # Linear X deadband below which motion is treated as zero. Default is commonly 0.001 m/s.
     min_y_velocity_threshold:        0.001                               # Linear Y deadband below which motion is treated as zero. Default is commonly 0.5 for holonomic robots; near-zero fits diff drive.
     min_theta_velocity_threshold:    0.001                               # Angular deadband below which rotation is treated as zero. Default is commonly 0.001 rad/s.
@@ -53,8 +53,8 @@ controller_server:
       angular_dist_threshold:        0.785                               # Match the default-missions shim engagement threshold.
       angular_disengage_threshold:   0.3925                              # Match the default-missions shim handoff threshold.
       forward_sampling_distance:     0.5                                 # Match the default-missions path-heading sampling distance.
-      rotate_to_heading_angular_vel: 0.65                                # Match the default-missions practical turn rate.
-      max_angular_accel:             1.2                                 # Match the default-missions angular acceleration envelope.
+      rotate_to_heading_angular_vel: 0.30                                # Reduced turn-in rate to keep programmed mission heading changes gentler.
+      max_angular_accel:             0.6                                 # Reduced shim angular acceleration to match the calmer turn behavior.
       simulate_ahead_time:           1.0                                 # Match the default-missions collision-check horizon for shim motions.
       rotate_to_goal_heading:        true                                # Match the default-missions goal-heading alignment behavior.
 
@@ -78,7 +78,7 @@ controller_server:
       primary_controller.regulated_linear_scaling_min_speed: 0.05        # Match the default-missions minimum regulated speed.
       primary_controller.use_rotate_to_heading: false                    # Rotation Shim owns heading acquisition in this controller family.
       primary_controller.allow_reversing: false                          # Match the default-missions forward-only tracking behavior.
-      primary_controller.max_angular_accel: 1.2                          # Match the default-missions RPP angular acceleration envelope.
+      primary_controller.max_angular_accel: 0.6                          # Match the reduced shim angular acceleration envelope.
       primary_controller.stateful: true                                  # Match the default-missions stateful controller behavior.
 
 local_costmap:
@@ -230,7 +230,7 @@ behavior_server:
     transform_tolerance:             1.0                                 # TF lookup tolerance in seconds for behavior execution. Keep recoveries tolerant of map -> odom correction cadence.
     use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
     simulate_ahead_time:             2.0                                 # Seconds to project motion ahead for some recovery behaviors. Common examples use 2.0 s.
-    max_rotational_vel:              0.3                                 # Maximum rotational speed in rad/s for behavior server motions. Common examples are often higher, around 1.0.
+    max_rotational_vel:              0.25                                # Maximum rotational speed in rad/s for behavior server motions. Reduced for gentler heading changes.
     min_rotational_vel:              0.1                                 # Minimum commanded rotational speed in rad/s for behavior server motions. Common examples use 0.4.
     rotational_acc_lim:              0.8                                 # Angular acceleration limit in rad/s^2 for behavior server motions. Common examples use 3.2.
 
@@ -253,7 +253,7 @@ velocity_smoother:
     scale_velocities:                false                               # Uniformly scale velocity components when one axis would violate limits. Common examples often use false.
     feedback:                        "CLOSED_LOOP"                       # When the smoother is enabled, use odometry feedback so commanded velocity tracks the real robot state more closely during map-frame missions.
 
-    max_velocity:                    [0.15, 0.0, 0.3]                    # Maximum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was 0.25; common examples are often [0.5, 0.0, 2.5].
+    max_velocity:                    [0.15, 0.0, 0.25]                   # Maximum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Reduced theta cap to keep turns calmer.
     min_velocity:                    [-0.15, 0.0, -0.3]                  # Minimum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was -0.25; common examples mirror max limits.
     max_accel:                       [1.0, 0.0, 0.8]                     # Maximum acceleration [x, y, theta] in [m/s^2, m/s^2, rad/s^2]. X was 2.5; common examples are often [2.5, 0.0, 3.2].
     max_decel:                       [-1.0, 0.0, -0.8]                   # Maximum deceleration [x, y, theta] in [m/s^2, m/s^2, rad/s^2]. X was -2.5; common examples mirror accel limits.
