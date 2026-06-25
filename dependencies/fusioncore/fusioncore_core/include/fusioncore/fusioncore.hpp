@@ -499,15 +499,6 @@ private:
 
   void init_adaptive_R();
 
-  bool apply_imu_measurement(
-    double wx, double wy, double wz,
-    double ax, double ay, double az,
-    const sensors::ImuNoiseMatrix& R,
-    bool reject_outliers,
-    bool adapt_noise,
-    double& innovation_norm
-  );
-
   template <int z_dim>
   void adapt_R(
     Eigen::Matrix<double, z_dim, z_dim>& R,

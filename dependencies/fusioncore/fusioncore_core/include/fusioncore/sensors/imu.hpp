@@ -15,14 +15,6 @@ constexpr int IMU_DIM = 6;
 using ImuMeasurement = Eigen::Matrix<double, IMU_DIM, 1>;
 using ImuNoiseMatrix = Eigen::Matrix<double, IMU_DIM, IMU_DIM>;
 
-constexpr int IMU_GYRO_DIM = 3;
-constexpr int IMU_ACCEL_DIM = 3;
-
-using ImuGyroMeasurement = Eigen::Matrix<double, IMU_GYRO_DIM, 1>;
-using ImuGyroNoiseMatrix = Eigen::Matrix<double, IMU_GYRO_DIM, IMU_GYRO_DIM>;
-using ImuAccelMeasurement = Eigen::Matrix<double, IMU_ACCEL_DIM, 1>;
-using ImuAccelNoiseMatrix = Eigen::Matrix<double, IMU_ACCEL_DIM, IMU_ACCEL_DIM>;
-
 // ─── IMU lever arm ───────────────────────────────────────────────────────────
 // Offset from base_link origin to the IMU's sensing point, expressed in the
 // body frame (after the rotation between base_link and the IMU chip has been
@@ -73,50 +65,6 @@ inline ImuMeasurement imu_measurement_function(const StateVector& x) {
   return z;
 }
 
-inline ImuGyroMeasurement imu_gyro_measurement_function(const StateVector& x) {
-  ImuGyroMeasurement z;
-  z[0] = x[WX] + x[B_GX];
-  z[1] = x[WY] + x[B_GY];
-  z[2] = x[WZ] + x[B_GZ];
-  return z;
-}
-
-inline ImuAccelMeasurement imu_accel_no_yaw_measurement_function_with_lever_arm(
-  const ImuLeverArm& lever_arm,
-  const StateVector& x)
-{
-  ImuAccelMeasurement z;
-  constexpr double g = 9.80665;
-  double roll, pitch, yaw;
-  quat_to_euler(x[QW], x[QX], x[QY], x[QZ], roll, pitch, yaw);
-
-  const double wx = x[WX], wy = x[WY], wz = x[WZ];
-  const double rx = lever_arm.x, ry = lever_arm.y, rz = lever_arm.z;
-  const double w_dot_r = wx*rx + wy*ry + wz*rz;
-  const double w_dot_w = wx*wx + wy*wy + wz*wz;
-  const double cen_x = w_dot_r * wx - w_dot_w * rx;
-  const double cen_y = w_dot_r * wy - w_dot_w * ry;
-  const double cen_z = w_dot_r * wz - w_dot_w * rz;
-
-  // Gravity expressed in body frame from roll/pitch only:
-  // Rz(yaw) leaves world-z gravity unchanged, so yaw is intentionally absent.
-  const double sr = std::sin(roll);
-  const double cr = std::cos(roll);
-  const double sp = std::sin(pitch);
-  const double cp = std::cos(pitch);
-  z[0] = x[AX] + x[B_AX] - sp * g + cen_x;
-  z[1] = x[AY] + x[B_AY] + sr * cp * g + cen_y;
-  z[2] = x[AZ] + x[B_AZ] + cr * cp * g + cen_z;
-  return z;
-}
-
-inline auto imu_accel_no_yaw_measurement_function(const ImuLeverArm& lever_arm)
-{
-  return [lever_arm](const StateVector& x) -> ImuAccelMeasurement {
-    return imu_accel_no_yaw_measurement_function_with_lever_arm(lever_arm, x);
-  };
-}
-
 // h(x): state -> expected raw IMU measurement accounting for the lever arm
 // between base_link and the IMU sensing point.
 //
@@ -160,22 +108,6 @@ inline ImuNoiseMatrix imu_noise_matrix(const ImuParams& p) {
   R(3,3) = p.accel_noise_x * p.accel_noise_x;
   R(4,4) = p.accel_noise_y * p.accel_noise_y;
   R(5,5) = p.accel_noise_z * p.accel_noise_z;
-  return R;
-}
-
-inline ImuGyroNoiseMatrix imu_gyro_noise_matrix(const ImuNoiseMatrix& R_imu) {
-  ImuGyroNoiseMatrix R = ImuGyroNoiseMatrix::Zero();
-  R(0,0) = R_imu(0,0);
-  R(1,1) = R_imu(1,1);
-  R(2,2) = R_imu(2,2);
-  return R;
-}
-
-inline ImuAccelNoiseMatrix imu_accel_noise_matrix(const ImuNoiseMatrix& R_imu) {
-  ImuAccelNoiseMatrix R = ImuAccelNoiseMatrix::Zero();
-  R(0,0) = R_imu(3,3);
-  R(1,1) = R_imu(4,4);
-  R(2,2) = R_imu(5,5);
   return R;
 }
 

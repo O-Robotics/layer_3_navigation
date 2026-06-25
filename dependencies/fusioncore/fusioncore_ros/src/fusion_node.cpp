@@ -28,6 +28,7 @@
 #include "fusioncore_ros/srv/from_ll.hpp"
 #include "fusioncore_ros/msg/gnss_status.hpp"
 #include "fusioncore_ros/msg/filter_health.hpp"
+#include <lifecycle_msgs/msg/transition.hpp>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -71,6 +72,13 @@ public:
     // (e.g. a separate sensor fusion layer). FusionCore will still
     // publish /fusion/odom; only the TF broadcast is suppressed.
     declare_parameter("publish.tf", true);
+
+    // When true (default), the node self-transitions configure -> activate
+    // automatically ~200ms after on_configure() returns. This removes the
+    // need for external callers to manage lifecycle transitions manually.
+    // Set to false when your launch file drives transitions itself (e.g. via
+    // OnStateTransition or nav2_lifecycle_manager) to avoid a double-activate.
+    declare_parameter("autostart", true);
 
     // Primary IMU topic. Override when your driver publishes at a non-default topic
     // (e.g. Clearpath Microstrain at /sensors/imu_0/data, Realsense at /camera/imu).
@@ -584,6 +592,15 @@ public:
       "FusionCore configured. base_frame=%s odom_frame=%s rate=%.0fHz",
       base_frame_.c_str(), odom_frame_.c_str(), publish_rate_);
 
+    autostart_ = get_parameter("autostart").as_bool();
+    if (autostart_) {
+      autostart_timer_ = create_wall_timer(200ms, [this]() {
+        autostart_timer_->cancel();
+        trigger_transition(lifecycle_msgs::msg::Transition::TRANSITION_ACTIVATE);
+      });
+      RCLCPP_INFO(get_logger(), "Autostart enabled: activating in 200ms.");
+    }
+
     return CallbackReturn::SUCCESS;
   }
 
@@ -780,7 +797,6 @@ public:
         fusioncore::State initial;
         initial.x = fusioncore::StateVector::Zero();
         initial.P = fusioncore::StateMatrix::Identity() * 0.1;
-        keep_quaternion_covariance_tight(initial);
         initial.P(0,0) = 1000.0;
         initial.P(1,1) = 1000.0;
         initial.P(2,2) = 1000.0;
@@ -963,6 +979,7 @@ public:
 
   CallbackReturn on_cleanup(const rclcpp_lifecycle::State &)
   {
+    autostart_timer_.reset();
     fc_.reset();
     tf_broadcaster_.reset();
     tf_listener_.reset();
@@ -1072,13 +1089,6 @@ private:
     return out;
   }
 
-  static void keep_quaternion_covariance_tight(fusioncore::State& state) {
-    state.P(fusioncore::QW, fusioncore::QW) = 1e-8;
-    state.P(fusioncore::QX, fusioncore::QX) = 1e-8;
-    state.P(fusioncore::QY, fusioncore::QY) = 1e-8;
-    state.P(fusioncore::QZ, fusioncore::QZ) = 1e-8;
-  }
-
   void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
     double t = rclcpp::Time(msg->header.stamp).seconds();
@@ -1120,7 +1130,6 @@ private:
       if (init_window_duration_ <= 0.0) {
         fusioncore::State initial;
         initial.P = fusioncore::StateMatrix::Identity() * 0.1;
-        keep_quaternion_covariance_tight(initial);
         initial.P(0,0) = 1000.0;
         initial.P(1,1) = 1000.0;
         initial.P(2,2) = 1000.0;
@@ -1147,84 +1156,23 @@ private:
             "Collecting %.1fs bias window before init...", init_window_duration_);
         }
 
-        std::string init_imu_frame = imu_frame_override_.empty()
-          ? (msg->header.frame_id.empty() ? "imu_link" : msg->header.frame_id)
-          : imu_frame_override_;
-
-        tf2::Vector3 init_w_base(
-          msg->angular_velocity.x,
-          msg->angular_velocity.y,
-          msg->angular_velocity.z);
-        tf2::Vector3 init_a_base(
-          msg->linear_acceleration.x,
-          msg->linear_acceleration.y,
-          msg->linear_acceleration.z);
-        std::optional<tf2::Quaternion> init_imu_to_base = std::nullopt;
-
-        if (init_imu_frame != base_frame_) {
-          try {
-            auto init_tf = tf_buffer_->lookupTransform(
-              base_frame_, init_imu_frame, tf2::TimePointZero);
-            tf2::Quaternion q_init(
-              init_tf.transform.rotation.x,
-              init_tf.transform.rotation.y,
-              init_tf.transform.rotation.z,
-              init_tf.transform.rotation.w);
-            tf2::Matrix3x3 init_r(q_init);
-            init_w_base = init_r * init_w_base;
-            init_a_base = init_r * init_a_base;
-            init_imu_to_base = q_init;
-          } catch (const tf2::TransformException & ex) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-              "Cannot transform IMU from %s to %s during startup bias window: %s. "
-              "Falling back to raw IMU-frame samples for initialization.",
-              init_imu_frame.c_str(), base_frame_.c_str(), ex.what());
-          }
-        }
-
-        // Accumulate gyro and accel in the same base frame used by runtime fusion.
-        init_win_wx_ += init_w_base.x();
-        init_win_wy_ += init_w_base.y();
-        init_win_wz_ += init_w_base.z();
-        init_win_ax_ += init_a_base.x();
-        init_win_ay_ += init_a_base.y();
-        init_win_az_ += init_a_base.z();
+        // Accumulate gyro and accel
+        init_win_wx_ += msg->angular_velocity.x;
+        init_win_wy_ += msg->angular_velocity.y;
+        init_win_wz_ += msg->angular_velocity.z;
+        init_win_ax_ += msg->linear_acceleration.x;
+        init_win_ay_ += msg->linear_acceleration.y;
+        init_win_az_ += msg->linear_acceleration.z;
         ++init_win_n_;
 
-        // Accumulate orientation if available. Align quaternion signs into a
-        // common hemisphere first so startup samples do not cancel each other
-        // out when the IMU flips between q and -q representations.
+        // Accumulate orientation if available
         const auto& ocov = msg->orientation_covariance;
         bool has_orient = (ocov[0] > 0.0 || ocov[4] > 0.0 || ocov[8] > 0.0);
         if (has_orient) {
-          tf2::Quaternion q_init(
-            msg->orientation.x,
-            msg->orientation.y,
-            msg->orientation.z,
-            msg->orientation.w);
-          tf2::Quaternion q_base = init_imu_to_base.has_value()
-            ? (init_imu_to_base.value() * q_init).normalized()
-            : q_init;
-          double qw = q_base.w();
-          double qx = q_base.x();
-          double qy = q_base.y();
-          double qz = q_base.z();
-
-          if (init_win_orient_n_ > 0) {
-            double dot = init_win_qw_ * qw + init_win_qx_ * qx +
-                         init_win_qy_ * qy + init_win_qz_ * qz;
-            if (dot < 0.0) {
-              qw = -qw;
-              qx = -qx;
-              qy = -qy;
-              qz = -qz;
-            }
-          }
-
-          init_win_qw_ += qw;
-          init_win_qx_ += qx;
-          init_win_qy_ += qy;
-          init_win_qz_ += qz;
+          init_win_qw_ += msg->orientation.w;
+          init_win_qx_ += msg->orientation.x;
+          init_win_qy_ += msg->orientation.y;
+          init_win_qz_ += msg->orientation.z;
           ++init_win_orient_n_;
         }
 
@@ -1235,7 +1183,6 @@ private:
         if (window_elapsed >= init_window_duration_) {
           fusioncore::State initial;
           initial.P = fusioncore::StateMatrix::Identity() * 0.1;
-          keep_quaternion_covariance_tight(initial);
           initial.P(0,0) = 1000.0;
           initial.P(1,1) = 1000.0;
           initial.P(2,2) = 1000.0;
@@ -1251,37 +1198,18 @@ private:
               double qw = init_win_qw_ / on, qx = init_win_qx_ / on;
               double qy = init_win_qy_ / on, qz = init_win_qz_ / on;
               double norm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
-              if (norm > 1e-9) {
-                qw /= norm; qx /= norm; qy /= norm; qz /= norm;
-
-                // Seed the startup attitude from the same stationary IMU
-                // samples already used for bias estimation. This keeps the
-                // change local to initialization and leaves all downstream
-                // fusion logic unchanged.
-                initial.x[fusioncore::QW] = qw;
-                initial.x[fusioncore::QX] = qx;
-                initial.x[fusioncore::QY] = qy;
-                initial.x[fusioncore::QZ] = qz;
-
-                const double g = 9.80665;
-                double gx = 2.0*(qx*qz - qy*qw)*g;
-                double gy = 2.0*(qy*qz + qx*qw)*g;
-                double gz = (1.0 - 2.0*(qx*qx + qy*qy))*g;
-                initial.x[fusioncore::B_AX] = init_win_ax_ / n - gx;
-                initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
-                initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
-
-                double roll, pitch, yaw;
-                fusioncore::quat_to_euler(qw, qx, qy, qz, roll, pitch, yaw);
-                RCLCPP_INFO(get_logger(),
-                  "Bias window done: seeded attitude rpy=[%.2f, %.2f, %.2f] deg gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f]",
-                  roll * 180.0 / M_PI, pitch * 180.0 / M_PI, yaw * 180.0 / M_PI,
-                  initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
-                  initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
-              } else {
-                RCLCPP_WARN(get_logger(),
-                  "Bias window orientation average was degenerate; leaving initial attitude at identity.");
-              }
+              qw /= norm; qx /= norm; qy /= norm; qz /= norm;
+              const double g = 9.80665;
+              double gx = 2.0*(qx*qz - qy*qw)*g;
+              double gy = 2.0*(qy*qz + qx*qw)*g;
+              double gz = (1.0 - 2.0*(qx*qx + qy*qy))*g;
+              initial.x[fusioncore::B_AX] = init_win_ax_ / n - gx;
+              initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
+              initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
+              RCLCPP_INFO(get_logger(),
+                "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] rad/s, m/s²",
+                initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
+                initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
             } else {
               RCLCPP_INFO(get_logger(),
                 "Bias window done (gyro only, no orientation): gyro=[%.4f,%.4f,%.4f]",
@@ -1370,6 +1298,7 @@ private:
         msg->angular_velocity.y,
         msg->angular_velocity.z,
         ax, ay, az);
+      // No frame rotation needed: IMU is already in base_frame
       fuse_imu_orientation_if_valid(t, msg, std::nullopt);
       return;
     }
@@ -1425,7 +1354,7 @@ private:
     fc_->update_imu(t,
       w_base.x(), w_base.y(), w_base.z(),
       a_base.x(), a_base.y(), a_base.z());
-    // Fix 11: pass the rotation quaternion so orientation is transformed too.
+    // Fix 11: pass the rotation quaternion so orientation is also transformed
     fuse_imu_orientation_if_valid(t, msg, q);
   }
 
@@ -2958,6 +2887,10 @@ private:
   bool                     sensor_wait_done_     = false;
   std::set<std::string>    sensors_expected_;
   std::set<std::string>    sensors_received_;
+
+  // Autostart: self-transition configure -> activate without external lifecycle management
+  bool autostart_ = true;
+  rclcpp::TimerBase::SharedPtr autostart_timer_;
 
   // Deterministic replay checkpoint (#27)
   std::string checkpoint_path_;

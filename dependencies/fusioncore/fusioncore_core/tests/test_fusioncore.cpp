@@ -3,44 +3,6 @@
 
 using namespace fusioncore;
 
-namespace {
-
-void set_quaternion_from_rpy(
-  State& state,
-  double roll,
-  double pitch,
-  double yaw)
-{
-  const double cy = std::cos(yaw * 0.5);
-  const double sy = std::sin(yaw * 0.5);
-  const double cp = std::cos(pitch * 0.5);
-  const double sp = std::sin(pitch * 0.5);
-  const double cr = std::cos(roll * 0.5);
-  const double sr = std::sin(roll * 0.5);
-
-  state.x[QW] = cr * cp * cy + sr * sp * sy;
-  state.x[QX] = sr * cp * cy - cr * sp * sy;
-  state.x[QY] = cr * sp * cy + sr * cp * sy;
-  state.x[QZ] = cr * cp * sy - sr * sp * cy;
-}
-
-double normalize_angle(double angle)
-{
-  while (angle > M_PI) angle -= 2.0 * M_PI;
-  while (angle < -M_PI) angle += 2.0 * M_PI;
-  return angle;
-}
-
-void gravity_for_rp(double roll, double pitch, double& ax, double& ay, double& az)
-{
-  constexpr double g = 9.80665;
-  ax = -std::sin(pitch) * g;
-  ay = std::sin(roll) * std::cos(pitch) * g;
-  az = std::cos(roll) * std::cos(pitch) * g;
-}
-
-}  // namespace
-
 // ─── Test 1: Cannot update before init ───────────────────────────────────────
 
 TEST(FusionCoreTest, ThrowsIfNotInitialized) {
@@ -178,9 +140,9 @@ TEST(FusionCoreTest, ResetClearsState) {
 }
 
 // ─── Test 7: 6-axis IMU: yaw blocked, roll/pitch still fused ────────────────
-// When imu_has_magnetometer=false, the IMU orientation update fuses roll/pitch
-// only. A wildly wrong yaw measurement must not move the filter's heading.
-// Roll and pitch must still converge normally.
+// When imu_has_magnetometer=false, cedbossneo's fix sets R(2,2)=1e6 so the
+// Kalman gain for yaw is ~0. A wildly wrong yaw measurement must not move
+// the filter's heading. Roll and pitch must still converge normally.
 
 TEST(FusionCoreTest, SixAxisIMUYawBlockedRollPitchFused) {
   FusionCoreConfig config;
@@ -199,7 +161,8 @@ TEST(FusionCoreTest, SixAxisIMUYawBlockedRollPitchFused) {
   fc.init(initial, 0.0);
 
   // Feed 200 orientation updates: correct roll=0, but yaw=π (wildly wrong).
-  // The yaw component is ignored in six-axis mode.
+  // With R(2,2)=1e6 the Kalman gain for yaw ≈ P(yaw)/(P(yaw)+1e6) ≈ 1e-7,
+  // so the total yaw drift over 200 steps is < 0.001 rad.
   for (int i = 1; i <= 200; ++i) {
     fc.update_imu_orientation(i * 0.01, 0.0, 0.0, M_PI, nullptr);
   }
@@ -212,8 +175,8 @@ TEST(FusionCoreTest, SixAxisIMUYawBlockedRollPitchFused) {
 }
 
 // ─── Test 8: 9-axis IMU: yaw IS fused normally ──────────────────────────────
-// When imu_has_magnetometer=true, the yaw measurement must pull the filter
-// heading toward the target.
+// When imu_has_magnetometer=true, the fix is skipped entirely.
+// The yaw measurement must pull the filter heading toward the target.
 
 TEST(FusionCoreTest, NineAxisIMUYawFusedNormally) {
   FusionCoreConfig config;
@@ -236,96 +199,6 @@ TEST(FusionCoreTest, NineAxisIMUYawFusedNormally) {
 
   // Yaw must have converged toward 0.5
   EXPECT_GT(fc.get_state().yaw(), 0.3);
-}
-
-TEST(FusionCoreTest, StationaryNineAxisIMUYawDoesNotWanderWithBroadStartupCovariance) {
-  FusionCoreConfig config;
-  config.imu_has_magnetometer = true;
-  config.adaptive_imu = false;
-
-  FusionCore fc(config);
-
-  constexpr double roll = 0.8115 * M_PI / 180.0;
-  constexpr double pitch = 3.9439 * M_PI / 180.0;
-  constexpr double yaw = 57.7661 * M_PI / 180.0;
-
-  State initial;
-  initial.P = StateMatrix::Identity() * 0.1;
-  set_quaternion_from_rpy(initial, roll, pitch, yaw);
-  fc.init(initial, 0.0);
-
-  double ax = 0.0;
-  double ay = 0.0;
-  double az = 0.0;
-  gravity_for_rp(roll, pitch, ax, ay, az);
-
-  for (int i = 1; i <= 500; ++i) {
-    const double t = i * 0.02;
-    fc.update_imu(t, 0.0, 0.0, 0.0, ax, ay, az);
-    fc.update_imu_orientation(t, roll, pitch, yaw, nullptr);
-    fc.update_encoder(t, 0.0, 0.0, 0.0);
-    fc.update_zupt(t, 0.01);
-  }
-
-  EXPECT_NEAR(normalize_angle(fc.get_state().yaw() - yaw), 0.0, 0.02);
-}
-
-TEST(FusionCoreTest, RawAccelerometerGravityDoesNotObserveYaw) {
-  FusionCoreConfig config;
-  config.imu_has_magnetometer = false;
-  config.adaptive_imu = false;
-
-  FusionCore fc(config);
-
-  constexpr double roll = 0.63 * M_PI / 180.0;
-  constexpr double pitch = 4.72 * M_PI / 180.0;
-  constexpr double yaw = 44.37 * M_PI / 180.0;
-
-  State initial;
-  initial.P = StateMatrix::Identity() * 0.1;
-  set_quaternion_from_rpy(initial, roll, pitch, yaw);
-  fc.init(initial, 0.0);
-
-  double ax = 0.0;
-  double ay = 0.0;
-  double az = 0.0;
-  gravity_for_rp(roll, pitch, ax, ay, az);
-
-  for (int i = 1; i <= 500; ++i) {
-    const double t = i * 0.02;
-    fc.update_imu(t, 0.0, 0.0, 0.0, ax, ay, az);
-    fc.update_imu_orientation(t, roll, pitch, yaw + M_PI, nullptr);
-    fc.update_encoder(t, 0.0, 0.0, 0.0);
-    fc.update_zupt(t, 0.01);
-  }
-
-  EXPECT_NEAR(normalize_angle(fc.get_state().yaw() - yaw), 0.0, 0.02);
-}
-
-TEST(FusionCoreTest, CompassHeadingCorrectsYawWhenImuMagnetometerModeIsOff) {
-  FusionCoreConfig config;
-  config.imu_has_magnetometer = false;
-  config.adaptive_imu = false;
-
-  FusionCore fc(config);
-
-  constexpr double yaw = 44.37 * M_PI / 180.0;
-
-  State initial;
-  initial.P = StateMatrix::Identity() * 0.1;
-  fc.init(initial, 0.0);
-
-  for (int i = 1; i <= 100; ++i) {
-    const double t = i * 0.02;
-    fc.update_imu(t, 0.0, 0.0, 0.0, 0.0, 0.0, 9.80665);
-    fusioncore::sensors::GnssHeading heading;
-    heading.heading_rad = yaw;
-    heading.accuracy_rad = 0.02;
-    heading.valid = true;
-    fc.update_gnss_heading(t, heading);
-  }
-
-  EXPECT_NEAR(normalize_angle(fc.get_state().yaw() - yaw), 0.0, 0.02);
 }
 
 int main(int argc, char** argv) {

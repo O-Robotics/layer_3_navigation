@@ -1,40 +1,9 @@
 #include "fusioncore/fusioncore.hpp"
 #include "fusioncore/sensors/imu.hpp"
-#include <algorithm>
 #include <stdexcept>
 #include <cmath>
 
 namespace fusioncore {
-
-namespace {
-
-void set_quaternion_from_rpy(StateVector& x, double roll, double pitch, double yaw)
-{
-  const double cy = std::cos(yaw * 0.5);
-  const double sy = std::sin(yaw * 0.5);
-  const double cp = std::cos(pitch * 0.5);
-  const double sp = std::sin(pitch * 0.5);
-  const double cr = std::cos(roll * 0.5);
-  const double sr = std::sin(roll * 0.5);
-
-  x[QW] = cr * cp * cy + sr * sp * sy;
-  x[QX] = sr * cp * cy - cr * sp * sy;
-  x[QY] = cr * sp * cy + sr * cp * sy;
-  x[QZ] = cr * cp * sy - sr * sp * cy;
-}
-
-void keep_roll_pitch_after_yaw_update(State& state, double roll, double pitch)
-{
-  double roll_after = 0.0;
-  double pitch_after = 0.0;
-  double yaw_after = 0.0;
-  quat_to_euler(
-    state.x[QW], state.x[QX], state.x[QY], state.x[QZ],
-    roll_after, pitch_after, yaw_after);
-  set_quaternion_from_rpy(state.x, roll, pitch, yaw_after);
-}
-
-}  // namespace
 
 // ─── Adaptive noise covariance implementation ─────────────────────────────
 
@@ -303,14 +272,18 @@ bool FusionCore::apply_delayed_measurement(
       ukf_.predict(dt);
       last_timestamp_ = imu.timestamp;
 
-      double replay_innovation_norm = 0.0;
-      apply_imu_measurement(
-        imu.wx, imu.wy, imu.wz,
-        imu.ax, imu.ay, imu.az,
-        imu.R,
-        false,
-        false,
-        replay_innovation_norm);
+      // Re-apply the IMU measurement so the filter sees the real dynamics.
+      // Pick the same measurement function as update_imu() to keep the
+      // replay consistent with the original update (lever-arm aware when
+      // the IMU is offset from base_link).
+      sensors::ImuMeasurement z;
+      z[0] = imu.wx; z[1] = imu.wy; z[2] = imu.wz;
+      z[3] = imu.ax; z[4] = imu.ay; z[5] = imu.az;
+      auto h_imu_replay = !config_.imu.lever_arm.is_zero()
+        ? sensors::imu_measurement_function_with_lever_arm(config_.imu.lever_arm)
+        : std::function<sensors::ImuMeasurement(const StateVector&)>(
+            sensors::imu_measurement_function);
+      ukf_.update<sensors::IMU_DIM>(z, h_imu_replay, imu.R);
       replayed_any = true;
     }
   }
@@ -439,88 +412,6 @@ void FusionCore::update_distance_traveled(double x, double y, double pre_update_
   }
 }
 
-bool FusionCore::apply_imu_measurement(
-  double wx, double wy, double wz,
-  double ax, double ay, double az,
-  const sensors::ImuNoiseMatrix& R,
-  bool reject_outliers,
-  bool adapt_noise,
-  double& innovation_norm)
-{
-  sensors::ImuMeasurement combined_innovation = sensors::ImuMeasurement::Zero();
-
-  sensors::ImuGyroMeasurement z_gyro;
-  z_gyro[0] = wx; z_gyro[1] = wy; z_gyro[2] = wz;
-  sensors::ImuGyroNoiseMatrix R_gyro = sensors::imu_gyro_noise_matrix(R);
-
-  if (reject_outliers) {
-    sensors::ImuGyroMeasurement innovation_pre;
-    sensors::ImuGyroNoiseMatrix S;
-    ukf_.predict_measurement<sensors::IMU_GYRO_DIM>(
-      z_gyro, sensors::imu_gyro_measurement_function, R_gyro, innovation_pre, S);
-    if (is_outlier<sensors::IMU_GYRO_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
-      ++imu_outliers_;
-      innovation_norm = innovation_pre.norm();
-      return false;
-    }
-  }
-
-  double roll_before_gyro = 0.0;
-  double pitch_before_gyro = 0.0;
-  double yaw_before_gyro = 0.0;
-  const State& state_before_gyro = ukf_.state();
-  quat_to_euler(
-    state_before_gyro.x[QW], state_before_gyro.x[QX],
-    state_before_gyro.x[QY], state_before_gyro.x[QZ],
-    roll_before_gyro, pitch_before_gyro, yaw_before_gyro);
-
-  sensors::ImuGyroMeasurement gyro_innovation =
-    ukf_.update<sensors::IMU_GYRO_DIM>(z_gyro, sensors::imu_gyro_measurement_function, R_gyro);
-  set_quaternion_from_rpy(
-    ukf_.mutable_state().x, roll_before_gyro, pitch_before_gyro, yaw_before_gyro);
-  combined_innovation.template segment<sensors::IMU_GYRO_DIM>(0) = gyro_innovation;
-
-  sensors::ImuAccelMeasurement z_accel;
-  z_accel[0] = ax; z_accel[1] = ay; z_accel[2] = az;
-  sensors::ImuAccelNoiseMatrix R_accel = sensors::imu_accel_noise_matrix(R);
-  auto h_accel = sensors::imu_accel_no_yaw_measurement_function(config_.imu.lever_arm);
-
-  if (reject_outliers) {
-    sensors::ImuAccelMeasurement innovation_pre;
-    sensors::ImuAccelNoiseMatrix S;
-    ukf_.predict_measurement<sensors::IMU_ACCEL_DIM>(
-      z_accel, h_accel, R_accel, innovation_pre, S);
-    if (is_outlier<sensors::IMU_ACCEL_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
-      ++imu_outliers_;
-      innovation_norm = combined_innovation.norm();
-      return true;
-    }
-  }
-
-  const double yaw_before_accel = ukf_.state().yaw();
-  sensors::ImuAccelMeasurement accel_innovation =
-    ukf_.update<sensors::IMU_ACCEL_DIM>(z_accel, h_accel, R_accel);
-
-  State& state = ukf_.mutable_state();
-  double roll_after = 0.0;
-  double pitch_after = 0.0;
-  double yaw_after = 0.0;
-  quat_to_euler(
-    state.x[QW], state.x[QX], state.x[QY], state.x[QZ],
-    roll_after, pitch_after, yaw_after);
-  set_quaternion_from_rpy(state.x, roll_after, pitch_after, yaw_before_accel);
-
-  combined_innovation.template segment<sensors::IMU_ACCEL_DIM>(3) = accel_innovation;
-  innovation_norm = combined_innovation.norm();
-
-  if (adapt_noise) {
-    adapt_R<sensors::IMU_DIM>(
-      R_imu_, R_imu_floor_, imu_innovations_, combined_innovation, config_.adaptive_imu);
-  }
-
-  return true;
-}
-
 void FusionCore::update_imu(
   double timestamp_seconds,
   double wx, double wy, double wz,
@@ -530,6 +421,10 @@ void FusionCore::update_imu(
     throw std::runtime_error("FusionCore: update_imu() called before init()");
 
   predict_to(timestamp_seconds);
+
+  sensors::ImuMeasurement z;
+  z[0] = wx; z[1] = wy; z[2] = wz;
+  z[3] = ax; z[4] = ay; z[5] = az;
 
   // Use adaptive R if initialized, else config default
   sensors::ImuNoiseMatrix R = adaptive_initialized_ ? R_imu_ : sensors::imu_noise_matrix(config_.imu);
@@ -542,20 +437,35 @@ void FusionCore::update_imu(
     R(2, 2) *= config_.gnss_coast_imu_wz_scale;
   }
 
-  double innovation_norm = 0.0;
-  const bool accepted = apply_imu_measurement(
-    wx, wy, wz,
-    ax, ay, az,
-    R,
-    config_.outlier_rejection,
-    true,
-    innovation_norm);
-  if (!accepted) {
-    last_imu_time_ = timestamp_seconds;
-    return;
+  // Pick the measurement function: plain if IMU is at base_link origin,
+  // else the lever-arm-aware variant that adds ω×(ω×r) centripetal to the
+  // predicted accel. Both produce identical output when lever_arm == 0, so
+  // we could always use the lambda; the explicit fork avoids the lambda
+  // allocation on the hot path when no lever arm is configured.
+  const bool use_imu_lever_arm = !config_.imu.lever_arm.is_zero();
+  auto h_imu = use_imu_lever_arm
+    ? sensors::imu_measurement_function_with_lever_arm(config_.imu.lever_arm)
+    : std::function<sensors::ImuMeasurement(const StateVector&)>(
+        sensors::imu_measurement_function);
+
+  // Mahalanobis outlier rejection for IMU
+  if (config_.outlier_rejection) {
+    sensors::ImuMeasurement innovation_pre;
+    sensors::ImuNoiseMatrix S;
+    ukf_.predict_measurement<sensors::IMU_DIM>(z, h_imu, R, innovation_pre, S);
+    if (is_outlier<sensors::IMU_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
+      ++imu_outliers_;
+      last_imu_time_ = timestamp_seconds;
+      return;
+    }
   }
 
-  last_imu_innovation_norm_ = innovation_norm;
+  auto innovation = ukf_.update<sensors::IMU_DIM>(z, h_imu, R);
+
+  last_imu_innovation_norm_ = innovation.norm();
+
+  // Track innovation for adaptive noise estimation
+  adapt_R<sensors::IMU_DIM>(R_imu_, R_imu_floor_, imu_innovations_, innovation, config_.adaptive_imu);
 
   // Save snapshot for delay compensation
   save_snapshot();
@@ -591,108 +501,71 @@ void FusionCore::update_imu_orientation(
 
   sensors::ImuOrientationParams fallback;
 
-  // Fuse attitude in two independent pieces:
-  //   - roll/pitch: 2-DOF tilt measurement, always valid for IMU orientation
-  //   - yaw: 1-DOF heading measurement, only valid for magnetometer-backed IMUs
-  //
-  // The previous 3D Euler update let roll/pitch/yaw sigma points interact through
-  // a single UKF measurement. With broad startup quaternion covariance, that path
-  // could move yaw tens of degrees while the IMU yaw, gyro, and encoders were all
-  // stationary. Splitting yaw onto the same 1D heading path used by GNSS/mag keeps
-  // the magnetometer authority without the Euler cross-coupling.
-  sensors::ImuRPNoiseMatrix R_rp;
-  if (orientation_cov != nullptr) {
-    R_rp(0,0) = (orientation_cov[0] > 0.0) ? orientation_cov[0] : fallback.roll_noise  * fallback.roll_noise;
-    R_rp(1,1) = (orientation_cov[4] > 0.0) ? orientation_cov[4] : fallback.pitch_noise * fallback.pitch_noise;
-    R_rp(0,1) = R_rp(1,0) = 0.0;
-  } else if (adaptive_initialized_) {
-    R_rp(0,0) = R_imu_orient_(0,0);
-    R_rp(1,1) = R_imu_orient_(1,1);
-    R_rp(0,1) = R_rp(1,0) = 0.0;
-  } else {
-    R_rp = sensors::imu_rp_noise_matrix(fallback);
-  }
-
-  sensors::ImuRPMeasurement z_rp;
-  z_rp[0] = roll;
-  z_rp[1] = pitch;
-
-  constexpr unsigned int RP_ANGLE_DIMS = 0b11;  // roll and pitch are angular residuals.
-  bool rp_fused = true;
-  if (config_.outlier_rejection) {
-    sensors::ImuRPMeasurement innovation_pre;
-    sensors::ImuRPNoiseMatrix  S;
-    ukf_.predict_measurement<sensors::IMU_RP_DIM>(
-      z_rp, sensors::imu_rp_measurement_function, R_rp, innovation_pre, S, RP_ANGLE_DIMS);
-    if (is_outlier<sensors::IMU_RP_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
-      ++imu_outliers_;
-      rp_fused = false;
-    }
-  }
-
-  const double yaw_before_rp = ukf_.state().yaw();
-  if (rp_fused) {
-    ukf_.update<sensors::IMU_RP_DIM>(
-      z_rp, sensors::imu_rp_measurement_function, R_rp, RP_ANGLE_DIMS);
-    State& state = ukf_.mutable_state();
-    double roll_after = 0.0;
-    double pitch_after = 0.0;
-    double yaw_after = 0.0;
-    quat_to_euler(
-      state.x[QW], state.x[QX], state.x[QY], state.x[QZ],
-      roll_after, pitch_after, yaw_after);
-    set_quaternion_from_rpy(state.x, roll_after, pitch_after, yaw_before_rp);
-  }
-
-  bool yaw_fused = false;
-  if (config_.imu_has_magnetometer) {
-    sensors::GnssHdgMeasurement z_yaw;
-    z_yaw[0] = yaw;
-
-    sensors::GnssHdgNoiseMatrix R_yaw;
-    if (orientation_cov != nullptr && orientation_cov[8] > 0.0) {
-      R_yaw(0,0) = orientation_cov[8];
-    } else if (adaptive_initialized_) {
-      R_yaw(0,0) = R_imu_orient_(2,2);
+  if (!config_.imu_has_magnetometer) {
+    // 6-axis IMU: fuse roll and pitch only. Yaw is omitted (not estimated from gyro integral).
+    // A 3D update with R(yaw)=1e6 would still couple roll/pitch corrections into QZ
+    // via the Kalman cross-covariance; a 2D update eliminates the channel entirely.
+    sensors::ImuRPNoiseMatrix R_rp;
+    if (orientation_cov != nullptr) {
+      R_rp(0,0) = (orientation_cov[0] > 0.0) ? orientation_cov[0] : fallback.roll_noise  * fallback.roll_noise;
+      R_rp(1,1) = (orientation_cov[4] > 0.0) ? orientation_cov[4] : fallback.pitch_noise * fallback.pitch_noise;
+      R_rp(0,1) = R_rp(1,0) = 0.0;
     } else {
-      R_yaw(0,0) = fallback.yaw_noise * fallback.yaw_noise;
+      R_rp = sensors::imu_rp_noise_matrix(fallback);
     }
 
-    constexpr unsigned int YAW_ANGLE_DIMS = 0b1;
-    bool yaw_rejected = false;
+    sensors::ImuRPMeasurement z_rp;
+    z_rp[0] = roll;
+    z_rp[1] = pitch;
+
     if (config_.outlier_rejection) {
-      sensors::GnssHdgMeasurement innovation_pre;
-      sensors::GnssHdgNoiseMatrix S;
-      ukf_.predict_measurement<sensors::GNSS_HDG_DIM>(
-        z_yaw, sensors::gnss_hdg_measurement_function, R_yaw,
-        innovation_pre, S, YAW_ANGLE_DIMS);
-      if (is_outlier<sensors::GNSS_HDG_DIM>(innovation_pre, S, config_.outlier_threshold_hdg)) {
+      sensors::ImuRPMeasurement innovation_pre;
+      sensors::ImuRPNoiseMatrix  S;
+      ukf_.predict_measurement<sensors::IMU_RP_DIM>(
+        z_rp, sensors::imu_rp_measurement_function, R_rp, innovation_pre, S);
+      if (is_outlier<sensors::IMU_RP_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
         ++imu_outliers_;
-        yaw_rejected = true;
+        last_imu_time_ = timestamp_seconds;
+        return;
       }
     }
 
-    if (!yaw_rejected) {
-      double roll_before_yaw = 0.0;
-      double pitch_before_yaw = 0.0;
-      double yaw_before_yaw = 0.0;
-      const State& state_before = ukf_.state();
-      quat_to_euler(
-        state_before.x[QW], state_before.x[QX], state_before.x[QY], state_before.x[QZ],
-        roll_before_yaw, pitch_before_yaw, yaw_before_yaw);
-      ukf_.update<sensors::GNSS_HDG_DIM>(
-        z_yaw, sensors::gnss_hdg_measurement_function, R_yaw, YAW_ANGLE_DIMS);
-      set_quaternion_from_rpy(
-        ukf_.mutable_state().x, roll_before_yaw, pitch_before_yaw, yaw);
-      yaw_fused = true;
+    ukf_.update<sensors::IMU_RP_DIM>(z_rp, sensors::imu_rp_measurement_function, R_rp);
+
+  } else {
+    // 9-axis IMU with magnetometer: fuse roll, pitch, and yaw.
+    sensors::ImuOrientationNoiseMatrix R;
+    if (orientation_cov != nullptr) {
+      R = sensors::imu_orientation_noise_from_covariance(orientation_cov, fallback);
+    } else {
+      R = adaptive_initialized_ ? R_imu_orient_ : sensors::imu_orientation_noise_matrix(fallback);
     }
+
+    if (config_.outlier_rejection) {
+      sensors::ImuOrientationMeasurement innovation_pre;
+      sensors::ImuOrientationNoiseMatrix S;
+      ukf_.predict_measurement<sensors::IMU_ORIENTATION_DIM>(
+        z, sensors::imu_orientation_measurement_function, R, innovation_pre, S);
+      if (is_outlier<sensors::IMU_ORIENTATION_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
+        ++imu_outliers_;
+        last_imu_time_ = timestamp_seconds;
+        return;
+      }
+    }
+
+    constexpr unsigned int IMU_ORIENT_ANGLE_DIMS = 0b100;  // bit 2 = yaw
+    auto imu_orient_innovation = ukf_.update<sensors::IMU_ORIENTATION_DIM>(
+      z, sensors::imu_orientation_measurement_function, R, IMU_ORIENT_ANGLE_DIMS);
+
+    adapt_R<sensors::IMU_ORIENTATION_DIM>(
+      R_imu_orient_, R_imu_orient_floor_, imu_orient_innovations_, imu_orient_innovation, config_.adaptive_imu);
   }
 
   // IMU orientation validates heading ONLY if the IMU has a magnetometer.
   // 6-axis IMUs integrate gyro for yaw: this drifts and is not a valid
   // heading reference. 9-axis IMUs with magnetometer give true heading.
   // peci1 fix: don't blindly trust IMU orientation as heading source.
-  if (yaw_fused) {
+  if (config_.imu_has_magnetometer) {
     if (!heading_validated_ ||
         heading_source_ == HeadingSource::GPS_TRACK) {
       heading_validated_ = true;
@@ -1069,18 +942,8 @@ bool FusionCore::apply_gnss_update(
           }
 
           if (fuse) {
-            double roll_before_hdg = 0.0;
-            double pitch_before_hdg = 0.0;
-            double yaw_before_hdg = 0.0;
-            const State& state_before_hdg = ukf_.state();
-            quat_to_euler(
-              state_before_hdg.x[QW], state_before_hdg.x[QX],
-              state_before_hdg.x[QY], state_before_hdg.x[QZ],
-              roll_before_hdg, pitch_before_hdg, yaw_before_hdg);
             ukf_.update<sensors::GNSS_HDG_DIM>(
               z_hdg, sensors::gnss_hdg_measurement_function, R_hdg, HDG_ANGLE_DIMS);
-            keep_roll_pitch_after_yaw_update(
-              ukf_.mutable_state(), roll_before_hdg, pitch_before_hdg);
             gps_track_hdg_fused_ = true;
 
             if (!heading_validated_) {
@@ -1137,19 +1000,8 @@ bool FusionCore::update_gnss_heading(
     }
   }
 
-  double roll_before_hdg = 0.0;
-  double pitch_before_hdg = 0.0;
-  double yaw_before_hdg = 0.0;
-  const State& state_before_hdg = ukf_.state();
-  quat_to_euler(
-    state_before_hdg.x[QW], state_before_hdg.x[QX],
-    state_before_hdg.x[QY], state_before_hdg.x[QZ],
-    roll_before_hdg, pitch_before_hdg, yaw_before_hdg);
-
   ukf_.update<sensors::GNSS_HDG_DIM>(
     z, sensors::gnss_hdg_measurement_function, R, HDG_ANGLE_DIMS);
-  set_quaternion_from_rpy(
-    ukf_.mutable_state().x, roll_before_hdg, pitch_before_hdg, heading.heading_rad);
 
   // Dual antenna heading is the strongest possible heading validation
   // Override any weaker source
@@ -1359,19 +1211,8 @@ bool FusionCore::update_magnetometer(
     }
   }
 
-  double roll_before_mag = 0.0;
-  double pitch_before_mag = 0.0;
-  double yaw_before_mag = 0.0;
-  const State& state_before_mag = ukf_.state();
-  quat_to_euler(
-    state_before_mag.x[QW], state_before_mag.x[QX],
-    state_before_mag.x[QY], state_before_mag.x[QZ],
-    roll_before_mag, pitch_before_mag, yaw_before_mag);
-
   ukf_.update<sensors::GNSS_HDG_DIM>(
     z, sensors::gnss_hdg_measurement_function, R, MAG_ANGLE_DIMS);
-  set_quaternion_from_rpy(
-    ukf_.mutable_state().x, roll_before_mag, pitch_before_mag, yaw_mag);
 
   // Magnetometer immediately provides valid heading.
   // Upgrade from GPS_TRACK (which requires 5m of motion) but never downgrade

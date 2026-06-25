@@ -127,7 +127,7 @@ TEST(GNSSManagerTest, StefanFullConfigurationWithGNSSCorrection) {
   FusionCoreConfig config;
   config.ukf.q_position    = 0.01;
   config.ukf.q_velocity    = 0.01;
-  config.ukf.q_orientation = 1e-9;
+  config.ukf.q_orientation = 0.01;
   config.ukf.q_angular_vel = 0.01;
   config.ukf.q_acceleration= 0.1;
   config.ukf.q_gyro_bias   = 1e-5;
@@ -138,10 +138,6 @@ TEST(GNSSManagerTest, StefanFullConfigurationWithGNSSCorrection) {
   State initial;
   initial.x = StateVector::Zero();
   initial.P = StateMatrix::Identity() * 0.1;
-  initial.P(QW,QW) = 1e-8;
-  initial.P(QX,QX) = 1e-8;
-  initial.P(QY,QY) = 1e-8;
-  initial.P(QZ,QZ) = 1e-8;
   fc.init(initial, 0.0);
 
   GnssFix fix;
