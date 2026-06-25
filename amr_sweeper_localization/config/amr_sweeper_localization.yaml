@@ -107,7 +107,7 @@ fusioncore:
     outlier_threshold_vslam:               22.46                  # VSLAM innovation threshold used for rejection.
 
     # -- Adaptive noise --------------------------------------------------------
-    adaptive.imu:                          true                   # Let FusionCore adapt IMU measurement noise online.
+    adaptive.imu:                          false                  # Let FusionCore adapt IMU measurement noise online.
     adaptive.encoder:                      true                   # Let FusionCore adapt wheel-odometry noise online.
     adaptive.gnss:                         true                   # Let FusionCore adapt GNSS noise online.
     adaptive.ground_constraint:            true                   # Let FusionCore adapt ground-constraint noise online.
