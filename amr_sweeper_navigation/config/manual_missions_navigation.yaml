@@ -254,8 +254,8 @@ velocity_smoother:
     scale_velocities:                false                               # Uniformly scale velocity components when one axis would violate limits. Common examples often use false.
     feedback:                        "OPEN_LOOP"                         # Use commanded velocity instead of odometry feedback for smoothing. Common default/example is OPEN_LOOP.
 
-    max_velocity:                    [0.26, 0.0, 0.3]                    # Maximum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was 0.25; common examples are often [0.5, 0.0, 2.5].
-    min_velocity:                    [-0.26, 0.0, -0.3]                  # Minimum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was -0.25; common examples mirror max limits.
+    max_velocity:                    [0.15, 0.0, 0.3]                    # Maximum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was 0.25; common examples are often [0.5, 0.0, 2.5].
+    min_velocity:                    [-0.15, 0.0, -0.3]                  # Minimum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was -0.25; common examples mirror max limits.
     max_accel:                       [1.0, 0.0, 0.8]                     # Maximum acceleration [x, y, theta] in [m/s^2, m/s^2, rad/s^2]. X was 2.5; common examples are often [2.5, 0.0, 3.2].
     max_decel:                       [-1.0, 0.0, -0.8]                   # Maximum deceleration [x, y, theta] in [m/s^2, m/s^2, rad/s^2]. X was -2.5; common examples mirror accel limits.
 
