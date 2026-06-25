@@ -75,6 +75,7 @@ def _launch_fusioncore(context, *args, **kwargs):
 
     fusion_overrides = {
         "use_sim_time": use_sim_time,
+        "autostart": False,
         "base_frame": "base_link",
         "odom_frame": "odom",
         "imu.topic": _primary_topic_or_disabled(

@@ -334,6 +334,7 @@ def _build_launches(context):
 
         fusion_overrides = {
             "use_sim_time": use_sim_time_bool,
+            "autostart": False,
             "base_frame": "base_link",
             "odom_frame": "odom",
             "imu.topic": _primary_topic_or_disabled(
@@ -400,16 +401,20 @@ def _build_launches(context):
             ],
         )
 
-        activate_fusioncore = TimerAction(
-            period=4.0,
-            actions=[
-                EmitEvent(
-                    event=ChangeState(
-                        lifecycle_node_matcher=lambda action: action is fusioncore_node,
-                        transition_id=Transition.TRANSITION_ACTIVATE,
+        activate_fusioncore = RegisterEventHandler(
+            OnStateTransition(
+                target_lifecycle_node=fusioncore_node,
+                start_state="configuring",
+                goal_state="inactive",
+                entities=[
+                    EmitEvent(
+                        event=ChangeState(
+                            lifecycle_node_matcher=lambda action: action is fusioncore_node,
+                            transition_id=Transition.TRANSITION_ACTIVATE,
+                        )
                     )
-                )
-            ],
+                ],
+            )
         )
 
         actions.extend([odometry_projection_node, fusioncore_node, configure_fusioncore, activate_fusioncore])
