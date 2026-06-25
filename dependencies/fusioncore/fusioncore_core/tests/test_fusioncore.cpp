@@ -31,6 +31,14 @@ double normalize_angle(double angle)
   return angle;
 }
 
+void gravity_for_rp(double roll, double pitch, double& ax, double& ay, double& az)
+{
+  constexpr double g = 9.80665;
+  ax = -std::sin(pitch) * g;
+  ay = std::sin(roll) * std::cos(pitch) * g;
+  az = std::cos(roll) * std::cos(pitch) * g;
+}
+
 }  // namespace
 
 // ─── Test 1: Cannot update before init ───────────────────────────────────────
@@ -247,11 +255,75 @@ TEST(FusionCoreTest, StationaryNineAxisIMUYawDoesNotWanderWithBroadStartupCovari
   set_quaternion_from_rpy(initial, roll, pitch, yaw);
   fc.init(initial, 0.0);
 
+  double ax = 0.0;
+  double ay = 0.0;
+  double az = 0.0;
+  gravity_for_rp(roll, pitch, ax, ay, az);
+
   for (int i = 1; i <= 500; ++i) {
     const double t = i * 0.02;
+    fc.update_imu(t, 0.0, 0.0, 0.0, ax, ay, az);
     fc.update_imu_orientation(t, roll, pitch, yaw, nullptr);
     fc.update_encoder(t, 0.0, 0.0, 0.0);
     fc.update_zupt(t, 0.01);
+  }
+
+  EXPECT_NEAR(normalize_angle(fc.get_state().yaw() - yaw), 0.0, 0.02);
+}
+
+TEST(FusionCoreTest, RawAccelerometerGravityDoesNotObserveYaw) {
+  FusionCoreConfig config;
+  config.imu_has_magnetometer = false;
+  config.adaptive_imu = false;
+
+  FusionCore fc(config);
+
+  constexpr double roll = 0.63 * M_PI / 180.0;
+  constexpr double pitch = 4.72 * M_PI / 180.0;
+  constexpr double yaw = 44.37 * M_PI / 180.0;
+
+  State initial;
+  initial.P = StateMatrix::Identity() * 0.1;
+  set_quaternion_from_rpy(initial, roll, pitch, yaw);
+  fc.init(initial, 0.0);
+
+  double ax = 0.0;
+  double ay = 0.0;
+  double az = 0.0;
+  gravity_for_rp(roll, pitch, ax, ay, az);
+
+  for (int i = 1; i <= 500; ++i) {
+    const double t = i * 0.02;
+    fc.update_imu(t, 0.0, 0.0, 0.0, ax, ay, az);
+    fc.update_imu_orientation(t, roll, pitch, yaw + M_PI, nullptr);
+    fc.update_encoder(t, 0.0, 0.0, 0.0);
+    fc.update_zupt(t, 0.01);
+  }
+
+  EXPECT_NEAR(normalize_angle(fc.get_state().yaw() - yaw), 0.0, 0.02);
+}
+
+TEST(FusionCoreTest, CompassHeadingCorrectsYawWhenImuMagnetometerModeIsOff) {
+  FusionCoreConfig config;
+  config.imu_has_magnetometer = false;
+  config.adaptive_imu = false;
+
+  FusionCore fc(config);
+
+  constexpr double yaw = 44.37 * M_PI / 180.0;
+
+  State initial;
+  initial.P = StateMatrix::Identity() * 0.1;
+  fc.init(initial, 0.0);
+
+  for (int i = 1; i <= 100; ++i) {
+    const double t = i * 0.02;
+    fc.update_imu(t, 0.0, 0.0, 0.0, 0.0, 0.0, 9.80665);
+    fusioncore::sensors::GnssHeading heading;
+    heading.heading_rad = yaw;
+    heading.accuracy_rad = 0.02;
+    heading.valid = true;
+    fc.update_gnss_heading(t, heading);
   }
 
   EXPECT_NEAR(normalize_angle(fc.get_state().yaw() - yaw), 0.0, 0.02);

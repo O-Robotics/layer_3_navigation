@@ -1,9 +1,29 @@
 #include "fusioncore/fusioncore.hpp"
 #include "fusioncore/sensors/imu.hpp"
+#include <algorithm>
 #include <stdexcept>
 #include <cmath>
 
 namespace fusioncore {
+
+namespace {
+
+void set_quaternion_from_rpy(StateVector& x, double roll, double pitch, double yaw)
+{
+  const double cy = std::cos(yaw * 0.5);
+  const double sy = std::sin(yaw * 0.5);
+  const double cp = std::cos(pitch * 0.5);
+  const double sp = std::sin(pitch * 0.5);
+  const double cr = std::cos(roll * 0.5);
+  const double sr = std::sin(roll * 0.5);
+
+  x[QW] = cr * cp * cy + sr * sp * sy;
+  x[QX] = sr * cp * cy - cr * sp * sy;
+  x[QY] = cr * sp * cy + sr * cp * sy;
+  x[QZ] = cr * cp * sy - sr * sp * cy;
+}
+
+}  // namespace
 
 // ─── Adaptive noise covariance implementation ─────────────────────────────
 
@@ -272,18 +292,14 @@ bool FusionCore::apply_delayed_measurement(
       ukf_.predict(dt);
       last_timestamp_ = imu.timestamp;
 
-      // Re-apply the IMU measurement so the filter sees the real dynamics.
-      // Pick the same measurement function as update_imu() to keep the
-      // replay consistent with the original update (lever-arm aware when
-      // the IMU is offset from base_link).
-      sensors::ImuMeasurement z;
-      z[0] = imu.wx; z[1] = imu.wy; z[2] = imu.wz;
-      z[3] = imu.ax; z[4] = imu.ay; z[5] = imu.az;
-      auto h_imu_replay = !config_.imu.lever_arm.is_zero()
-        ? sensors::imu_measurement_function_with_lever_arm(config_.imu.lever_arm)
-        : std::function<sensors::ImuMeasurement(const StateVector&)>(
-            sensors::imu_measurement_function);
-      ukf_.update<sensors::IMU_DIM>(z, h_imu_replay, imu.R);
+      double replay_innovation_norm = 0.0;
+      apply_imu_measurement(
+        imu.wx, imu.wy, imu.wz,
+        imu.ax, imu.ay, imu.az,
+        imu.R,
+        false,
+        false,
+        replay_innovation_norm);
       replayed_any = true;
     }
   }
@@ -412,6 +428,77 @@ void FusionCore::update_distance_traveled(double x, double y, double pre_update_
   }
 }
 
+bool FusionCore::apply_imu_measurement(
+  double wx, double wy, double wz,
+  double ax, double ay, double az,
+  const sensors::ImuNoiseMatrix& R,
+  bool reject_outliers,
+  bool adapt_noise,
+  double& innovation_norm)
+{
+  sensors::ImuMeasurement combined_innovation = sensors::ImuMeasurement::Zero();
+
+  sensors::ImuGyroMeasurement z_gyro;
+  z_gyro[0] = wx; z_gyro[1] = wy; z_gyro[2] = wz;
+  sensors::ImuGyroNoiseMatrix R_gyro = sensors::imu_gyro_noise_matrix(R);
+
+  if (reject_outliers) {
+    sensors::ImuGyroMeasurement innovation_pre;
+    sensors::ImuGyroNoiseMatrix S;
+    ukf_.predict_measurement<sensors::IMU_GYRO_DIM>(
+      z_gyro, sensors::imu_gyro_measurement_function, R_gyro, innovation_pre, S);
+    if (is_outlier<sensors::IMU_GYRO_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
+      ++imu_outliers_;
+      innovation_norm = innovation_pre.norm();
+      return false;
+    }
+  }
+
+  sensors::ImuGyroMeasurement gyro_innovation =
+    ukf_.update<sensors::IMU_GYRO_DIM>(z_gyro, sensors::imu_gyro_measurement_function, R_gyro);
+  combined_innovation.template segment<sensors::IMU_GYRO_DIM>(0) = gyro_innovation;
+
+  sensors::ImuAccelMeasurement z_accel;
+  z_accel[0] = ax; z_accel[1] = ay; z_accel[2] = az;
+  sensors::ImuAccelNoiseMatrix R_accel = sensors::imu_accel_noise_matrix(R);
+  auto h_accel = sensors::imu_accel_no_yaw_measurement_function(config_.imu.lever_arm);
+
+  if (reject_outliers) {
+    sensors::ImuAccelMeasurement innovation_pre;
+    sensors::ImuAccelNoiseMatrix S;
+    ukf_.predict_measurement<sensors::IMU_ACCEL_DIM>(
+      z_accel, h_accel, R_accel, innovation_pre, S);
+    if (is_outlier<sensors::IMU_ACCEL_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
+      ++imu_outliers_;
+      innovation_norm = combined_innovation.norm();
+      return true;
+    }
+  }
+
+  const double yaw_before_accel = ukf_.state().yaw();
+  sensors::ImuAccelMeasurement accel_innovation =
+    ukf_.update<sensors::IMU_ACCEL_DIM>(z_accel, h_accel, R_accel);
+
+  State& state = ukf_.mutable_state();
+  double roll_after = 0.0;
+  double pitch_after = 0.0;
+  double yaw_after = 0.0;
+  quat_to_euler(
+    state.x[QW], state.x[QX], state.x[QY], state.x[QZ],
+    roll_after, pitch_after, yaw_after);
+  set_quaternion_from_rpy(state.x, roll_after, pitch_after, yaw_before_accel);
+
+  combined_innovation.template segment<sensors::IMU_ACCEL_DIM>(3) = accel_innovation;
+  innovation_norm = combined_innovation.norm();
+
+  if (adapt_noise) {
+    adapt_R<sensors::IMU_DIM>(
+      R_imu_, R_imu_floor_, imu_innovations_, combined_innovation, config_.adaptive_imu);
+  }
+
+  return true;
+}
+
 void FusionCore::update_imu(
   double timestamp_seconds,
   double wx, double wy, double wz,
@@ -421,10 +508,6 @@ void FusionCore::update_imu(
     throw std::runtime_error("FusionCore: update_imu() called before init()");
 
   predict_to(timestamp_seconds);
-
-  sensors::ImuMeasurement z;
-  z[0] = wx; z[1] = wy; z[2] = wz;
-  z[3] = ax; z[4] = ay; z[5] = az;
 
   // Use adaptive R if initialized, else config default
   sensors::ImuNoiseMatrix R = adaptive_initialized_ ? R_imu_ : sensors::imu_noise_matrix(config_.imu);
@@ -437,35 +520,20 @@ void FusionCore::update_imu(
     R(2, 2) *= config_.gnss_coast_imu_wz_scale;
   }
 
-  // Pick the measurement function: plain if IMU is at base_link origin,
-  // else the lever-arm-aware variant that adds ω×(ω×r) centripetal to the
-  // predicted accel. Both produce identical output when lever_arm == 0, so
-  // we could always use the lambda; the explicit fork avoids the lambda
-  // allocation on the hot path when no lever arm is configured.
-  const bool use_imu_lever_arm = !config_.imu.lever_arm.is_zero();
-  auto h_imu = use_imu_lever_arm
-    ? sensors::imu_measurement_function_with_lever_arm(config_.imu.lever_arm)
-    : std::function<sensors::ImuMeasurement(const StateVector&)>(
-        sensors::imu_measurement_function);
-
-  // Mahalanobis outlier rejection for IMU
-  if (config_.outlier_rejection) {
-    sensors::ImuMeasurement innovation_pre;
-    sensors::ImuNoiseMatrix S;
-    ukf_.predict_measurement<sensors::IMU_DIM>(z, h_imu, R, innovation_pre, S);
-    if (is_outlier<sensors::IMU_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
-      ++imu_outliers_;
-      last_imu_time_ = timestamp_seconds;
-      return;
-    }
+  double innovation_norm = 0.0;
+  const bool accepted = apply_imu_measurement(
+    wx, wy, wz,
+    ax, ay, az,
+    R,
+    config_.outlier_rejection,
+    true,
+    innovation_norm);
+  if (!accepted) {
+    last_imu_time_ = timestamp_seconds;
+    return;
   }
 
-  auto innovation = ukf_.update<sensors::IMU_DIM>(z, h_imu, R);
-
-  last_imu_innovation_norm_ = innovation.norm();
-
-  // Track innovation for adaptive noise estimation
-  adapt_R<sensors::IMU_DIM>(R_imu_, R_imu_floor_, imu_innovations_, innovation, config_.adaptive_imu);
+  last_imu_innovation_norm_ = innovation_norm;
 
   // Save snapshot for delay compensation
   save_snapshot();

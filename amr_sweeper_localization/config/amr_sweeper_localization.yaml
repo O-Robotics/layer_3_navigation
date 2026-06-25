@@ -20,7 +20,7 @@ fusioncore:
     imu.topic:                              "imu/data_raw"        # Primary IMU topic consumed by FusionCore.
     imu.gyro_noise:                         0.005                 # Gyroscope white-noise sigma used by the filter model.
     imu.accel_noise:                        0.1                   # Accelerometer white-noise sigma used by the filter model.
-    imu.has_magnetometer:                   true                  # Tell FusionCore the IMU includes magnetometer-backed orientation information.
+    imu.has_magnetometer:                   false                 # Fuse IMU roll/pitch only; yaw is supplied separately via compass azimuth.
     imu.remove_gravitational_acceleration:  false                 # Keep raw acceleration intact because the driver/controller handle gravity conventions.
     imu.frame_id:                           "imu_link"            # Physical frame in which the IMU measurements are expressed.
     imu.lever_arm_x:                        0.0                   # IMU X offset from the fused body origin in meters.
@@ -55,7 +55,7 @@ fusioncore:
     gnss.min_fix_type:                      3                     # Require a 3D-quality fix or better before fusion.
     gnss.fix2_topic:                        ""                    # No second GNSS receiver is configured by default.
     gnss.heading_topic:                     ""                    # No dedicated GNSS heading topic is configured.
-    gnss.azimuth_topic:                     ""                    # No GNSS azimuth topic is configured.
+    gnss.azimuth_topic:                     "/amr_sweeper/imu/azimuth" # IMU compass yaw published as REP-145 azimuth.
     gnss.lever_arm_x:                       0.0                   # Primary GNSS antenna X offset from the fused body origin in meters.
     gnss.lever_arm_y:                       0.0                   # Primary GNSS antenna Y offset from the fused body origin in meters.
     gnss.lever_arm_z:                       0.0                   # Primary GNSS antenna Z offset from the fused body origin in meters.
