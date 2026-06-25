@@ -501,71 +501,90 @@ void FusionCore::update_imu_orientation(
 
   sensors::ImuOrientationParams fallback;
 
-  if (!config_.imu_has_magnetometer) {
-    // 6-axis IMU: fuse roll and pitch only. Yaw is omitted (not estimated from gyro integral).
-    // A 3D update with R(yaw)=1e6 would still couple roll/pitch corrections into QZ
-    // via the Kalman cross-covariance; a 2D update eliminates the channel entirely.
-    sensors::ImuRPNoiseMatrix R_rp;
-    if (orientation_cov != nullptr) {
-      R_rp(0,0) = (orientation_cov[0] > 0.0) ? orientation_cov[0] : fallback.roll_noise  * fallback.roll_noise;
-      R_rp(1,1) = (orientation_cov[4] > 0.0) ? orientation_cov[4] : fallback.pitch_noise * fallback.pitch_noise;
-      R_rp(0,1) = R_rp(1,0) = 0.0;
-    } else {
-      R_rp = sensors::imu_rp_noise_matrix(fallback);
-    }
-
-    sensors::ImuRPMeasurement z_rp;
-    z_rp[0] = roll;
-    z_rp[1] = pitch;
-
-    if (config_.outlier_rejection) {
-      sensors::ImuRPMeasurement innovation_pre;
-      sensors::ImuRPNoiseMatrix  S;
-      ukf_.predict_measurement<sensors::IMU_RP_DIM>(
-        z_rp, sensors::imu_rp_measurement_function, R_rp, innovation_pre, S);
-      if (is_outlier<sensors::IMU_RP_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
-        ++imu_outliers_;
-        last_imu_time_ = timestamp_seconds;
-        return;
-      }
-    }
-
-    ukf_.update<sensors::IMU_RP_DIM>(z_rp, sensors::imu_rp_measurement_function, R_rp);
-
+  // Fuse attitude in two independent pieces:
+  //   - roll/pitch: 2-DOF tilt measurement, always valid for IMU orientation
+  //   - yaw: 1-DOF heading measurement, only valid for magnetometer-backed IMUs
+  //
+  // The previous 3D Euler update let roll/pitch/yaw sigma points interact through
+  // a single UKF measurement. With broad startup quaternion covariance, that path
+  // could move yaw tens of degrees while the IMU yaw, gyro, and encoders were all
+  // stationary. Splitting yaw onto the same 1D heading path used by GNSS/mag keeps
+  // the magnetometer authority without the Euler cross-coupling.
+  sensors::ImuRPNoiseMatrix R_rp;
+  if (orientation_cov != nullptr) {
+    R_rp(0,0) = (orientation_cov[0] > 0.0) ? orientation_cov[0] : fallback.roll_noise  * fallback.roll_noise;
+    R_rp(1,1) = (orientation_cov[4] > 0.0) ? orientation_cov[4] : fallback.pitch_noise * fallback.pitch_noise;
+    R_rp(0,1) = R_rp(1,0) = 0.0;
+  } else if (adaptive_initialized_) {
+    R_rp(0,0) = R_imu_orient_(0,0);
+    R_rp(1,1) = R_imu_orient_(1,1);
+    R_rp(0,1) = R_rp(1,0) = 0.0;
   } else {
-    // 9-axis IMU with magnetometer: fuse roll, pitch, and yaw.
-    sensors::ImuOrientationNoiseMatrix R;
-    if (orientation_cov != nullptr) {
-      R = sensors::imu_orientation_noise_from_covariance(orientation_cov, fallback);
+    R_rp = sensors::imu_rp_noise_matrix(fallback);
+  }
+
+  sensors::ImuRPMeasurement z_rp;
+  z_rp[0] = roll;
+  z_rp[1] = pitch;
+
+  constexpr unsigned int RP_ANGLE_DIMS = 0b11;  // roll and pitch are angular residuals.
+  bool rp_fused = true;
+  if (config_.outlier_rejection) {
+    sensors::ImuRPMeasurement innovation_pre;
+    sensors::ImuRPNoiseMatrix  S;
+    ukf_.predict_measurement<sensors::IMU_RP_DIM>(
+      z_rp, sensors::imu_rp_measurement_function, R_rp, innovation_pre, S, RP_ANGLE_DIMS);
+    if (is_outlier<sensors::IMU_RP_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
+      ++imu_outliers_;
+      rp_fused = false;
+    }
+  }
+
+  if (rp_fused) {
+    ukf_.update<sensors::IMU_RP_DIM>(
+      z_rp, sensors::imu_rp_measurement_function, R_rp, RP_ANGLE_DIMS);
+  }
+
+  bool yaw_fused = false;
+  if (config_.imu_has_magnetometer) {
+    sensors::GnssHdgMeasurement z_yaw;
+    z_yaw[0] = yaw;
+
+    sensors::GnssHdgNoiseMatrix R_yaw;
+    if (orientation_cov != nullptr && orientation_cov[8] > 0.0) {
+      R_yaw(0,0) = orientation_cov[8];
+    } else if (adaptive_initialized_) {
+      R_yaw(0,0) = R_imu_orient_(2,2);
     } else {
-      R = adaptive_initialized_ ? R_imu_orient_ : sensors::imu_orientation_noise_matrix(fallback);
+      R_yaw(0,0) = fallback.yaw_noise * fallback.yaw_noise;
     }
 
+    constexpr unsigned int YAW_ANGLE_DIMS = 0b1;
+    bool yaw_rejected = false;
     if (config_.outlier_rejection) {
-      sensors::ImuOrientationMeasurement innovation_pre;
-      sensors::ImuOrientationNoiseMatrix S;
-      ukf_.predict_measurement<sensors::IMU_ORIENTATION_DIM>(
-        z, sensors::imu_orientation_measurement_function, R, innovation_pre, S);
-      if (is_outlier<sensors::IMU_ORIENTATION_DIM>(innovation_pre, S, config_.outlier_threshold_imu)) {
+      sensors::GnssHdgMeasurement innovation_pre;
+      sensors::GnssHdgNoiseMatrix S;
+      ukf_.predict_measurement<sensors::GNSS_HDG_DIM>(
+        z_yaw, sensors::gnss_hdg_measurement_function, R_yaw,
+        innovation_pre, S, YAW_ANGLE_DIMS);
+      if (is_outlier<sensors::GNSS_HDG_DIM>(innovation_pre, S, config_.outlier_threshold_hdg)) {
         ++imu_outliers_;
-        last_imu_time_ = timestamp_seconds;
-        return;
+        yaw_rejected = true;
       }
     }
 
-    constexpr unsigned int IMU_ORIENT_ANGLE_DIMS = 0b100;  // bit 2 = yaw
-    auto imu_orient_innovation = ukf_.update<sensors::IMU_ORIENTATION_DIM>(
-      z, sensors::imu_orientation_measurement_function, R, IMU_ORIENT_ANGLE_DIMS);
-
-    adapt_R<sensors::IMU_ORIENTATION_DIM>(
-      R_imu_orient_, R_imu_orient_floor_, imu_orient_innovations_, imu_orient_innovation, config_.adaptive_imu);
+    if (!yaw_rejected) {
+      ukf_.update<sensors::GNSS_HDG_DIM>(
+        z_yaw, sensors::gnss_hdg_measurement_function, R_yaw, YAW_ANGLE_DIMS);
+      yaw_fused = true;
+    }
   }
 
   // IMU orientation validates heading ONLY if the IMU has a magnetometer.
   // 6-axis IMUs integrate gyro for yaw: this drifts and is not a valid
   // heading reference. 9-axis IMUs with magnetometer give true heading.
   // peci1 fix: don't blindly trust IMU orientation as heading source.
-  if (config_.imu_has_magnetometer) {
+  if (yaw_fused) {
     if (!heading_validated_ ||
         heading_source_ == HeadingSource::GPS_TRACK) {
       heading_validated_ = true;

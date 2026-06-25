@@ -780,6 +780,7 @@ public:
         fusioncore::State initial;
         initial.x = fusioncore::StateVector::Zero();
         initial.P = fusioncore::StateMatrix::Identity() * 0.1;
+        keep_quaternion_covariance_tight(initial);
         initial.P(0,0) = 1000.0;
         initial.P(1,1) = 1000.0;
         initial.P(2,2) = 1000.0;
@@ -1071,6 +1072,13 @@ private:
     return out;
   }
 
+  static void keep_quaternion_covariance_tight(fusioncore::State& state) {
+    state.P(fusioncore::QW, fusioncore::QW) = 1e-8;
+    state.P(fusioncore::QX, fusioncore::QX) = 1e-8;
+    state.P(fusioncore::QY, fusioncore::QY) = 1e-8;
+    state.P(fusioncore::QZ, fusioncore::QZ) = 1e-8;
+  }
+
   void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
   {
     double t = rclcpp::Time(msg->header.stamp).seconds();
@@ -1112,6 +1120,7 @@ private:
       if (init_window_duration_ <= 0.0) {
         fusioncore::State initial;
         initial.P = fusioncore::StateMatrix::Identity() * 0.1;
+        keep_quaternion_covariance_tight(initial);
         initial.P(0,0) = 1000.0;
         initial.P(1,1) = 1000.0;
         initial.P(2,2) = 1000.0;
@@ -1226,6 +1235,7 @@ private:
         if (window_elapsed >= init_window_duration_) {
           fusioncore::State initial;
           initial.P = fusioncore::StateMatrix::Identity() * 0.1;
+          keep_quaternion_covariance_tight(initial);
           initial.P(0,0) = 1000.0;
           initial.P(1,1) = 1000.0;
           initial.P(2,2) = 1000.0;

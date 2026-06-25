@@ -3,6 +3,36 @@
 
 using namespace fusioncore;
 
+namespace {
+
+void set_quaternion_from_rpy(
+  State& state,
+  double roll,
+  double pitch,
+  double yaw)
+{
+  const double cy = std::cos(yaw * 0.5);
+  const double sy = std::sin(yaw * 0.5);
+  const double cp = std::cos(pitch * 0.5);
+  const double sp = std::sin(pitch * 0.5);
+  const double cr = std::cos(roll * 0.5);
+  const double sr = std::sin(roll * 0.5);
+
+  state.x[QW] = cr * cp * cy + sr * sp * sy;
+  state.x[QX] = sr * cp * cy - cr * sp * sy;
+  state.x[QY] = cr * sp * cy + sr * cp * sy;
+  state.x[QZ] = cr * cp * sy - sr * sp * cy;
+}
+
+double normalize_angle(double angle)
+{
+  while (angle > M_PI) angle -= 2.0 * M_PI;
+  while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
+}
+
+}  // namespace
+
 // ─── Test 1: Cannot update before init ───────────────────────────────────────
 
 TEST(FusionCoreTest, ThrowsIfNotInitialized) {
@@ -199,6 +229,32 @@ TEST(FusionCoreTest, NineAxisIMUYawFusedNormally) {
 
   // Yaw must have converged toward 0.5
   EXPECT_GT(fc.get_state().yaw(), 0.3);
+}
+
+TEST(FusionCoreTest, StationaryNineAxisIMUYawDoesNotWanderWithBroadStartupCovariance) {
+  FusionCoreConfig config;
+  config.imu_has_magnetometer = true;
+  config.adaptive_imu = false;
+
+  FusionCore fc(config);
+
+  constexpr double roll = 0.8115 * M_PI / 180.0;
+  constexpr double pitch = 3.9439 * M_PI / 180.0;
+  constexpr double yaw = 57.7661 * M_PI / 180.0;
+
+  State initial;
+  initial.P = StateMatrix::Identity() * 0.1;
+  set_quaternion_from_rpy(initial, roll, pitch, yaw);
+  fc.init(initial, 0.0);
+
+  for (int i = 1; i <= 500; ++i) {
+    const double t = i * 0.02;
+    fc.update_imu_orientation(t, roll, pitch, yaw, nullptr);
+    fc.update_encoder(t, 0.0, 0.0, 0.0);
+    fc.update_zupt(t, 0.01);
+  }
+
+  EXPECT_NEAR(normalize_angle(fc.get_state().yaw() - yaw), 0.0, 0.02);
 }
 
 int main(int argc, char** argv) {
