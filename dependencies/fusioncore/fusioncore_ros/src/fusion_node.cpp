@@ -1355,13 +1355,16 @@ private:
         tf2::Vector3 g_base = gravity_in_body_frame();
         ax += g_base.x(); ay += g_base.y(); az += g_base.z();
       }
+      // Fuse orientation first so the same IMU sample's gravity projection is
+      // available before the raw accel/gyro update is evaluated.
+      // This avoids a one-sample lag where stale pitch/roll turns a constant
+      // gravity component into spurious body-frame acceleration.
+      fuse_imu_orientation_if_valid(t, msg, std::nullopt);
       fc_->update_imu(t,
         msg->angular_velocity.x,
         msg->angular_velocity.y,
         msg->angular_velocity.z,
         ax, ay, az);
-      // No frame rotation needed: IMU is already in base_frame
-      fuse_imu_orientation_if_valid(t, msg, std::nullopt);
       return;
     }
 
@@ -1413,11 +1416,13 @@ private:
       a_base += g_base;
     }
 
+    // Fuse orientation first so the current message's gravity direction is in
+    // state before the raw accel update consumes the same sample.
+    // Fix 11: pass the rotation quaternion so orientation is transformed too.
+    fuse_imu_orientation_if_valid(t, msg, q);
     fc_->update_imu(t,
       w_base.x(), w_base.y(), w_base.z(),
       a_base.x(), a_base.y(), a_base.z());
-    // Fix 11: pass the rotation quaternion so orientation is also transformed
-    fuse_imu_orientation_if_valid(t, msg, q);
   }
 
   // Second IMU callback. Mirrors imu_callback but skips filter initialization
@@ -1443,10 +1448,10 @@ private:
         tf2::Vector3 g_base = gravity_in_body_frame();
         ax += g_base.x(); ay += g_base.y(); az += g_base.z();
       }
+      fuse_imu_orientation_if_valid(t, msg, std::nullopt);
       fc_->update_imu(t,
         msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z,
         ax, ay, az);
-      fuse_imu_orientation_if_valid(t, msg, std::nullopt);
       return;
     }
 
@@ -1496,10 +1501,10 @@ private:
       a_base += g_base;
     }
 
+    fuse_imu_orientation_if_valid(t, msg, q);
     fc_->update_imu(t,
       w_base.x(), w_base.y(), w_base.z(),
       a_base.x(), a_base.y(), a_base.z());
-    fuse_imu_orientation_if_valid(t, msg, q);
   }
 
   // Returns the specific-force gravity contribution in body frame.
