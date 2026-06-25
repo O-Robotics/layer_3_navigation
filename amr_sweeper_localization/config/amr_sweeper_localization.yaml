@@ -2,7 +2,7 @@ launch_defaults:
   ros__parameters:
     use_imu:                                true                  # Enable the primary IMU by default because FusionCore initializes from this stream.
     use_imu2:                               false                 # Disable the optional secondary IMU unless a second sensor is wired in.
-    use_encoder:                            false                 # Enable wheel odometry input for planar velocity constraints.
+    use_encoder:                            true                  # Enable wheel odometry input for planar velocity constraints.
     use_visual_odometry:                    false                 # Keep visual odometry disabled in the default sweeper configuration.
     use_gnss:                               false                 # Enable GNSS by default for outdoor localization.
 
