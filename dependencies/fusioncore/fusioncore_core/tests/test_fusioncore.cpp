@@ -178,9 +178,9 @@ TEST(FusionCoreTest, ResetClearsState) {
 }
 
 // ─── Test 7: 6-axis IMU: yaw blocked, roll/pitch still fused ────────────────
-// When imu_has_magnetometer=false, cedbossneo's fix sets R(2,2)=1e6 so the
-// Kalman gain for yaw is ~0. A wildly wrong yaw measurement must not move
-// the filter's heading. Roll and pitch must still converge normally.
+// When imu_has_magnetometer=false, the IMU orientation update fuses roll/pitch
+// only. A wildly wrong yaw measurement must not move the filter's heading.
+// Roll and pitch must still converge normally.
 
 TEST(FusionCoreTest, SixAxisIMUYawBlockedRollPitchFused) {
   FusionCoreConfig config;
@@ -199,8 +199,7 @@ TEST(FusionCoreTest, SixAxisIMUYawBlockedRollPitchFused) {
   fc.init(initial, 0.0);
 
   // Feed 200 orientation updates: correct roll=0, but yaw=π (wildly wrong).
-  // With R(2,2)=1e6 the Kalman gain for yaw ≈ P(yaw)/(P(yaw)+1e6) ≈ 1e-7,
-  // so the total yaw drift over 200 steps is < 0.001 rad.
+  // The yaw component is ignored in six-axis mode.
   for (int i = 1; i <= 200; ++i) {
     fc.update_imu_orientation(i * 0.01, 0.0, 0.0, M_PI, nullptr);
   }
@@ -213,8 +212,8 @@ TEST(FusionCoreTest, SixAxisIMUYawBlockedRollPitchFused) {
 }
 
 // ─── Test 8: 9-axis IMU: yaw IS fused normally ──────────────────────────────
-// When imu_has_magnetometer=true, the fix is skipped entirely.
-// The yaw measurement must pull the filter heading toward the target.
+// When imu_has_magnetometer=true, the yaw measurement must pull the filter
+// heading toward the target.
 
 TEST(FusionCoreTest, NineAxisIMUYawFusedNormally) {
   FusionCoreConfig config;

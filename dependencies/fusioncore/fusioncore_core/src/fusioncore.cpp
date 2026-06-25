@@ -23,6 +23,17 @@ void set_quaternion_from_rpy(StateVector& x, double roll, double pitch, double y
   x[QZ] = cr * cp * sy - sr * sp * cy;
 }
 
+void keep_roll_pitch_after_yaw_update(State& state, double roll, double pitch)
+{
+  double roll_after = 0.0;
+  double pitch_after = 0.0;
+  double yaw_after = 0.0;
+  quat_to_euler(
+    state.x[QW], state.x[QX], state.x[QY], state.x[QZ],
+    roll_after, pitch_after, yaw_after);
+  set_quaternion_from_rpy(state.x, roll, pitch, yaw_after);
+}
+
 }  // namespace
 
 // ─── Adaptive noise covariance implementation ─────────────────────────────
@@ -454,8 +465,19 @@ bool FusionCore::apply_imu_measurement(
     }
   }
 
+  double roll_before_gyro = 0.0;
+  double pitch_before_gyro = 0.0;
+  double yaw_before_gyro = 0.0;
+  const State& state_before_gyro = ukf_.state();
+  quat_to_euler(
+    state_before_gyro.x[QW], state_before_gyro.x[QX],
+    state_before_gyro.x[QY], state_before_gyro.x[QZ],
+    roll_before_gyro, pitch_before_gyro, yaw_before_gyro);
+
   sensors::ImuGyroMeasurement gyro_innovation =
     ukf_.update<sensors::IMU_GYRO_DIM>(z_gyro, sensors::imu_gyro_measurement_function, R_gyro);
+  set_quaternion_from_rpy(
+    ukf_.mutable_state().x, roll_before_gyro, pitch_before_gyro, yaw_before_gyro);
   combined_innovation.template segment<sensors::IMU_GYRO_DIM>(0) = gyro_innovation;
 
   sensors::ImuAccelMeasurement z_accel;
@@ -608,9 +630,18 @@ void FusionCore::update_imu_orientation(
     }
   }
 
+  const double yaw_before_rp = ukf_.state().yaw();
   if (rp_fused) {
     ukf_.update<sensors::IMU_RP_DIM>(
       z_rp, sensors::imu_rp_measurement_function, R_rp, RP_ANGLE_DIMS);
+    State& state = ukf_.mutable_state();
+    double roll_after = 0.0;
+    double pitch_after = 0.0;
+    double yaw_after = 0.0;
+    quat_to_euler(
+      state.x[QW], state.x[QX], state.x[QY], state.x[QZ],
+      roll_after, pitch_after, yaw_after);
+    set_quaternion_from_rpy(state.x, roll_after, pitch_after, yaw_before_rp);
   }
 
   bool yaw_fused = false;
@@ -642,8 +673,17 @@ void FusionCore::update_imu_orientation(
     }
 
     if (!yaw_rejected) {
+      double roll_before_yaw = 0.0;
+      double pitch_before_yaw = 0.0;
+      double yaw_before_yaw = 0.0;
+      const State& state_before = ukf_.state();
+      quat_to_euler(
+        state_before.x[QW], state_before.x[QX], state_before.x[QY], state_before.x[QZ],
+        roll_before_yaw, pitch_before_yaw, yaw_before_yaw);
       ukf_.update<sensors::GNSS_HDG_DIM>(
         z_yaw, sensors::gnss_hdg_measurement_function, R_yaw, YAW_ANGLE_DIMS);
+      set_quaternion_from_rpy(
+        ukf_.mutable_state().x, roll_before_yaw, pitch_before_yaw, yaw);
       yaw_fused = true;
     }
   }
@@ -1029,8 +1069,18 @@ bool FusionCore::apply_gnss_update(
           }
 
           if (fuse) {
+            double roll_before_hdg = 0.0;
+            double pitch_before_hdg = 0.0;
+            double yaw_before_hdg = 0.0;
+            const State& state_before_hdg = ukf_.state();
+            quat_to_euler(
+              state_before_hdg.x[QW], state_before_hdg.x[QX],
+              state_before_hdg.x[QY], state_before_hdg.x[QZ],
+              roll_before_hdg, pitch_before_hdg, yaw_before_hdg);
             ukf_.update<sensors::GNSS_HDG_DIM>(
               z_hdg, sensors::gnss_hdg_measurement_function, R_hdg, HDG_ANGLE_DIMS);
+            keep_roll_pitch_after_yaw_update(
+              ukf_.mutable_state(), roll_before_hdg, pitch_before_hdg);
             gps_track_hdg_fused_ = true;
 
             if (!heading_validated_) {
@@ -1087,8 +1137,19 @@ bool FusionCore::update_gnss_heading(
     }
   }
 
+  double roll_before_hdg = 0.0;
+  double pitch_before_hdg = 0.0;
+  double yaw_before_hdg = 0.0;
+  const State& state_before_hdg = ukf_.state();
+  quat_to_euler(
+    state_before_hdg.x[QW], state_before_hdg.x[QX],
+    state_before_hdg.x[QY], state_before_hdg.x[QZ],
+    roll_before_hdg, pitch_before_hdg, yaw_before_hdg);
+
   ukf_.update<sensors::GNSS_HDG_DIM>(
     z, sensors::gnss_hdg_measurement_function, R, HDG_ANGLE_DIMS);
+  set_quaternion_from_rpy(
+    ukf_.mutable_state().x, roll_before_hdg, pitch_before_hdg, heading.heading_rad);
 
   // Dual antenna heading is the strongest possible heading validation
   // Override any weaker source
@@ -1298,8 +1359,19 @@ bool FusionCore::update_magnetometer(
     }
   }
 
+  double roll_before_mag = 0.0;
+  double pitch_before_mag = 0.0;
+  double yaw_before_mag = 0.0;
+  const State& state_before_mag = ukf_.state();
+  quat_to_euler(
+    state_before_mag.x[QW], state_before_mag.x[QX],
+    state_before_mag.x[QY], state_before_mag.x[QZ],
+    roll_before_mag, pitch_before_mag, yaw_before_mag);
+
   ukf_.update<sensors::GNSS_HDG_DIM>(
     z, sensors::gnss_hdg_measurement_function, R, MAG_ANGLE_DIMS);
+  set_quaternion_from_rpy(
+    ukf_.mutable_state().x, roll_before_mag, pitch_before_mag, yaw_mag);
 
   // Magnetometer immediately provides valid heading.
   // Upgrade from GPS_TRACK (which requires 5m of motion) but never downgrade
