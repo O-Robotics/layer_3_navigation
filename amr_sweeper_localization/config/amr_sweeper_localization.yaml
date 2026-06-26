@@ -18,9 +18,9 @@ fusioncore:
 
     # -- IMU -------------------------------------------------------------------
     imu.topic:                              "imu/data_raw"        # Primary IMU topic consumed by FusionCore.
-    imu.gyro_noise:                         0.02   #0.005              # Gyroscope white-noise sigma used by the filter model.
-    imu.accel_noise:                        1.0    #0.25               # Accelerometer white-noise sigma used by the filter model.
-    imu.has_magnetometer:                   false                 # Fuse IMU roll/pitch only; yaw is supplied separately via compass azimuth.
+    imu.gyro_noise:                         0.005                 # Gyroscope white-noise sigma used by the filter model.
+    imu.accel_noise:                        0.25                  # Accelerometer white-noise sigma used by the filter model.
+    imu.has_magnetometer:                   true                  # Fuse IMU roll/pitch only; yaw is supplied separately via compass azimuth.
     imu.remove_gravitational_acceleration:  false                 # Keep raw acceleration intact because the driver/controller handle gravity conventions.
     imu.frame_id:                           "imu_link"            # Physical frame in which the IMU measurements are expressed.
     imu.lever_arm_x:                        0.0                   # IMU X offset from the fused body origin in meters.
@@ -55,7 +55,7 @@ fusioncore:
     gnss.min_fix_type:                      3                     # Require a 3D-quality fix or better before fusion.
     gnss.fix2_topic:                        ""                    # No second GNSS receiver is configured by default.
     gnss.heading_topic:                     ""                    # No dedicated GNSS heading topic is configured.
-    gnss.azimuth_topic:                     "/amr_sweeper/imu/azimuth" # IMU compass yaw published as REP-145 azimuth.
+    gnss.azimuth_topic:                     ""                    # IMU compass yaw published as REP-145 azimuth.
     gnss.lever_arm_x:                       0.0                   # Primary GNSS antenna X offset from the fused body origin in meters.
     gnss.lever_arm_y:                       0.0                   # Primary GNSS antenna Y offset from the fused body origin in meters.
     gnss.lever_arm_z:                       0.0                   # Primary GNSS antenna Z offset from the fused body origin in meters.
@@ -80,7 +80,7 @@ fusioncore:
 
     # -- Magnetometer ----------------------------------------------------------
     magnetometer.enabled:                  false                  # Disable direct magnetometer fusion in this localization profile.
-    magnetometer.topic:                    "/imu/mag"             # Default topic to use if magnetometer fusion is enabled later.
+    magnetometer.topic:                    ""                     # Default topic to use if magnetometer fusion is enabled later.
     magnetometer.noise_rad:                0.05                   # Magnetometer heading sigma in radians.
     magnetometer.chi2_threshold:           9.21                   # Chi-squared gate used to reject inconsistent magnetometer updates.
     magnetometer.declination_rad:          0.0                    # Local magnetic declination correction in radians.
