@@ -1199,6 +1199,10 @@ private:
               double qy = init_win_qy_ / on, qz = init_win_qz_ / on;
               double norm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
               qw /= norm; qx /= norm; qy /= norm; qz /= norm;
+              initial.x[fusioncore::QW] = qw;
+              initial.x[fusioncore::QX] = qx;
+              initial.x[fusioncore::QY] = qy;
+              initial.x[fusioncore::QZ] = qz;
               const double g = 9.80665;
               double gx = 2.0*(qx*qz - qy*qw)*g;
               double gy = 2.0*(qy*qz + qx*qw)*g;
@@ -1207,9 +1211,10 @@ private:
               initial.x[fusioncore::B_AY] = init_win_ay_ / n - gy;
               initial.x[fusioncore::B_AZ] = init_win_az_ / n - gz;
               RCLCPP_INFO(get_logger(),
-                "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] rad/s, m/s²",
+                "Bias window done: gyro=[%.4f,%.4f,%.4f] accel=[%.4f,%.4f,%.4f] yaw=%.2f deg rad/s, m/s²",
                 initial.x[fusioncore::B_GX], initial.x[fusioncore::B_GY], initial.x[fusioncore::B_GZ],
-                initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ]);
+                initial.x[fusioncore::B_AX], initial.x[fusioncore::B_AY], initial.x[fusioncore::B_AZ],
+                std::atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz)) * 180.0 / M_PI);
             } else {
               RCLCPP_INFO(get_logger(),
                 "Bias window done (gyro only, no orientation): gyro=[%.4f,%.4f,%.4f]",
