@@ -13,6 +13,7 @@
 #include <deque>
 #include <functional>
 #include <array>
+#include <string>
 
 namespace fusioncore {
 
@@ -380,6 +381,15 @@ public:
   HeadingSource      heading_source()    const { return heading_source_; }
 
 private:
+  void maybe_trace_blowup(
+    const char* function_name,
+    double timestamp_seconds,
+    const State& before_state,
+    const std::string& measurement_summary);
+  bool        debug_trace_blowup_ = false;
+  int         debug_trace_count_ = 0;
+  std::string debug_trace_last_function_;
+
   FusionCoreConfig config_;
   UKF              ukf_;
   bool             initialized_       = false;

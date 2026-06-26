@@ -2,8 +2,53 @@
 #include "fusioncore/sensors/imu.hpp"
 #include <stdexcept>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <sstream>
 
 namespace fusioncore {
+
+namespace {
+
+constexpr double kTracePositionJumpThresholdM = 5.0;
+constexpr double kTracePositionAbsThresholdM = 1000.0;
+constexpr double kTraceVelocityAbsThresholdMps = 15.0;
+constexpr double kTraceYawJumpThresholdRad = 0.75;
+constexpr int kTraceMaxEvents = 25;
+
+double wrap_angle(double angle_rad)
+{
+  while (angle_rad > M_PI) angle_rad -= 2.0 * M_PI;
+  while (angle_rad < -M_PI) angle_rad += 2.0 * M_PI;
+  return angle_rad;
+}
+
+std::string trace_state_summary(const State& state)
+{
+  std::ostringstream out;
+  out.setf(std::ios::fixed);
+  out.precision(6);
+  out
+    << "x=" << state.x[X]
+    << " y=" << state.x[Y]
+    << " z=" << state.x[Z]
+    << " yaw=" << state.yaw()
+    << " vx=" << state.x[VX]
+    << " vy=" << state.x[VY]
+    << " vz=" << state.x[VZ]
+    << " wz=" << state.x[WZ]
+    << " sig_x=" << std::sqrt(std::max(state.P(X, X), 0.0))
+    << " sig_y=" << std::sqrt(std::max(state.P(Y, Y), 0.0))
+    << " sig_yaw_deg=" << (std::sqrt(std::max(state.P(QZ, QZ), 0.0)) * 180.0 / M_PI);
+  return out.str();
+}
+
+bool state_has_nonfinite(const State& state)
+{
+  return !state.x.allFinite() || !state.P.allFinite();
+}
+
+}  // namespace
 
 // ─── Adaptive noise covariance implementation ─────────────────────────────
 
@@ -103,9 +148,64 @@ void FusionCore::adapt_R(
 FusionCore::FusionCore(const FusionCoreConfig& config)
   : config_(config), ukf_(config.ukf)
 {
+  if (const char* trace_env = std::getenv("FUSIONCORE_TRACE_BLOWUP")) {
+    debug_trace_blowup_ = std::string(trace_env) != "0";
+  }
   if (config.motion_model) {
     ukf_.set_motion_model(config.motion_model);
   }
+}
+
+void FusionCore::maybe_trace_blowup(
+  const char* function_name,
+  double timestamp_seconds,
+  const State& before_state,
+  const std::string& measurement_summary)
+{
+  if (!debug_trace_blowup_ || debug_trace_count_ >= kTraceMaxEvents) {
+    return;
+  }
+
+  const State& after_state = ukf_.state();
+
+  const double dx = after_state.x[X] - before_state.x[X];
+  const double dy = after_state.x[Y] - before_state.x[Y];
+  const double dz = after_state.x[Z] - before_state.x[Z];
+  const double position_jump = std::sqrt(dx * dx + dy * dy + dz * dz);
+  const double yaw_jump = std::abs(wrap_angle(after_state.yaw() - before_state.yaw()));
+
+  const bool abnormal =
+    state_has_nonfinite(after_state) ||
+    std::abs(after_state.x[X]) > kTracePositionAbsThresholdM ||
+    std::abs(after_state.x[Y]) > kTracePositionAbsThresholdM ||
+    std::abs(after_state.x[Z]) > kTracePositionAbsThresholdM ||
+    std::abs(after_state.x[VX]) > kTraceVelocityAbsThresholdMps ||
+    std::abs(after_state.x[VY]) > kTraceVelocityAbsThresholdMps ||
+    std::abs(after_state.x[VZ]) > kTraceVelocityAbsThresholdMps ||
+    position_jump > kTracePositionJumpThresholdM ||
+    yaw_jump > kTraceYawJumpThresholdRad;
+
+  if (!abnormal) {
+    return;
+  }
+
+  ++debug_trace_count_;
+  debug_trace_last_function_ = function_name;
+
+  std::fprintf(
+    stderr,
+    "[FUSIONCORE_TRACE] event=%d function=%s t=%.6f pos_jump=%.6f yaw_jump=%.6f input={%s}\n"
+    "  before={%s}\n"
+    "  after={%s}\n",
+    debug_trace_count_,
+    function_name,
+    timestamp_seconds,
+    position_jump,
+    yaw_jump,
+    measurement_summary.c_str(),
+    trace_state_summary(before_state).c_str(),
+    trace_state_summary(after_state).c_str());
+  std::fflush(stderr);
 }
 
 void FusionCore::set_imu_lever_arm(const sensors::ImuLeverArm& lever_arm) {
@@ -330,6 +430,7 @@ double FusionCore::compute_heading_sigma_rad() const {
 }
 
 void FusionCore::predict_to(double timestamp_seconds) {
+  const State before_state = ukf_.state();
   // Enter coast mode on GPS timeout: receiver went silent (mode=2, tunnel,
   // power loss) rather than publishing rejectable fixes. Consecutive-reject
   // coast mode won't fire in this case because there are no fixes to reject.
@@ -361,10 +462,14 @@ void FusionCore::predict_to(double timestamp_seconds) {
       ukf_.predict(dt_remaining);
     }
     last_timestamp_ = timestamp_seconds;
+    maybe_trace_blowup("predict_to", timestamp_seconds, before_state,
+      "chunked_predict=true");
     return;
   }
   ukf_.predict(dt);
   last_timestamp_ = timestamp_seconds;
+  maybe_trace_blowup("predict_to", timestamp_seconds, before_state,
+    "chunked_predict=false");
 }
 
 void FusionCore::update_distance_traveled(double x, double y, double pre_update_speed) {
@@ -420,6 +525,7 @@ void FusionCore::update_imu(
   if (!initialized_)
     throw std::runtime_error("FusionCore: update_imu() called before init()");
 
+  const State before_state = ukf_.state();
   predict_to(timestamp_seconds);
 
   sensors::ImuMeasurement z;
@@ -482,6 +588,12 @@ void FusionCore::update_imu(
 
   last_imu_time_ = timestamp_seconds;
   ++update_count_;
+  std::ostringstream measurement;
+  measurement.setf(std::ios::fixed);
+  measurement.precision(6);
+  measurement << "wx=" << wx << " wy=" << wy << " wz=" << wz
+              << " ax=" << ax << " ay=" << ay << " az=" << az;
+  maybe_trace_blowup("update_imu", timestamp_seconds, before_state, measurement.str());
 }
 
 void FusionCore::update_imu_orientation(
@@ -492,6 +604,7 @@ void FusionCore::update_imu_orientation(
   if (!initialized_)
     throw std::runtime_error("FusionCore: update_imu_orientation() called before init()");
 
+  const State before_state = ukf_.state();
   predict_to(timestamp_seconds);
 
   sensors::ImuOrientationMeasurement z;
@@ -577,6 +690,11 @@ void FusionCore::update_imu_orientation(
 
   last_imu_time_ = timestamp_seconds;
   ++update_count_;
+  std::ostringstream measurement;
+  measurement.setf(std::ios::fixed);
+  measurement.precision(6);
+  measurement << "roll=" << roll << " pitch=" << pitch << " yaw=" << yaw;
+  maybe_trace_blowup("update_imu_orientation", timestamp_seconds, before_state, measurement.str());
 }
 
 void FusionCore::update_encoder(
@@ -589,6 +707,7 @@ void FusionCore::update_encoder(
   if (!initialized_)
     throw std::runtime_error("FusionCore: update_encoder() called before init()");
 
+  const State before_state = ukf_.state();
   predict_to(timestamp_seconds);
 
   sensors::EncoderMeasurement z;
@@ -624,11 +743,18 @@ void FusionCore::update_encoder(
 
   last_encoder_time_ = timestamp_seconds;
   ++update_count_;
+  std::ostringstream measurement;
+  measurement.setf(std::ios::fixed);
+  measurement.precision(6);
+  measurement << "vx=" << vx << " vy=" << vy << " wz=" << wz
+              << " var_vx=" << var_vx << " var_vy=" << var_vy << " var_wz=" << var_wz;
+  maybe_trace_blowup("update_encoder", timestamp_seconds, before_state, measurement.str());
 }
 
 void FusionCore::update_ground_constraint(double timestamp_seconds) {
   if (!initialized_) return;
 
+  const State before_state = ukf_.state();
   // Force a minimal predict step so Q is injected into P before this update.
   // This prevents Cholesky failure when called back-to-back with update_encoder
   // at the same timestamp (where predict_to would be a no-op and P gets two
@@ -697,11 +823,13 @@ void FusionCore::update_ground_constraint(double timestamp_seconds) {
     };
     ukf_.update<1>(z_pos, h_zpos, R_zpos);
   }
+  maybe_trace_blowup("update_ground_constraint", timestamp_seconds, before_state, "ground_constraint");
 }
 
 void FusionCore::update_zupt(double timestamp_seconds, double noise_sigma) {
   if (!initialized_) return;
 
+  const State before_state = ukf_.state();
   predict_to(timestamp_seconds);
 
   // Fuse [VX=0, VY=0, WZ=0] using the encoder measurement function.
@@ -718,6 +846,11 @@ void FusionCore::update_zupt(double timestamp_seconds, double noise_sigma) {
   R(2,2) = var;
 
   ukf_.update<sensors::ENCODER_DIM>(z, sensors::zupt_measurement_function, R);
+  std::ostringstream measurement;
+  measurement.setf(std::ios::fixed);
+  measurement.precision(6);
+  measurement << "noise_sigma=" << noise_sigma;
+  maybe_trace_blowup("update_zupt", timestamp_seconds, before_state, measurement.str());
 }
 
 bool FusionCore::update_gnss(
@@ -792,6 +925,7 @@ bool FusionCore::apply_gnss_update(
   double timestamp_seconds,
   const sensors::GnssFix& fix)
 {
+  const State before_state = ukf_.state();
   sensors::GnssPosMeasurement z;
   z[0] = fix.x;
   z[1] = fix.y;
@@ -965,6 +1099,19 @@ bool FusionCore::apply_gnss_update(
     }
   }
 
+  std::ostringstream measurement;
+  measurement.setf(std::ios::fixed);
+  measurement.precision(6);
+  measurement << "x=" << fix.x << " y=" << fix.y << " z=" << fix.z
+              << " hdop=" << fix.hdop << " vdop=" << fix.vdop
+              << " sats=" << fix.satellites << " fix_type=" << static_cast<int>(fix.fix_type)
+              << " lever_arm_x=" << fix.lever_arm.x
+              << " lever_arm_y=" << fix.lever_arm.y
+              << " lever_arm_z=" << fix.lever_arm.z
+              << " heading_sigma_deg=" << gnss_debug_.heading_sigma_deg
+              << " mahalanobis_sq=" << gnss_debug_.mahalanobis_sq
+              << " lever_arm_used=" << (gnss_debug_.lever_arm_used ? 1 : 0);
+  maybe_trace_blowup("apply_gnss_update", timestamp_seconds, before_state, measurement.str());
   return true;
 }
 
@@ -977,6 +1124,7 @@ bool FusionCore::update_gnss_heading(
 
   if (!heading.valid) return false;
 
+  const State before_state = ukf_.state();
   predict_to(timestamp_seconds);
 
   sensors::GnssHdgMeasurement z;
@@ -1010,6 +1158,12 @@ bool FusionCore::update_gnss_heading(
 
   last_gnss_time_ = timestamp_seconds;
   ++update_count_;
+  std::ostringstream measurement;
+  measurement.setf(std::ios::fixed);
+  measurement.precision(6);
+  measurement << "heading_rad=" << heading.heading_rad
+              << " accuracy_rad=" << heading.accuracy_rad;
+  maybe_trace_blowup("update_gnss_heading", timestamp_seconds, before_state, measurement.str());
   return true;
 }
 
