@@ -38,6 +38,8 @@ class Layer3SystemCheck(Node):
         self.declare_parameter("tf_wait_timeout_sec", 45.0)
         self.declare_parameter("goal_result_timeout_sec", 30.0)
         self.declare_parameter("success_publish_period_sec", 1.0)
+        self.declare_parameter("goal_checker_id", "general_goal_checker")
+        self.declare_parameter("progress_checker_id", "progress_checker")
 
         self.global_frame = self.get_parameter("global_frame").get_parameter_value().string_value
         self.robot_frame = self.get_parameter("robot_frame").get_parameter_value().string_value
@@ -58,6 +60,12 @@ class Layer3SystemCheck(Node):
         self.success_publish_period = max(
             0.1,
             self.get_parameter("success_publish_period_sec").get_parameter_value().double_value,
+        )
+        self.goal_checker_id = (
+            self.get_parameter("goal_checker_id").get_parameter_value().string_value
+        )
+        self.progress_checker_id = (
+            self.get_parameter("progress_checker_id").get_parameter_value().string_value
         )
 
         self.tf_buffer = Buffer()
@@ -117,6 +125,8 @@ class Layer3SystemCheck(Node):
 
             goal = FollowWaypoints.Goal()
             goal.poses.append(pose)
+            goal.goal_checker_id = self.goal_checker_id
+            goal.progress_checker_id = self.progress_checker_id
 
             self.goal_send_time = now
             self.goal_inflight = True
