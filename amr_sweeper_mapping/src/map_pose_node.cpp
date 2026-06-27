@@ -145,6 +145,7 @@ MapPoseNode::MapPoseNode()
   declare_parameter("heading_topic", std::string("imu/data_heading"));
   declare_parameter("scan_topic", std::string("depth_camera/scan"));
   declare_parameter("global_costmap_topic", std::string("mapping/global_costmap"));
+  declare_parameter("startup_ready_topic", std::string("mapping/map_pose_startup_ready"));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("costmap_yaml_path", std::string(""));
   declare_parameter("publish_period_seconds", 0.5);
@@ -201,6 +202,7 @@ MapPoseNode::MapPoseNode()
   heading_topic_ = get_parameter("heading_topic").as_string();
   scan_topic_ = get_parameter("scan_topic").as_string();
   global_costmap_topic_ = get_parameter("global_costmap_topic").as_string();
+  startup_ready_topic_ = get_parameter("startup_ready_topic").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   costmap_yaml_path_ = get_parameter("costmap_yaml_path").as_string();
   publish_identity_when_pose_missing_ =
@@ -350,6 +352,9 @@ MapPoseNode::MapPoseNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MapPoseNode::handleGlobalCostmap, this, std::placeholders::_1),
     subscription_options);
+  startup_ready_publisher_ = create_publisher<std_msgs::msg::Bool>(
+    startup_ready_topic_,
+    rclcpp::QoS(1).reliable().transient_local());
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
@@ -1363,6 +1368,9 @@ void MapPoseNode::publishMapToOdomTransform()
   }
 
   const StateSnapshot snapshot = snapshotState();
+  std_msgs::msg::Bool startup_ready_message;
+  startup_ready_message.data = snapshot.correction_startup_ready;
+  startup_ready_publisher_->publish(startup_ready_message);
   if (!snapshot.latest_odometry_ready) {
     return;
   }

@@ -23,6 +23,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -103,6 +104,7 @@ private:
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
   void handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message);
   void handleHeading(const sensor_msgs::msg::Imu::SharedPtr message);
+  void handleMapPoseStartupReady(const std_msgs::msg::Bool::SharedPtr message);
   void handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
   void handleNav2LocalCostmapUpdate(const map_msgs::msg::OccupancyGridUpdate::SharedPtr message);
   void handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
@@ -191,6 +193,7 @@ private:
   std::string nav2_local_costmap_topic_;
   std::string nav2_local_costmap_updates_topic_;
   std::string nav2_global_costmap_topic_;
+  std::string map_pose_startup_ready_topic_;
   double runtime_costmap_save_period_seconds_{10.0};
   double nav2_costmap_ready_timeout_seconds_{2.5};
   int static_obstacle_min_observations_{6};
@@ -222,6 +225,7 @@ private:
   double min_global_map_size_m_{10.0};
   bool live_map_ready_{false};
   bool latest_padded_live_map_ready_{false};
+  bool map_pose_startup_ready_{false};
   bool nav2_local_costmap_ready_{false};
   bool nav2_global_costmap_ready_{false};
   bool latest_odometry_pose_ready_{false};
@@ -265,6 +269,7 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr map_pose_startup_ready_subscription_;
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_local_costmap_subscription_;
   rclcpp::Subscription<map_msgs::msg::OccupancyGridUpdate>::SharedPtr
     nav2_local_costmap_updates_subscription_;

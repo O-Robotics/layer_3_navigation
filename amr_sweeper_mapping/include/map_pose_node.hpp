@@ -21,6 +21,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -116,6 +117,7 @@ private:
   std::string heading_topic_;
   std::string scan_topic_;
   std::string global_costmap_topic_;
+  std::string startup_ready_topic_;
   std::string fromll_service_name_;
   std::string costmap_yaml_path_;
   bool publish_identity_when_pose_missing_{true};
@@ -206,6 +208,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_subscription_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr startup_ready_publisher_;
   rclcpp::TimerBase::SharedPtr publish_timer_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

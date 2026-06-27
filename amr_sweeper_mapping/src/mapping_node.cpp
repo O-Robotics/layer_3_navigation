@@ -837,6 +837,7 @@ MappingNode::MappingNode()
     "nav2_local_costmap_updates_topic",
     std::string("local_costmap/costmap_updates"));
   declare_parameter("nav2_global_costmap_topic", std::string("global_costmap/costmap_raw"));
+  declare_parameter("map_pose_startup_ready_topic", std::string("mapping/map_pose_startup_ready"));
   declare_parameter("nav2_costmap_ready_timeout_seconds", 2.5);
   declare_parameter("end_mission_service", std::string("end_mission"));
 
@@ -875,6 +876,7 @@ MappingNode::MappingNode()
   nav2_local_costmap_updates_topic_ =
     get_parameter("nav2_local_costmap_updates_topic").as_string();
   nav2_global_costmap_topic_ = get_parameter("nav2_global_costmap_topic").as_string();
+  map_pose_startup_ready_topic_ = get_parameter("map_pose_startup_ready_topic").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
@@ -931,6 +933,10 @@ MappingNode::MappingNode()
     heading_topic_,
     rclcpp::SensorDataQoS(),
     std::bind(&MappingNode::handleHeading, this, std::placeholders::_1));
+  map_pose_startup_ready_subscription_ = create_subscription<std_msgs::msg::Bool>(
+    map_pose_startup_ready_topic_,
+    rclcpp::QoS(1).reliable().transient_local(),
+    std::bind(&MappingNode::handleMapPoseStartupReady, this, std::placeholders::_1));
   nav2_local_costmap_subscription_ = create_subscription<nav2_msgs::msg::Costmap>(
     nav2_local_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
@@ -1014,6 +1020,15 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
     now() :
     rclcpp::Time(message->header.stamp);
   have_scan_ = true;
+  if (!map_pose_startup_ready_) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      3000,
+      "Delaying scan integration until map_pose_node reports startup-ready on %s.",
+      map_pose_startup_ready_topic_.c_str());
+    return;
+  }
   if (latest_odometry_pose_ready_) {
     integrateScanIntoGlobalMap(*message);
   }
@@ -1154,6 +1169,21 @@ void MappingNode::handleHeading(const sensor_msgs::msg::Imu::SharedPtr message)
     pruneGeoreferenceSamples();
   }
   tryInitializeSavedCostmapFromSensors();
+}
+
+void MappingNode::handleMapPoseStartupReady(const std_msgs::msg::Bool::SharedPtr message)
+{
+  if (!message) {
+    return;
+  }
+
+  const bool was_ready = map_pose_startup_ready_;
+  map_pose_startup_ready_ = message->data;
+  if (map_pose_startup_ready_ && !was_ready) {
+    RCLCPP_INFO(
+      get_logger(),
+      "map_pose_node reported startup-ready; scan integration into the runtime map is enabled.");
+  }
 }
 
 void MappingNode::pruneGeoreferenceSamples()
@@ -1649,6 +1679,7 @@ std::string MappingNode::composeMapBuilderStatus() const
   std::ostringstream stream;
   stream
     << "ready=" << (ready ? "true" : "false")
+    << "; map_pose_startup_ready=" << (map_pose_startup_ready_ ? "true" : "false")
     << "; tracking=" << (have_global_map ? "true" : "false")
     << "; scan_tf=" << (have_scan_to_base_tf ? "true" : "false")
     << "; base_frame=" << (have_base_frame ? "true" : "false")
