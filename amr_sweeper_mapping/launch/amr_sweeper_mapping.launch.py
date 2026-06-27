@@ -77,6 +77,9 @@ def _build_nodes(context):
     configured_mission_costmap_yaml = LaunchConfiguration("mission_costmap_yaml").perform(context)
     auto_start_mission = LaunchConfiguration("auto_start_mission").perform(context).lower() == "true"
     use_gaussian = LaunchConfiguration("use_gaussian").perform(context).lower() == "true"
+    bootstrap_empty_global_costmap = (
+        LaunchConfiguration("bootstrap_empty_global_costmap").perform(context).lower() == "true"
+    )
 
     mission_context = _resolve_execution_context(mission_execution_directory)
     mission_type = configured_mission_type or str(mission_context.get("mission_type", "")).lower()
@@ -184,6 +187,8 @@ def _build_nodes(context):
         common_runtime_parameters["startup_saved_costmap_yaml"] = startup_saved_costmap_yaml
     if saved_costmap_yaml:
         common_runtime_parameters["saved_costmap_yaml"] = saved_costmap_yaml
+    if bootstrap_empty_global_costmap:
+        common_runtime_parameters["bootstrap_empty_global_costmap"] = True
     if mission_window_start:
         common_runtime_parameters["mission_window_start"] = mission_window_start
     if mission_window_end:
@@ -319,6 +324,14 @@ def generate_launch_description():
                 description=(
                     "When true, the mapping node will dispatch Nav2 goals after receiving a valid "
                     "mission execution context. RUNNING profiles should enable this explicitly."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "bootstrap_empty_global_costmap",
+                default_value="false",
+                description=(
+                    "When true, mapping_node seeds an in-memory empty global costmap around the "
+                    "current odometry pose so Nav2 can bootstrap without a saved costmap file."
                 ),
             ),
             OpaqueFunction(function=_build_nodes),

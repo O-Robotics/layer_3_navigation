@@ -55,6 +55,7 @@
     runtime_costmap_save_period_seconds: 10.0                       # Periodically write the runtime mission costmap artifact back into the active run folder while scans refine it.
     static_obstacle_min_observations: 6                             # Minimum number of occupied observations before a scanned obstacle is considered static enough to persist into the runtime costmap artifact.
     static_obstacle_min_occupied_fraction: 0.75                     # Minimum occupied-observation fraction required before a cell is treated as static structure instead of a transient obstacle.
+    bootstrap_empty_global_costmap: false                           # When true, publish an in-memory unknown occupancy grid around the current odometry pose so dummy runs can bootstrap Nav2 without any saved costmap artifact on disk.
     follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
     pad_live_map_to_minimum_size:  true                             # Republish the live global occupancy grid with a minimum square footprint so short default missions are plan-able immediately.
     min_global_map_size_m:         10.0                             # Minimum width/height of the republished live map in meters before Nav2 sees it.

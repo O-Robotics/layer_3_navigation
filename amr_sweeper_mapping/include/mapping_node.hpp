@@ -144,6 +144,7 @@ private:
   [[nodiscard]] std::optional<RawNavSatSample> stabilizedNavSatSample() const;
   [[nodiscard]] std::optional<double> stabilizedHeadingYaw() const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid buildStaticRuntimeCostmapArtifact() const;
+  void tryPublishBootstrapGlobalCostmap();
   void initializeGlobalMap(const geometry_msgs::msg::Point & center);
   void expandGlobalMapToFit(
     double min_x,
@@ -198,6 +199,8 @@ private:
   double nav2_costmap_ready_timeout_seconds_{2.5};
   int static_obstacle_min_observations_{6};
   double static_obstacle_min_occupied_fraction_{0.75};
+  bool bootstrap_empty_global_costmap_{false};
+  bool bootstrap_global_costmap_published_{false};
   bool auto_start_mission_{true};
   bool repeat_mission_{false};
   bool publish_seeded_map_to_odom_{false};

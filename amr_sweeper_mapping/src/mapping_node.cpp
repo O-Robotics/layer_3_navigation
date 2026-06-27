@@ -839,6 +839,7 @@ MappingNode::MappingNode()
   declare_parameter("nav2_global_costmap_topic", std::string("global_costmap/costmap_raw"));
   declare_parameter("map_pose_startup_ready_topic", std::string("mapping/map_pose_startup_ready"));
   declare_parameter("nav2_costmap_ready_timeout_seconds", 2.5);
+  declare_parameter("bootstrap_empty_global_costmap", false);
   declare_parameter("end_mission_service", std::string("end_mission"));
 
   mission_file_ = get_parameter("mission_file").as_string();
@@ -879,6 +880,7 @@ MappingNode::MappingNode()
   map_pose_startup_ready_topic_ = get_parameter("map_pose_startup_ready_topic").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
+  bootstrap_empty_global_costmap_ = get_parameter("bootstrap_empty_global_costmap").as_bool();
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
   global_map_resolution_m_ = get_parameter("global_map_resolution_m").as_double();
   runtime_costmap_save_period_seconds_ = get_parameter("runtime_costmap_save_period_seconds").as_double();
@@ -1088,6 +1090,7 @@ void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
   latest_odometry_position_ = message->pose.pose.position;
   latest_odometry_orientation_ = message->pose.pose.orientation;
   latest_odometry_pose_ready_ = true;
+  tryPublishBootstrapGlobalCostmap();
 
   const auto & position = message->pose.pose.position;
   bool should_record_path_sample = true;
@@ -1127,6 +1130,29 @@ void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
   }
 
   tryInitializeSavedCostmapFromSensors();
+}
+
+void MappingNode::tryPublishBootstrapGlobalCostmap()
+{
+  if (
+    !bootstrap_empty_global_costmap_ ||
+    bootstrap_global_costmap_published_ ||
+    latest_padded_live_map_ready_ ||
+    latest_live_map_.info.width > 0U ||
+    !latest_odometry_pose_ready_)
+  {
+    return;
+  }
+
+  initializeGlobalMap(latest_odometry_position_);
+  publishGlobalMaps();
+  bootstrap_global_costmap_published_ = latest_padded_live_map_ready_;
+
+  if (bootstrap_global_costmap_published_) {
+    RCLCPP_INFO(
+      get_logger(),
+      "Published a bootstrap in-memory empty global costmap centered at the current odometry pose so Nav2 and map_pose_node can initialize without a saved costmap artifact.");
+  }
 }
 
 void MappingNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr message)

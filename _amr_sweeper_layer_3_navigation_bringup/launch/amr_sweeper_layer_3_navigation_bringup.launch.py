@@ -310,6 +310,7 @@ def _build_launches(context):
             'mission_id': effective_mission_id,
             'mission_type': effective_mission_type,
             'mission_costmap_yaml': effective_mission_costmap_yaml,
+            'bootstrap_empty_global_costmap': 'true' if run_layer_3_system_check else 'false',
             'use_gaussian': use_gaussian,
             'auto_start_mission': auto_start_mission,
             'use_test': 'true' if use_test else 'false',
