@@ -67,6 +67,9 @@ class Layer3SystemCheck(Node):
             node_name: self.create_client(GetState, f"{node_name}/get_state")
             for node_name in self.required_lifecycle_nodes
         }
+        self.lifecycle_state_futures = {
+            node_name: None for node_name in self.required_lifecycle_nodes
+        }
 
         self.start_time = self.get_clock().now()
         self.goal_send_time: Optional[rclpy.time.Time] = None
@@ -132,19 +135,26 @@ class Layer3SystemCheck(Node):
             if not client.wait_for_service(timeout_sec=0.0):
                 return False
 
-            request = GetState.Request()
-            future = client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=0.2)
+            future = self.lifecycle_state_futures[node_name]
+            if future is None:
+                request = GetState.Request()
+                self.lifecycle_state_futures[node_name] = client.call_async(request)
+                return False
+
             if not future.done():
                 return False
 
             try:
                 response = future.result()
             except Exception:  # noqa: BLE001
+                self.lifecycle_state_futures[node_name] = None
                 return False
 
             if response.current_state.id != State.PRIMARY_STATE_ACTIVE:
+                self.lifecycle_state_futures[node_name] = None
                 return False
+
+            self.lifecycle_state_futures[node_name] = None
 
         return True
 
