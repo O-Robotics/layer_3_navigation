@@ -144,6 +144,20 @@ def _resolve_navigation_launch_filename(mission_type: str, execution_mode: str) 
     return "programmed_missions_navigation.launch.py"
 
 
+def _should_use_manual_navigation_for_system_check(
+    run_layer_3_system_check: bool,
+    mission_context: dict,
+    effective_mission_file: str,
+    effective_mission_type: str,
+    effective_execution_mode: str,
+) -> bool:
+    if not run_layer_3_system_check:
+        return False
+    if effective_mission_file or effective_mission_type or effective_execution_mode:
+        return False
+    return not bool(mission_context)
+
+
 def _bool_override(context: dict, key: str, default_value: bool) -> bool:
     overrides = context.get("layer_overrides", {})
     if not isinstance(overrides, dict) or key not in overrides:
@@ -245,6 +259,14 @@ def _build_launches(context):
         effective_mission_type,
         effective_execution_mode,
     )
+    if _should_use_manual_navigation_for_system_check(
+        run_layer_3_system_check,
+        mission_context,
+        effective_mission_file,
+        effective_mission_type,
+        effective_execution_mode,
+    ):
+        navigation_launch_filename = "manual_missions_navigation.launch.py"
     effective_use_amr_sweeper_mapping = _mission_requires_mapping(
         effective_mission_type,
         effective_execution_mode,

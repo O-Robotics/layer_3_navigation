@@ -175,6 +175,16 @@ def _controller_server_selector_params(context) -> dict:
     }
 
 
+def _controller_server_selector_arguments(context) -> list[str]:
+    selector_params = _controller_server_selector_params(context)
+    arguments = ['--ros-args']
+    for key in ('current_progress_checker', 'current_goal_checker'):
+        value = selector_params.get(key)
+        if value:
+            arguments.extend(['-p', f'{key}:={value}'])
+    return arguments
+
+
 
 def _build_nav2_group(context):
     namespace_value = _normalize_namespace(LaunchConfiguration('namespace').perform(context))
@@ -218,6 +228,7 @@ def _build_nav2_group(context):
     _validate_nav2_params(context)
     configured_params = _build_configured_params(context)
     controller_server_selector_params = _controller_server_selector_params(context)
+    controller_server_selector_arguments = _controller_server_selector_arguments(context)
 
     actions = []
 
@@ -234,6 +245,7 @@ def _build_nav2_group(context):
                 output='screen',
                 respawn=use_respawn,
                 respawn_delay=2.0,
+                arguments=controller_server_selector_arguments,
                 parameters=[configured_params, controller_server_selector_params],
                 remappings=[('cmd_vel', nav2_cmd_vel_output_topic),
                             ('odom', 'localization/odometry_fused'),
