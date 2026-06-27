@@ -125,8 +125,10 @@ class Layer3SystemCheck(Node):
 
             goal = FollowWaypoints.Goal()
             goal.poses.append(pose)
-            goal.goal_checker_id = self.goal_checker_id
-            goal.progress_checker_id = self.progress_checker_id
+            if hasattr(goal, "goal_checker_id"):
+                goal.goal_checker_id = self.goal_checker_id
+            if hasattr(goal, "progress_checker_id"):
+                goal.progress_checker_id = self.progress_checker_id
 
             self.goal_send_time = now
             self.goal_inflight = True
