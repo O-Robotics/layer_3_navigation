@@ -1144,14 +1144,40 @@ void MappingNode::tryPublishBootstrapGlobalCostmap()
     return;
   }
 
-  initializeGlobalMap(latest_odometry_position_);
+  geometry_msgs::msg::PointStamped odom_point;
+  odom_point.header.frame_id = odom_frame_id_;
+  odom_point.point = mission_anchor_pose_ready_ ? mission_anchor_position_ : latest_odometry_position_;
+
+  geometry_msgs::msg::PointStamped map_point;
+  try {
+    const auto map_to_odom = tf_buffer_->lookupTransform(
+      map_frame_id_,
+      odom_frame_id_,
+      tf2::TimePointZero,
+      tf2::durationFromSec(0.05));
+    tf2::doTransform(odom_point, map_point, map_to_odom);
+  } catch (const tf2::TransformException & exception) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      3000,
+      "Waiting for the first %s -> %s TF before publishing the bootstrap global map: %s",
+      map_frame_id_.c_str(),
+      odom_frame_id_.c_str(),
+      exception.what());
+    return;
+  }
+
+  initializeGlobalMap(map_point.point);
   publishGlobalMaps();
   bootstrap_global_costmap_published_ = latest_padded_live_map_ready_;
 
   if (bootstrap_global_costmap_published_) {
     RCLCPP_INFO(
       get_logger(),
-      "Published a bootstrap in-memory empty global costmap centered at the current odometry pose so Nav2 and map_pose_node can initialize without a saved costmap artifact.");
+      "Published a bootstrap in-memory empty global costmap after the first %s -> %s TF became available, so Nav2 and map_pose_node can initialize without a saved costmap artifact.",
+      map_frame_id_.c_str(),
+      odom_frame_id_.c_str());
   }
 }
 
