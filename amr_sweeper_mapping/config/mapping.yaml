@@ -48,6 +48,7 @@
     base_frame:                    base_footprint                   # Robot body frame used by the in-package scan map builder readiness checks.
     scan_topic:                    depth_camera/scan                # Depth-camera laserscan topic relative to the robot namespace.
     heading_topic:                 imu/data_heading                 # IMU heading used only for the startup georeferenced costmap lock-in; runtime map -> odom corrections are handled by map_pose_node.
+    map_pose_status_topic:         mapping/map_pose_status          # map_pose_node health topic. BOOTSTRAP, DEGRADED, HEALTHY, and WARNING all allow scan integration; FAULT blocks it.
     georef_lock_window_seconds:    3.0                              # Wait this long while collecting GNSS and IMU heading samples before locking the saved georeferenced costmap into the metric map frame.
     georef_lock_min_samples:       10                               # Minimum samples required inside the stabilization window before the one-time startup costmap lock is accepted.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.

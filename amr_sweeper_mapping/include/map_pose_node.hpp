@@ -21,7 +21,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
-#include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -29,6 +29,15 @@
 
 namespace amr_sweeper_mapping
 {
+
+enum class MapPoseHealthState
+{
+  BOOTSTRAP,
+  DEGRADED,
+  HEALTHY,
+  WARNING,
+  FAULT
+};
 
 class MapPoseNode : public rclcpp::Node
 {
@@ -62,6 +71,7 @@ private:
     sensor_msgs::msg::LaserScan latest_scan;
     nav_msgs::msg::OccupancyGrid latest_global_costmap;
     std::shared_ptr<const std::vector<float>> latest_global_costmap_score_field;
+    rclcpp::Time latest_odometry_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_scan_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_global_costmap_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_map_pose_stamp{0, 0, RCL_ROS_TIME};
@@ -96,7 +106,10 @@ private:
     int grid_x,
     int grid_y) const;
   [[nodiscard]] StateSnapshot snapshotState() const;
+  void publishMapPoseStatus(const StateSnapshot & snapshot);
+  [[nodiscard]] bool odometryInputReady(const StateSnapshot & snapshot) const;
   [[nodiscard]] bool correctionInputsReady(const StateSnapshot & snapshot) const;
+  [[nodiscard]] std::string composeHealthReason(const StateSnapshot & snapshot) const;
   [[nodiscard]] bool shouldHoldIdentityAtStartup(const StateSnapshot & snapshot);
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> latestMapPositionFromNavSat() const;
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPositionFromArtifactGeoreference() const;
@@ -117,7 +130,7 @@ private:
   std::string heading_topic_;
   std::string scan_topic_;
   std::string global_costmap_topic_;
-  std::string startup_ready_topic_;
+  std::string status_topic_;
   std::string fromll_service_name_;
   std::string costmap_yaml_path_;
   bool publish_identity_when_pose_missing_{true};
@@ -159,9 +172,12 @@ private:
   double prior_blend_weight_{0.7};
   double scan_timeout_seconds_{1.0};
   double costmap_timeout_seconds_{2.0};
+  double odometry_timeout_seconds_{1.0};
   double scan_match_period_seconds_{0.5};
   double global_costmap_min_update_period_seconds_{0.5};
   int startup_ready_streak_required_{3};
+  int degraded_streak_before_warning_{3};
+  int degraded_streak_before_fault_{6};
   double max_translation_jump_m_{0.75};
   double max_yaw_jump_rad_{0.35};
   double transform_smoothing_alpha_{0.35};
@@ -200,6 +216,8 @@ private:
   bool pending_global_costmap_ready_{false};
   bool pending_global_costmap_dirty_{false};
   bool shutdown_global_costmap_worker_{false};
+  MapPoseHealthState health_state_{MapPoseHealthState::BOOTSTRAP};
+  int degraded_input_streak_{0};
   std::thread global_costmap_worker_;
   rclcpp::CallbackGroup::SharedPtr subscription_callback_group_;
   rclcpp::CallbackGroup::SharedPtr publish_callback_group_;
@@ -208,7 +226,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_subscription_;
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr startup_ready_publisher_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::TimerBase::SharedPtr publish_timer_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

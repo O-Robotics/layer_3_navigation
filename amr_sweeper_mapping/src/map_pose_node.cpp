@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <queue>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -132,6 +133,24 @@ double geographicDistanceMeters(
   return std::hypot(delta_latitude_m, delta_longitude_m);
 }
 
+const char * healthStateToString(const MapPoseHealthState state)
+{
+  switch (state) {
+    case MapPoseHealthState::BOOTSTRAP:
+      return "BOOTSTRAP";
+    case MapPoseHealthState::DEGRADED:
+      return "DEGRADED";
+    case MapPoseHealthState::HEALTHY:
+      return "HEALTHY";
+    case MapPoseHealthState::WARNING:
+      return "WARNING";
+    case MapPoseHealthState::FAULT:
+      return "FAULT";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 }  // namespace
 
 MapPoseNode::MapPoseNode()
@@ -145,7 +164,7 @@ MapPoseNode::MapPoseNode()
   declare_parameter("heading_topic", std::string("imu/data_heading"));
   declare_parameter("scan_topic", std::string("depth_camera/scan"));
   declare_parameter("global_costmap_topic", std::string("mapping/global_costmap"));
-  declare_parameter("startup_ready_topic", std::string("mapping/map_pose_startup_ready"));
+  declare_parameter("status_topic", std::string("mapping/map_pose_status"));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("costmap_yaml_path", std::string(""));
   declare_parameter("publish_period_seconds", 0.5);
@@ -178,9 +197,12 @@ MapPoseNode::MapPoseNode()
   declare_parameter("prior_blend_weight", 0.7);
   declare_parameter("scan_timeout_seconds", 1.0);
   declare_parameter("costmap_timeout_seconds", 2.0);
+  declare_parameter("odometry_timeout_seconds", 1.0);
   declare_parameter("scan_match_period_seconds", 0.5);
   declare_parameter("global_costmap_min_update_period_seconds", 0.5);
   declare_parameter("startup_ready_streak_required", 3);
+  declare_parameter("degraded_streak_before_warning", 3);
+  declare_parameter("degraded_streak_before_fault", 6);
   declare_parameter("max_translation_jump_m", 0.75);
   declare_parameter("max_yaw_jump_rad", 0.35);
   declare_parameter("transform_smoothing_alpha", 0.35);
@@ -202,7 +224,7 @@ MapPoseNode::MapPoseNode()
   heading_topic_ = get_parameter("heading_topic").as_string();
   scan_topic_ = get_parameter("scan_topic").as_string();
   global_costmap_topic_ = get_parameter("global_costmap_topic").as_string();
-  startup_ready_topic_ = get_parameter("startup_ready_topic").as_string();
+  status_topic_ = get_parameter("status_topic").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   costmap_yaml_path_ = get_parameter("costmap_yaml_path").as_string();
   publish_identity_when_pose_missing_ =
@@ -261,6 +283,9 @@ MapPoseNode::MapPoseNode()
   prior_blend_weight_ = std::clamp(get_parameter("prior_blend_weight").as_double(), 0.0, 1.0);
   scan_timeout_seconds_ = std::max(0.05, get_parameter("scan_timeout_seconds").as_double());
   costmap_timeout_seconds_ = std::max(0.05, get_parameter("costmap_timeout_seconds").as_double());
+  odometry_timeout_seconds_ = std::max(
+    0.05,
+    get_parameter("odometry_timeout_seconds").as_double());
   scan_match_period_seconds_ = std::max(
     0.0,
     get_parameter("scan_match_period_seconds").as_double());
@@ -270,6 +295,12 @@ MapPoseNode::MapPoseNode()
   startup_ready_streak_required_ = std::max(
     1,
     static_cast<int>(get_parameter("startup_ready_streak_required").as_int()));
+  degraded_streak_before_warning_ = std::max(
+    1,
+    static_cast<int>(get_parameter("degraded_streak_before_warning").as_int()));
+  degraded_streak_before_fault_ = std::max(
+    degraded_streak_before_warning_,
+    static_cast<int>(get_parameter("degraded_streak_before_fault").as_int()));
   max_translation_jump_m_ = std::max(0.0, get_parameter("max_translation_jump_m").as_double());
   max_yaw_jump_rad_ = std::max(0.0, get_parameter("max_yaw_jump_rad").as_double());
   transform_smoothing_alpha_ = std::clamp(
@@ -352,8 +383,8 @@ MapPoseNode::MapPoseNode()
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MapPoseNode::handleGlobalCostmap, this, std::placeholders::_1),
     subscription_options);
-  startup_ready_publisher_ = create_publisher<std_msgs::msg::Bool>(
-    startup_ready_topic_,
+  status_publisher_ = create_publisher<std_msgs::msg::String>(
+    status_topic_,
     rclcpp::QoS(1).reliable().transient_local());
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -515,6 +546,7 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.latest_scan = latest_scan_;
   snapshot.latest_global_costmap = latest_global_costmap_;
   snapshot.latest_global_costmap_score_field = latest_global_costmap_score_field_;
+  snapshot.latest_odometry_stamp = latest_odometry_stamp_;
   snapshot.latest_scan_stamp = latest_scan_stamp_;
   snapshot.latest_global_costmap_stamp = latest_global_costmap_stamp_;
   snapshot.latest_map_pose_stamp = latest_map_pose_stamp_;
@@ -524,12 +556,22 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   return snapshot;
 }
 
+bool MapPoseNode::odometryInputReady(const StateSnapshot & snapshot) const
+{
+  if (!snapshot.latest_odometry_ready) {
+    return false;
+  }
+
+  if (snapshot.latest_odometry_stamp.nanoseconds() == 0) {
+    return false;
+  }
+
+  return (now() - snapshot.latest_odometry_stamp).seconds() <= odometry_timeout_seconds_;
+}
+
 bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
 {
-  if (
-    !snapshot.latest_odometry_ready || !snapshot.latest_scan_ready ||
-    !snapshot.latest_global_costmap_ready)
-  {
+  if (!odometryInputReady(snapshot) || !snapshot.latest_scan_ready || !snapshot.latest_global_costmap_ready) {
     return false;
   }
 
@@ -560,6 +602,53 @@ bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
   }
 
   return true;
+}
+
+std::string MapPoseNode::composeHealthReason(const StateSnapshot & snapshot) const
+{
+  if (!snapshot.latest_odometry_ready) {
+    return "odometry_missing";
+  }
+  if (snapshot.latest_odometry_stamp.nanoseconds() == 0) {
+    return "odometry_stamp_missing";
+  }
+  if ((now() - snapshot.latest_odometry_stamp).seconds() > odometry_timeout_seconds_) {
+    return "odometry_stale";
+  }
+  if (!snapshot.latest_scan_ready) {
+    return "scan_missing";
+  }
+  if ((now() - snapshot.latest_scan_stamp).seconds() > scan_timeout_seconds_) {
+    return "scan_stale";
+  }
+  if (!snapshot.latest_global_costmap_ready) {
+    return "global_costmap_missing";
+  }
+  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
+    return "global_costmap_stale";
+  }
+  if (snapshot.latest_scan.header.frame_id.empty()) {
+    return "scan_frame_missing";
+  }
+  try {
+    const rclcpp::Time transform_stamp =
+      snapshot.latest_scan.header.stamp.sec == 0 && snapshot.latest_scan.header.stamp.nanosec == 0 ?
+      now() :
+      rclcpp::Time(snapshot.latest_scan.header.stamp);
+    tf_buffer_->lookupTransform(
+      base_frame_id_,
+      snapshot.latest_scan.header.frame_id,
+      transform_stamp,
+      tf2::durationFromSec(0.05));
+  } catch (const tf2::TransformException &) {
+    return "scan_to_base_tf_missing";
+  }
+
+  if (!snapshot.correction_startup_ready) {
+    return "startup_holdoff";
+  }
+
+  return "corrections_healthy";
 }
 
 bool MapPoseNode::shouldHoldIdentityAtStartup(const StateSnapshot & snapshot)
@@ -609,6 +698,76 @@ bool MapPoseNode::shouldHoldIdentityAtStartup(const StateSnapshot & snapshot)
     updated_streak,
     startup_ready_streak_required_);
   return true;
+}
+
+void MapPoseNode::publishMapPoseStatus(const StateSnapshot & snapshot)
+{
+  const bool odometry_ready = odometryInputReady(snapshot);
+  const bool correction_ready = correctionInputsReady(snapshot);
+  const bool startup_cleared = snapshot.correction_startup_ready;
+  const std::string reason = composeHealthReason(snapshot);
+
+  MapPoseHealthState next_state = MapPoseHealthState::BOOTSTRAP;
+  int degraded_streak = 0;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (!odometry_ready) {
+      degraded_input_streak_ = std::max(degraded_input_streak_, degraded_streak_before_fault_);
+      next_state = MapPoseHealthState::FAULT;
+    } else if (!startup_cleared) {
+      degraded_input_streak_ = 0;
+      next_state = MapPoseHealthState::BOOTSTRAP;
+    } else if (correction_ready) {
+      degraded_input_streak_ = 0;
+      next_state = MapPoseHealthState::HEALTHY;
+    } else {
+      degraded_input_streak_ = std::min(degraded_input_streak_ + 1, degraded_streak_before_fault_);
+      if (degraded_input_streak_ >= degraded_streak_before_fault_) {
+        next_state = MapPoseHealthState::FAULT;
+      } else if (degraded_input_streak_ >= degraded_streak_before_warning_) {
+        next_state = MapPoseHealthState::WARNING;
+      } else {
+        next_state = MapPoseHealthState::DEGRADED;
+      }
+    }
+    degraded_streak = degraded_input_streak_;
+    if (health_state_ != next_state) {
+      RCLCPP_INFO(
+        get_logger(),
+        "map_pose_node state transition %s -> %s (%s).",
+        healthStateToString(health_state_),
+        healthStateToString(next_state),
+        reason.c_str());
+      health_state_ = next_state;
+    }
+  }
+
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(3)
+         << "state=" << healthStateToString(next_state)
+         << "; reason=" << reason
+         << "; startup_cleared=" << (startup_cleared ? "true" : "false")
+         << "; correction_ready=" << (correction_ready ? "true" : "false")
+         << "; correction_ready_streak=" << snapshot.correction_ready_streak
+         << "/" << startup_ready_streak_required_
+         << "; degraded_streak=" << degraded_streak
+         << "/" << degraded_streak_before_fault_
+         << "; odometry_ready=" << (odometry_ready ? "true" : "false")
+         << "; scan_ready=" << (snapshot.latest_scan_ready ? "true" : "false")
+         << "; global_costmap_ready=" << (snapshot.latest_global_costmap_ready ? "true" : "false");
+  if (snapshot.latest_odometry_stamp.nanoseconds() > 0) {
+    stream << "; odometry_age_s=" << (now() - snapshot.latest_odometry_stamp).seconds();
+  }
+  if (snapshot.latest_scan_stamp.nanoseconds() > 0) {
+    stream << "; scan_age_s=" << (now() - snapshot.latest_scan_stamp).seconds();
+  }
+  if (snapshot.latest_global_costmap_stamp.nanoseconds() > 0) {
+    stream << "; global_costmap_age_s=" << (now() - snapshot.latest_global_costmap_stamp).seconds();
+  }
+
+  std_msgs::msg::String status_message;
+  status_message.data = stream.str();
+  status_publisher_->publish(status_message);
 }
 
 void MapPoseNode::loadCostmapGeoreference()
@@ -1363,15 +1522,13 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
 
 void MapPoseNode::publishMapToOdomTransform()
 {
+  const StateSnapshot snapshot = snapshotState();
   if (map_frame_id_ == odom_frame_id_) {
+    publishMapPoseStatus(snapshot);
     return;
   }
-
-  const StateSnapshot snapshot = snapshotState();
-  std_msgs::msg::Bool startup_ready_message;
-  startup_ready_message.data = snapshot.correction_startup_ready;
-  startup_ready_publisher_->publish(startup_ready_message);
-  if (!snapshot.latest_odometry_ready) {
+  if (!odometryInputReady(snapshot)) {
+    publishMapPoseStatus(snapshot);
     return;
   }
 
@@ -1396,6 +1553,7 @@ void MapPoseNode::publishMapToOdomTransform()
         snapshot.latest_map_pose_stamp.nanoseconds() > 0 ? snapshot.latest_map_pose_stamp : now(),
         map_frame_id_,
         odom_frame_id_));
+    publishMapPoseStatus(snapshotState());
     return;
   }
 
@@ -1497,6 +1655,7 @@ void MapPoseNode::publishMapToOdomTransform()
       now(),
       map_frame_id_,
       odom_frame_id_));
+  publishMapPoseStatus(final_snapshot);
 }
 
 }  // namespace amr_sweeper_mapping
