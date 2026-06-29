@@ -111,6 +111,8 @@ private:
   [[nodiscard]] bool correctionInputsReady(const StateSnapshot & snapshot) const;
   [[nodiscard]] std::string composeHealthReason(const StateSnapshot & snapshot) const;
   [[nodiscard]] bool shouldHoldIdentityAtStartup(const StateSnapshot & snapshot);
+  [[nodiscard]] bool waitingForInitialGlobalCostmap(const StateSnapshot & snapshot) const;
+  [[nodiscard]] bool initialGlobalCostmapWaitTimedOut(const StateSnapshot & snapshot) const;
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> latestMapPositionFromNavSat() const;
   [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPositionFromArtifactGeoreference() const;
   [[nodiscard]] std::optional<geographic_msgs::msg::GeoPoint> artifactGeoPointFromMapPoint(
@@ -202,6 +204,7 @@ private:
   rclcpp::Time latest_heading_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_scan_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time global_costmap_wait_started_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_global_costmap_processed_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time pending_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_scan_match_attempt_stamp_{0, 0, RCL_ROS_TIME};

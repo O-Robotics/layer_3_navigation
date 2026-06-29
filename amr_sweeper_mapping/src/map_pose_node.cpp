@@ -349,6 +349,7 @@ MapPoseNode::MapPoseNode()
       measurement_noise_max_values[1],
       measurement_noise_max_values[2]};
   }
+  global_costmap_wait_started_ = now();
   loadCostmapGeoreference();
 
   subscription_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
@@ -579,10 +580,6 @@ bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
     return false;
   }
 
-  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
-    return false;
-  }
-
   if (snapshot.latest_scan.header.frame_id.empty()) {
     return false;
   }
@@ -604,6 +601,22 @@ bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
   return true;
 }
 
+bool MapPoseNode::waitingForInitialGlobalCostmap(const StateSnapshot & snapshot) const
+{
+  return !snapshot.latest_global_costmap_ready && !initialGlobalCostmapWaitTimedOut(snapshot);
+}
+
+bool MapPoseNode::initialGlobalCostmapWaitTimedOut(const StateSnapshot & snapshot) const
+{
+  if (snapshot.latest_global_costmap_ready) {
+    return false;
+  }
+  if (global_costmap_wait_started_.nanoseconds() == 0) {
+    return false;
+  }
+  return (now() - global_costmap_wait_started_).seconds() > costmap_timeout_seconds_;
+}
+
 std::string MapPoseNode::composeHealthReason(const StateSnapshot & snapshot) const
 {
   if (!snapshot.latest_odometry_ready) {
@@ -622,10 +635,10 @@ std::string MapPoseNode::composeHealthReason(const StateSnapshot & snapshot) con
     return "scan_stale";
   }
   if (!snapshot.latest_global_costmap_ready) {
-    return "global_costmap_missing";
-  }
-  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
-    return "global_costmap_stale";
+    if (initialGlobalCostmapWaitTimedOut(snapshot)) {
+      return "global_costmap_missing";
+    }
+    return "global_costmap_waiting";
   }
   if (snapshot.latest_scan.header.frame_id.empty()) {
     return "scan_frame_missing";
@@ -705,6 +718,7 @@ void MapPoseNode::publishMapPoseStatus(const StateSnapshot & snapshot)
   const bool odometry_ready = odometryInputReady(snapshot);
   const bool correction_ready = correctionInputsReady(snapshot);
   const bool startup_cleared = snapshot.correction_startup_ready;
+  const bool waiting_for_initial_costmap = waitingForInitialGlobalCostmap(snapshot);
   const std::string reason = composeHealthReason(snapshot);
 
   MapPoseHealthState next_state = MapPoseHealthState::BOOTSTRAP;
@@ -714,7 +728,10 @@ void MapPoseNode::publishMapPoseStatus(const StateSnapshot & snapshot)
     if (!odometry_ready) {
       degraded_input_streak_ = std::max(degraded_input_streak_, degraded_streak_before_fault_);
       next_state = MapPoseHealthState::FAULT;
-    } else if (!startup_cleared) {
+    } else if (waiting_for_initial_costmap) {
+      degraded_input_streak_ = 0;
+      next_state = MapPoseHealthState::BOOTSTRAP;
+    } else if (!startup_cleared && snapshot.latest_global_costmap_ready) {
       degraded_input_streak_ = 0;
       next_state = MapPoseHealthState::BOOTSTRAP;
     } else if (correction_ready) {
@@ -1218,15 +1235,6 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       3000,
       "Skipping map pose scan matching because the latest scan is stale by %.3fs.",
       (now() - snapshot.latest_scan_stamp).seconds());
-    return std::nullopt;
-  }
-  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      3000,
-      "Skipping map pose scan matching because the latest global costmap is stale by %.3fs.",
-      (now() - snapshot.latest_global_costmap_stamp).seconds());
     return std::nullopt;
   }
 
