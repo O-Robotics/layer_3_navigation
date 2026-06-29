@@ -109,6 +109,7 @@ private:
   void handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
+  [[nodiscard]] bool updateStartupTfReadiness(const std::string & scan_frame_id);
   void persistRuntimeCostmapArtifact();
   void tickMissionExecution();
   void tryRequestMissionEnd();
@@ -196,7 +197,9 @@ private:
   std::string map_pose_status_topic_;
   double runtime_costmap_save_period_seconds_{10.0};
   double nav2_costmap_ready_timeout_seconds_{2.5};
+  double startup_tf_lookup_timeout_seconds_{0.05};
   int static_obstacle_min_observations_{6};
+  int startup_tf_ready_streak_required_{3};
   double static_obstacle_min_occupied_fraction_{0.75};
   bool bootstrap_empty_global_costmap_{false};
   bool bootstrap_global_costmap_published_{false};
@@ -229,6 +232,7 @@ private:
   bool latest_padded_live_map_ready_{false};
   std::string map_pose_status_state_{"UNKNOWN"};
   std::string latest_map_pose_status_message_;
+  std::string startup_tf_status_detail_;
   bool nav2_local_costmap_ready_{false};
   bool nav2_global_costmap_ready_{false};
   bool latest_odometry_pose_ready_{false};
@@ -236,6 +240,7 @@ private:
   bool georeferenced_costmap_locked_{false};
   bool mission_anchor_pose_ready_{false};
   bool padded_live_map_bounds_ready_{false};
+  bool startup_tf_ready_{false};
   bool have_scan_{false};
   sensor_msgs::msg::LaserScan latest_scan_;
   geometry_msgs::msg::Point latest_odometry_position_;
@@ -247,6 +252,7 @@ private:
   geometry_msgs::msg::Point mission_anchor_position_;
   geometry_msgs::msg::Quaternion mission_anchor_orientation_;
   std::string last_scan_frame_id_;
+  int startup_tf_ready_streak_{0};
   double padded_live_map_min_x_{0.0};
   double padded_live_map_min_y_{0.0};
   double padded_live_map_max_x_{0.0};

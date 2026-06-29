@@ -861,6 +861,8 @@ MappingNode::MappingNode()
   declare_parameter("nav2_global_costmap_topic", std::string("global_costmap/costmap_raw"));
   declare_parameter("map_pose_status_topic", std::string("mapping/map_pose_status"));
   declare_parameter("nav2_costmap_ready_timeout_seconds", 2.5);
+  declare_parameter("startup_tf_lookup_timeout_seconds", 0.05);
+  declare_parameter("startup_tf_ready_streak_required", 3);
   declare_parameter("bootstrap_empty_global_costmap", false);
   declare_parameter("end_mission_service", std::string("end_mission"));
 
@@ -906,6 +908,10 @@ MappingNode::MappingNode()
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
   global_map_resolution_m_ = get_parameter("global_map_resolution_m").as_double();
   runtime_costmap_save_period_seconds_ = get_parameter("runtime_costmap_save_period_seconds").as_double();
+  startup_tf_lookup_timeout_seconds_ =
+    std::max(0.01, get_parameter("startup_tf_lookup_timeout_seconds").as_double());
+  startup_tf_ready_streak_required_ =
+    std::max(1, static_cast<int>(get_parameter("startup_tf_ready_streak_required").as_int()));
   static_obstacle_min_observations_ =
     static_cast<int>(get_parameter("static_obstacle_min_observations").as_int());
   static_obstacle_min_occupied_fraction_ =
@@ -1052,6 +1058,18 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
       "Delaying scan integration until map_pose_node reports a non-fault status on %s. current_state=%s",
       map_pose_status_topic_.c_str(),
       map_pose_status_state_.c_str());
+    return;
+  }
+  if (!updateStartupTfReadiness(message->header.frame_id)) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      3000,
+      "Waiting for local TF buffer warmup before scan integration. frame=%s streak=%d/%d detail=%s",
+      message->header.frame_id.c_str(),
+      startup_tf_ready_streak_,
+      startup_tf_ready_streak_required_,
+      startup_tf_status_detail_.c_str());
     return;
   }
   if (latest_odometry_pose_ready_) {
@@ -1271,6 +1289,49 @@ void MappingNode::handleMapPoseStatus(const std_msgs::msg::String::SharedPtr mes
       get_logger(),
       "map_pose_node entered FAULT; runtime scan integration will pause until the status recovers.");
   }
+}
+
+bool MappingNode::updateStartupTfReadiness(const std::string & scan_frame_id)
+{
+  if (startup_tf_ready_) {
+    return true;
+  }
+
+  if (scan_frame_id.empty()) {
+    startup_tf_ready_streak_ = 0;
+    startup_tf_status_detail_ = "missing_scan_frame";
+    return false;
+  }
+
+  std::string missing_reason;
+  const bool have_transform = tf_buffer_->canTransform(
+    map_frame_id_,
+    scan_frame_id,
+    tf2::TimePointZero,
+    tf2::durationFromSec(startup_tf_lookup_timeout_seconds_),
+    &missing_reason);
+
+  if (!have_transform) {
+    startup_tf_ready_streak_ = 0;
+    startup_tf_status_detail_ = missing_reason.empty() ? "map_to_scan_unavailable" : missing_reason;
+    return false;
+  }
+
+  startup_tf_ready_streak_ = std::min(
+    startup_tf_ready_streak_ + 1,
+    startup_tf_ready_streak_required_);
+  startup_tf_status_detail_ = "map_to_scan_available";
+  if (startup_tf_ready_streak_ >= startup_tf_ready_streak_required_) {
+    startup_tf_ready_ = true;
+    startup_tf_status_detail_ = "ready";
+    RCLCPP_INFO(
+      get_logger(),
+      "Startup TF warmup complete for %s -> %s after %d consecutive checks; scan integration is now enabled.",
+      scan_frame_id.c_str(),
+      map_frame_id_.c_str(),
+      startup_tf_ready_streak_required_);
+  }
+  return startup_tf_ready_;
 }
 
 void MappingNode::pruneGeoreferenceSamples()
@@ -1767,6 +1828,8 @@ std::string MappingNode::composeMapBuilderStatus() const
   stream
     << "ready=" << (ready ? "true" : "false")
     << "; map_pose_status=" << map_pose_status_state_
+    << "; startup_tf_ready=" << (startup_tf_ready_ ? "true" : "false")
+    << "; startup_tf_streak=" << startup_tf_ready_streak_ << "/" << startup_tf_ready_streak_required_
     << "; tracking=" << (have_global_map ? "true" : "false")
     << "; scan_tf=" << (have_scan_to_base_tf ? "true" : "false")
     << "; base_frame=" << (have_base_frame ? "true" : "false")
@@ -1777,6 +1840,9 @@ std::string MappingNode::composeMapBuilderStatus() const
     << "; pose_frame=" << (latest_odometry_pose_ready_ ? odom_frame_id_ : "<none>");
   if (!latest_map_pose_status_message_.empty()) {
     stream << "; map_pose_status_detail=" << latest_map_pose_status_message_;
+  }
+  if (!startup_tf_status_detail_.empty()) {
+    stream << "; startup_tf_detail=" << startup_tf_status_detail_;
   }
   return stream.str();
 }

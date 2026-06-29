@@ -49,6 +49,8 @@
     scan_topic:                    depth_camera/scan                # Depth-camera laserscan topic relative to the robot namespace.
     heading_topic:                 imu/data_heading                 # IMU heading used only for the startup georeferenced costmap lock-in; runtime map -> odom corrections are handled by map_pose_node.
     map_pose_status_topic:         mapping/map_pose_status          # map_pose_node health topic. BOOTSTRAP, DEGRADED, HEALTHY, and WARNING all allow scan integration; FAULT blocks it.
+    startup_tf_lookup_timeout_seconds: 0.05                        # Wait this long per scan while the local tf listener warms up and ingests the full map -> sensor chain before startup scan integration begins.
+    startup_tf_ready_streak_required: 3                            # Require this many consecutive successful map -> scan transform checks before the first scan is allowed into the runtime map builder.
     georef_lock_window_seconds:    3.0                              # Wait this long while collecting GNSS and IMU heading samples before locking the saved georeferenced costmap into the metric map frame.
     georef_lock_min_samples:       10                               # Minimum samples required inside the stabilization window before the one-time startup costmap lock is accepted.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
