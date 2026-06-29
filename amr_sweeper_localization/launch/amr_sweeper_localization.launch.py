@@ -65,11 +65,17 @@ def _load_launch_defaults() -> dict[str, str]:
 def _launch_fusioncore(context, *args, **kwargs):
     namespace = LaunchConfiguration("namespace").perform(context)
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
+    use_simulation = LaunchConfiguration("use_simulation").perform(context).lower() == "true"
     use_imu = LaunchConfiguration("use_imu").perform(context).lower() == "true"
     use_imu2 = LaunchConfiguration("use_imu2").perform(context).lower() == "true"
     use_encoder = LaunchConfiguration("use_encoder").perform(context).lower() == "true"
     use_visual_odometry = LaunchConfiguration("use_visual_odometry").perform(context).lower() == "true"
     use_gnss = LaunchConfiguration("use_gnss").perform(context).lower() == "true"
+    if use_simulation:
+        use_imu = False
+        use_imu2 = False
+        use_visual_odometry = False
+        use_gnss = False
     parameters = _load_localization_parameters()
     gnss_input_topic = "gnss/fix" if parameters.get("gnss.use_gps_fix", False) else "gnss/navsat"
 
@@ -127,7 +133,7 @@ def _launch_fusioncore(context, *args, **kwargs):
     )
 
     configure = TimerAction(
-        period=2.0,
+        period=5.0,
         actions=[
             EmitEvent(
                 event=ChangeState(
@@ -169,6 +175,11 @@ def generate_launch_description():
                 "use_sim_time",
                 default_value="false",
                 description="Use ROS time if true",
+            ),
+            DeclareLaunchArgument(
+                "use_simulation",
+                default_value="false",
+                description="Disable real-hardware localization inputs when true",
             ),
             DeclareLaunchArgument(
                 "use_visual_odometry",

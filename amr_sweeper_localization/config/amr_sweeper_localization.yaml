@@ -47,12 +47,12 @@ fusioncore:
     # -- GNSS ------------------------------------------------------------------
     gnss.use_gps_fix:                       true                  # Consume NavSatFix-quality data from the GNSS pipeline.
     gnss.velocity_topic:                    ""                    # No standalone GNSS velocity topic is configured.
-    gnss.base_noise_xy:                     2.0                   # Baseline horizontal GNSS position sigma in meters.
+    gnss.base_noise_xy:                     3.0                   # Slightly loosen horizontal GNSS trust at startup; replay sweeps consistently reduced XY excursions with this setting.
     gnss.base_noise_z:                      4.0                   # Baseline vertical GNSS position sigma in meters.
     gnss.heading_noise:                     0.02                  # GNSS-derived heading sigma in radians.
     gnss.max_hdop:                          2.5                   # Reject fixes whose HDOP exceeds this threshold.
     gnss.min_satellites:                    6                     # Require at least this many satellites before accepting a fix.
-    gnss.min_fix_type:                      3                     # Require a 3D-quality fix or better before fusion.
+    gnss.min_fix_type:                      4                     # Require RTK-fixed quality before startup fusion; this consistently improved pre-motion stability in replay.
     gnss.fix2_topic:                        ""                    # No second GNSS receiver is configured by default.
     gnss.heading_topic:                     ""                    # No dedicated GNSS heading topic is configured.
     gnss.azimuth_topic:                     ""                    # IMU compass yaw published as REP-145 azimuth.
@@ -111,7 +111,7 @@ fusioncore:
     adaptive.encoder:                      true                   # Let FusionCore adapt wheel-odometry noise online.
     adaptive.gnss:                         true                   # Let FusionCore adapt GNSS noise online.
     adaptive.ground_constraint:            true                   # Let FusionCore adapt ground-constraint noise online.
-    adaptive.window:                       50                     # Number of samples used by the adaptive noise estimator.
+    adaptive.window:                       20                     # Shorter adaptive window reacted better in the completed convergence sweeps while preserving startup stability.
     adaptive.alpha:                        0.01                   # Exponential smoothing factor for adaptive noise updates.
 
     # -- Zero-velocity updates -------------------------------------------------
@@ -126,7 +126,7 @@ fusioncore:
     ground_constraint.z_position_sigma:    0.0                    # Sigma for constraining vertical position drift when planar assumptions hold.
 
     # -- Startup behavior ------------------------------------------------------
-    init.stationary_window:                4.0                    # Seconds of startup data used to estimate a stable initial state.
+    init.stationary_window:                2.0                    # Shorter startup averaging window consistently outperformed 4 s in the bag replay campaign.
     init.wait_for_all_sensors:             true                   # Delay initialization until all enabled sensor streams have appeared.
     init.sensor_wait_timeout:              10.0                   # Maximum time to wait for enabled sensors before startup proceeds.
 
@@ -135,7 +135,7 @@ fusioncore:
 
     # -- UKF process noise -----------------------------------------------------
     ukf.q_position:                        0.01                   # Process noise for position state propagation.
-    ukf.q_orientation:                     1.0e-9                 # Process noise for orientation state propagation.
+    ukf.q_orientation:                     1.0e-10                # Lower orientation process noise reduced startup heading wander in the completed convergence runs.
     ukf.q_velocity:                        0.1                    # Process noise for linear velocity state propagation.
     ukf.q_angular_vel:                     0.1                    # Process noise for angular velocity state propagation.
     ukf.q_acceleration:                    1.0                    # Process noise for linear acceleration state propagation.

@@ -338,6 +338,11 @@ def generate_launch_description():
         default_value='amr_sweeper',
         description='Top-level namespace')
 
+    declare_use_simulation_cmd = DeclareLaunchArgument(
+        'use_simulation',
+        default_value='false',
+        description='Simulation mode flag')
+
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false',
@@ -404,6 +409,7 @@ def generate_launch_description():
     ld.add_action(colorized_logs_envvar)
     ld.add_action(console_output_format_envvar)
     ld.add_action(declare_namespace_cmd)
+    ld.add_action(declare_use_simulation_cmd)
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_mission_costmap_yaml_cmd)

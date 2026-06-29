@@ -14,6 +14,7 @@ def generate_launch_description():
     console_output_format = "[{severity}] [{time}] [{name}] : {message}"
 
     namespace = LaunchConfiguration("namespace")
+    use_simulation = LaunchConfiguration("use_simulation")
     use_sim_time = LaunchConfiguration("use_sim_time")
     autostart = LaunchConfiguration("autostart")
     params_file = LaunchConfiguration("params_file")
@@ -32,6 +33,7 @@ def generate_launch_description():
         SetEnvironmentVariable("RCUTILS_LOGGING_BUFFERED_STREAM", "1"),
         SetEnvironmentVariable("RCUTILS_CONSOLE_OUTPUT_FORMAT", console_output_format),
         DeclareLaunchArgument("namespace", default_value="amr_sweeper", description="Top-level namespace"),
+        DeclareLaunchArgument("use_simulation", default_value="false", description="Simulation mode flag"),
         DeclareLaunchArgument("use_sim_time", default_value="false", description="Use ROS time if true"),
         DeclareLaunchArgument("autostart", default_value="true", description="Automatically startup the nav2 stack"),
         DeclareLaunchArgument(
@@ -58,6 +60,7 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(os.path.join(launch_dir, "navigation_launch.py")),
                 launch_arguments={
                     "namespace": namespace,
+                    "use_simulation": use_simulation,
                     "use_sim_time": use_sim_time,
                     "params_file": params_file,
                     "mission_costmap_yaml": mission_costmap_yaml,

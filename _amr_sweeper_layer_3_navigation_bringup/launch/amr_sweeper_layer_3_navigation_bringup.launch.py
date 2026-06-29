@@ -193,6 +193,8 @@ def _mission_requires_mapping(
 def _build_launches(context):
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
+    use_simulation = LaunchConfiguration('use_simulation')
+    use_simulation_bool = use_simulation.perform(context).lower() == 'true'
     legacy_navigation_startup_delay_sec = float(
         LaunchConfiguration('waypoint_follower_startup_delay_sec').perform(context)
     )
@@ -250,6 +252,11 @@ def _build_launches(context):
         'use_amr_sweeper_mapping',
         use_amr_sweeper_mapping,
     )
+    if use_simulation_bool:
+        use_imu = False
+        use_imu2 = False
+        use_gnss = False
+        use_amr_sweeper_visual_odometry_bool = False
     effective_mission_type = mission_type or mission_context.get("mission_type", "")
     effective_execution_mode = mission_context.get("execution_mode", "")
     effective_mission_file = mission_file or mission_context.get("mission_file", "")
@@ -292,6 +299,7 @@ def _build_launches(context):
             launch_arguments={
                 'namespace': namespace,
                 'use_sim_time': use_sim_time,
+                'use_simulation': use_simulation,
             }.items(),
             condition=IfCondition(use_amr_sweeper_visual_odometry),
         ),
@@ -303,6 +311,7 @@ def _build_launches(context):
         launch_arguments={
             'namespace': namespace,
             'use_sim_time': use_sim_time,
+            'use_simulation': use_simulation,
             'mission_costmap_yaml': effective_mission_costmap_yaml,
         }.items(),
     )
@@ -327,6 +336,7 @@ def _build_launches(context):
         launch_arguments={
             'namespace': namespace,
             'use_sim_time': use_sim_time,
+            'use_simulation': use_simulation,
             'mission_execution_directory': mission_execution_directory,
             'mission_file': effective_mission_file,
             'mission_id': effective_mission_id,
@@ -413,7 +423,7 @@ def _build_launches(context):
         )
 
         configure_fusioncore = TimerAction(
-            period=2.0,
+            period=5.0,
             actions=[
                 EmitEvent(
                     event=ChangeState(
@@ -483,6 +493,7 @@ def generate_launch_description():
         SetEnvironmentVariable('RCUTILS_COLORIZED_OUTPUT', '1'),
         SetEnvironmentVariable('RCUTILS_CONSOLE_OUTPUT_FORMAT', console_output_format),
         DeclareLaunchArgument('namespace', default_value='amr_sweeper'),
+        DeclareLaunchArgument('use_simulation', default_value='false'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('use_amr_sweeper_localization', default_value='true'),
         DeclareLaunchArgument(
