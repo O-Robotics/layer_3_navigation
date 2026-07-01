@@ -248,15 +248,24 @@ class Layer3SystemCheck(Node):
 def main() -> int:
     rclpy.init()
     node = Layer3SystemCheck()
+    interrupted = False
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        interrupted = True
     finally:
         exit_code = 1 if node.failed else 0
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if interrupted and not node.failed:
+            exit_code = 0
+        try:
+            node.destroy_node()
+        except (KeyboardInterrupt, RuntimeError):
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except RuntimeError:
+            pass
     return exit_code
 
 

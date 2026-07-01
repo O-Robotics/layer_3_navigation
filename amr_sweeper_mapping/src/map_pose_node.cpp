@@ -936,6 +936,9 @@ void MapPoseNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
   latest_odometry_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
     now() :
     rclcpp::Time(message->header.stamp);
+  if (latest_odometry_stamp_.nanoseconds() > latest_map_pose_stamp_.nanoseconds()) {
+    latest_map_pose_stamp_ = latest_odometry_stamp_;
+  }
   latest_odometry_ready_ = true;
 }
 
@@ -943,9 +946,6 @@ void MapPoseNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
 {
   std::lock_guard<std::mutex> lock(state_mutex_);
   latest_navsat_ = *message;
-  latest_map_pose_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
-    now() :
-    rclcpp::Time(message->header.stamp);
   latest_navsat_ready_ = true;
 }
 
@@ -956,7 +956,6 @@ void MapPoseNode::handleHeading(const sensor_msgs::msg::Imu::SharedPtr message)
   latest_heading_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
     now() :
     rclcpp::Time(message->header.stamp);
-  latest_map_pose_stamp_ = latest_heading_stamp_;
   latest_heading_ready_ = true;
 }
 
@@ -967,7 +966,9 @@ void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
   latest_scan_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
     now() :
     rclcpp::Time(message->header.stamp);
-  latest_map_pose_stamp_ = latest_scan_stamp_;
+  if (latest_scan_stamp_.nanoseconds() > latest_map_pose_stamp_.nanoseconds()) {
+    latest_map_pose_stamp_ = latest_scan_stamp_;
+  }
   latest_scan_ready_ = true;
 }
 

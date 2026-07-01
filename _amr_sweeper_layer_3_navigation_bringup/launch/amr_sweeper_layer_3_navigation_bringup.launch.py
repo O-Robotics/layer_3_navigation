@@ -320,6 +320,7 @@ def _build_launches(context):
         namespace=LaunchConfiguration('namespace').perform(context),
         output='screen',
         parameters=[{
+            'use_sim_time': use_sim_time,
             'global_frame': 'map' if navigation_launch_filename == 'programmed_missions_navigation.launch.py' else 'odom',
             'robot_frame': 'base_footprint',
             'action_name': 'follow_waypoints',
