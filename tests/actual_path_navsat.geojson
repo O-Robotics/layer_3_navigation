@@ -1,0 +1,30 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [
+          [
+            -79.87110348950749,
+            43.25569736475984
+          ]
+        ],
+        "type": "LineString"
+      },
+      "properties": {
+        "coordinate_frame": "wgs84",
+        "local_companion_file": "actual_path.geojson",
+        "name": "actual_path_navsat",
+        "position_source": "gnss/navsat",
+        "raw_navsat_timestamps": [
+          "1782832036.559331162"
+        ],
+        "sample_count": 1,
+        "sample_timestamps": [
+          "14.703000000"
+        ]
+      },
+      "type": "Feature"
+    }
+  ],
+  "type": "FeatureCollection"
+}

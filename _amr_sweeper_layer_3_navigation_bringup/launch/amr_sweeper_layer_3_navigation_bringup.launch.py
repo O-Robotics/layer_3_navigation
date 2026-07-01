@@ -253,9 +253,7 @@ def _build_launches(context):
         use_amr_sweeper_mapping,
     )
     if use_simulation_bool:
-        use_imu = False
         use_imu2 = False
-        use_gnss = False
         use_amr_sweeper_visual_odometry_bool = False
     effective_mission_type = mission_type or mission_context.get("mission_type", "")
     effective_execution_mode = mission_context.get("execution_mode", "")

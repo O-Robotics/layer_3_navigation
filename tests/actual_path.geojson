@@ -1,0 +1,22 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [
+          [
+            -0.003497893548319907,
+            -2.419375726163661e-06
+          ]
+        ],
+        "type": "LineString"
+      },
+      "properties": {
+        "coordinate_frame": "odom",
+        "geographic_companion_file": "actual_path_navsat.geojson",
+        "name": "actual_path"
+      },
+      "type": "Feature"
+    }
+  ],
+  "type": "FeatureCollection"
+}

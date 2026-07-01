@@ -72,10 +72,8 @@ def _launch_fusioncore(context, *args, **kwargs):
     use_visual_odometry = LaunchConfiguration("use_visual_odometry").perform(context).lower() == "true"
     use_gnss = LaunchConfiguration("use_gnss").perform(context).lower() == "true"
     if use_simulation:
-        use_imu = False
         use_imu2 = False
         use_visual_odometry = False
-        use_gnss = False
     parameters = _load_localization_parameters()
     gnss_input_topic = "gnss/fix" if parameters.get("gnss.use_gps_fix", False) else "gnss/navsat"
 
