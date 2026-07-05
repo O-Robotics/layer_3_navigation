@@ -94,7 +94,6 @@ def _launch_fusioncore(context, *args, **kwargs):
         "gnss.azimuth_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.azimuth_topic", "")),
         "publish.tf": False,
     }
-
     projection_node = Node(
         package="amr_sweeper_localization",
         executable="odometry_projection_node",

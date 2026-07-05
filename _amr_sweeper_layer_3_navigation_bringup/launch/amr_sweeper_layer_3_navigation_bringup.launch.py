@@ -323,7 +323,7 @@ def _build_launches(context):
             'use_sim_time': use_sim_time,
             'global_frame': 'map' if navigation_launch_filename == 'programmed_missions_navigation.launch.py' else 'odom',
             'robot_frame': 'base_footprint',
-            'action_name': 'follow_waypoints',
+            'action_name': 'navigate_through_poses',
             'passed_topic': 'layer_3/system_check_passed',
         }],
         condition=IfCondition(LaunchConfiguration('run_layer_3_system_check')),
@@ -362,7 +362,10 @@ def _build_launches(context):
     if use_amr_sweeper_localization:
         use_sim_time_bool = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
         localization_parameters = _load_localization_parameters()
-        gnss_input_topic = "gnss/fix" if localization_parameters.get("gnss.use_gps_fix", False) else "gnss/navsat"
+        use_gps_fix_input = localization_parameters.get("gnss.use_gps_fix", False)
+        if use_simulation_bool:
+            use_gps_fix_input = False
+        gnss_input_topic = "gnss/fix" if use_gps_fix_input else "gnss/navsat"
 
         fusion_overrides = {
             "use_sim_time": use_sim_time_bool,
@@ -385,7 +388,21 @@ def _build_launches(context):
                 use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
             "publish.tf": False,
         }
-
+        if use_simulation_bool:
+            # Simulation brings wheel odometry online later than hardware. Keep FusionCore
+            # from initializing before encoder data exists, otherwise the filter can start
+            # IMU-only while GNSS is still intentionally below RTK-fixed quality.
+            fusion_overrides.update({
+                "init.sensor_wait_timeout": 30.0,
+                # Use NavSatFix in simulation. The synthetic GNSS publishes both message
+                # families, but FusionCore's simulated pose-derived path is more stable on
+                # NavSatFix while still preserving RTK-fixed gating through STATUS_GBAS_FIX.
+                "gnss.use_gps_fix": False,
+                "gnss.min_satellites": 4,
+                # Sim GNSS positions are useful, but GPS track-heading from short-baseline
+                # synthetic fixes can overconstrain the UKF during startup and early turns.
+                "gnss.track_heading_enabled": False,
+            })
         odometry_projection_node = Node(
             package="amr_sweeper_localization",
             executable="odometry_projection_node",

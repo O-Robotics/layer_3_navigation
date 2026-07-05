@@ -67,6 +67,11 @@ def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
     )
     _set_nested(
         nav2_params,
+        ['global_costmap', 'global_costmap', 'ros__parameters', 'obstacle_layer', 'scan', 'topic'],
+        _qualify_topic(namespace_value, 'depth_camera/scan'),
+    )
+    _set_nested(
+        nav2_params,
         ['behavior_server', 'ros__parameters', 'local_costmap_topic'],
         _qualify_topic(namespace_value, 'local_costmap/costmap_raw'),
     )

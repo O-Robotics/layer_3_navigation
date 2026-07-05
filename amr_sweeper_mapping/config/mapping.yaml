@@ -59,7 +59,7 @@
     static_obstacle_min_observations: 6                             # Minimum number of occupied observations before a scanned obstacle is considered static enough to persist into the runtime costmap artifact.
     static_obstacle_min_occupied_fraction: 0.75                     # Minimum occupied-observation fraction required before a cell is treated as static structure instead of a transient obstacle.
     bootstrap_empty_global_costmap: false                           # When true, publish an in-memory unknown occupancy grid around the current odometry pose so dummy runs can bootstrap Nav2 without any saved costmap artifact on disk.
-    follow_waypoints_action:       follow_waypoints                 # Nav2 action name relative to the robot namespace.
+    navigate_through_poses_action: navigate_through_poses           # Nav2 action name relative to the robot namespace.
     pad_live_map_to_minimum_size:  true                             # Republish the live global occupancy grid with a minimum square footprint so short default missions are plan-able immediately.
     min_global_map_size_m:         10.0                             # Minimum width/height of the republished live map in meters before Nav2 sees it.
 
@@ -68,5 +68,7 @@
     repeat_mission:                false
     max_segments_per_goal:         4
     max_waypoint_spacing_m:        0.5                             # Densify long route segments so Nav2 plans to nearer intermediate targets while SLAM is still expanding the live map.
+    advance_past_blocked_waypoints: true                           # When Nav2 cannot reach a chunk target, skip that blocked waypoint and continue toward the next route waypoint.
+    max_blocked_waypoint_advances: 20                              # Abort after this many consecutive blocked-waypoint skips to avoid endless coverage loss.
     status_period_seconds:         2.0
     mission_tick_period_seconds:   1.0

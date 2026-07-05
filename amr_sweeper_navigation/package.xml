@@ -18,6 +18,7 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>navigation2</exec_depend>
   <exec_depend>nav2_common</exec_depend>
+  <exec_depend>nav2_smac_planner</exec_depend>
   <exec_depend>topic_tools</exec_depend>
   <exec_depend>amr_sweeper_localization</exec_depend>
   <test_depend>ament_lint_common</test_depend>

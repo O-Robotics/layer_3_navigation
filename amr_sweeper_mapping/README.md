@@ -12,7 +12,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including globa
 - `mapping_node`
 
 ## Current Capabilities
-- Converts generated mission routes through FusionCore `/fromLL` and executes them with Nav2 `follow_waypoints`.
+- Converts generated mission routes through FusionCore `/fromLL` and executes them with Nav2 `navigate_through_poses`.
 - Publishes the Nav2-facing runtime global costmap on `mapping/global_costmap`.
 - Supports mission route GeoJSON features tagged with `properties.coordinate_frame: "odom"` or `"local"` so small built-in sweep patterns can run directly in the local navigation frame.
 - Rewrites builtin local-pattern run-folder route artifacts into `odom` once they are anchored at mission start, so the saved planned path can be compared directly against `<mission_id>_<run_timestamp>_path_actual.geojson`.

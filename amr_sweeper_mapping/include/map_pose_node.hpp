@@ -88,6 +88,7 @@ private:
   void globalCostmapWorkerLoop();
   void publishMapToOdomTransform();
   void loadCostmapGeoreference();
+  void loadReferenceCostmapFromYaml();
   [[nodiscard]] std::shared_ptr<std::vector<float>> buildGlobalCostmapScoreField(
     const nav_msgs::msg::OccupancyGrid & map) const;
   void initializeMapToOdomFilter();
@@ -135,6 +136,7 @@ private:
   std::string status_topic_;
   std::string fromll_service_name_;
   std::string costmap_yaml_path_;
+  bool use_reference_costmap_{false};
   bool publish_identity_when_pose_missing_{true};
   bool latest_odometry_ready_{false};
   bool latest_navsat_ready_{false};

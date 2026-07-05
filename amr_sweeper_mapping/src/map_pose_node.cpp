@@ -1,7 +1,9 @@
 #include "map_pose_node.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <iomanip>
@@ -9,6 +11,7 @@
 #include <memory>
 #include <queue>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -149,6 +152,136 @@ const char * healthStateToString(const MapPoseHealthState state)
     default:
       return "UNKNOWN";
   }
+}
+
+std::string trim(const std::string & value)
+{
+  const auto begin = value.find_first_not_of(" \t");
+  if (begin == std::string::npos) {
+    return "";
+  }
+  const auto end = value.find_last_not_of(" \t");
+  return value.substr(begin, end - begin + 1U);
+}
+
+std::string stripQuotes(const std::string & value)
+{
+  if (value.size() >= 2U) {
+    const char first = value.front();
+    const char last = value.back();
+    if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+      return value.substr(1U, value.size() - 2U);
+    }
+  }
+  return value;
+}
+
+nav_msgs::msg::OccupancyGrid loadOccupancyGridFromYaml(
+  const std::string & yaml_path,
+  const std::string & frame_id)
+{
+  std::ifstream yaml_stream(yaml_path);
+  if (!yaml_stream.is_open()) {
+    throw std::runtime_error("Failed to open costmap YAML artifact: " + yaml_path);
+  }
+
+  std::string image_name;
+  double resolution = 0.0;
+  double origin_x = 0.0;
+  double origin_y = 0.0;
+  double occupied_thresh = 0.65;
+  double free_thresh = 0.196;
+  bool negate = false;
+  std::string line;
+  while (std::getline(yaml_stream, line)) {
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) {
+      continue;
+    }
+    const std::string key = trim(line.substr(0, colon));
+    const std::string value = trim(line.substr(colon + 1U));
+    if (key == "image") {
+      image_name = stripQuotes(value);
+    } else if (key == "resolution") {
+      resolution = std::stod(value);
+    } else if (key == "origin") {
+      const auto open = value.find('[');
+      const auto first_comma = value.find(',', open + 1U);
+      const auto second_comma = value.find(',', first_comma + 1U);
+      origin_x = std::stod(trim(value.substr(open + 1U, first_comma - open - 1U)));
+      origin_y = std::stod(trim(value.substr(first_comma + 1U, second_comma - first_comma - 1U)));
+    } else if (key == "occupied_thresh") {
+      occupied_thresh = std::stod(value);
+    } else if (key == "free_thresh") {
+      free_thresh = std::stod(value);
+    } else if (key == "negate") {
+      negate = std::stoi(value) != 0;
+    }
+  }
+
+  const std::filesystem::path image_path = std::filesystem::path(yaml_path).parent_path() / image_name;
+  std::ifstream image_stream(image_path, std::ios::binary);
+  if (!image_stream.is_open()) {
+    throw std::runtime_error("Failed to open costmap image artifact: " + image_path.string());
+  }
+
+  std::string magic;
+  image_stream >> magic;
+  if (magic != "P5" && magic != "P2") {
+    throw std::runtime_error("Unsupported costmap image format: " + magic);
+  }
+
+  unsigned int width = 0U;
+  unsigned int height = 0U;
+  int max_value = 0;
+  image_stream >> width >> height >> max_value;
+
+  nav_msgs::msg::OccupancyGrid map;
+  map.header.frame_id = frame_id;
+  map.info.resolution = static_cast<float>(resolution);
+  map.info.width = width;
+  map.info.height = height;
+  map.info.origin.position.x = origin_x;
+  map.info.origin.position.y = origin_y;
+  map.info.origin.orientation.w = 1.0;
+  map.data.assign(static_cast<std::size_t>(width) * height, -1);
+
+  auto to_cost = [max_value, negate, occupied_thresh, free_thresh](const int pixel_value) -> int8_t {
+      const int bounded = std::clamp(pixel_value, 0, std::max(1, max_value));
+      const double normalized = static_cast<double>(bounded) / static_cast<double>(std::max(1, max_value));
+      const double occupied = negate ? normalized : (1.0 - normalized);
+      if (occupied >= occupied_thresh) {
+        return 100;
+      }
+      if (occupied <= free_thresh) {
+        return 0;
+      }
+      return -1;
+    };
+
+  if (magic == "P5") {
+    image_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
+      for (unsigned int col = 0; col < width; ++col) {
+        unsigned char pixel = 0U;
+        image_stream.read(reinterpret_cast<char *>(&pixel), 1);
+        const std::size_t index = static_cast<std::size_t>(row) * width + col;
+        map.data[index] = to_cost(static_cast<int>(pixel));
+      }
+    }
+    return map;
+  }
+
+  for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
+    for (unsigned int col = 0; col < width; ++col) {
+      int pixel_value = 0;
+      image_stream >> pixel_value;
+      const std::size_t index = static_cast<std::size_t>(row) * width + col;
+      map.data[index] = to_cost(pixel_value);
+    }
+  }
+
+  return map;
 }
 
 }  // namespace
@@ -351,6 +484,7 @@ MapPoseNode::MapPoseNode()
   }
   global_costmap_wait_started_ = now();
   loadCostmapGeoreference();
+  loadReferenceCostmapFromYaml();
 
   subscription_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   publish_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -620,12 +754,21 @@ bool MapPoseNode::initialGlobalCostmapWaitTimedOut(const StateSnapshot & snapsho
 std::string MapPoseNode::composeHealthReason(const StateSnapshot & snapshot) const
 {
   if (!snapshot.latest_odometry_ready) {
+    if (!snapshot.correction_startup_ready) {
+      return "odometry_waiting";
+    }
     return "odometry_missing";
   }
   if (snapshot.latest_odometry_stamp.nanoseconds() == 0) {
+    if (!snapshot.correction_startup_ready) {
+      return "odometry_waiting";
+    }
     return "odometry_stamp_missing";
   }
   if ((now() - snapshot.latest_odometry_stamp).seconds() > odometry_timeout_seconds_) {
+    if (!snapshot.correction_startup_ready) {
+      return "odometry_waiting";
+    }
     return "odometry_stale";
   }
   if (!snapshot.latest_scan_ready) {
@@ -726,8 +869,13 @@ void MapPoseNode::publishMapPoseStatus(const StateSnapshot & snapshot)
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (!odometry_ready) {
-      degraded_input_streak_ = std::max(degraded_input_streak_, degraded_streak_before_fault_);
-      next_state = MapPoseHealthState::FAULT;
+      if (!startup_cleared) {
+        degraded_input_streak_ = 0;
+        next_state = MapPoseHealthState::BOOTSTRAP;
+      } else {
+        degraded_input_streak_ = std::max(degraded_input_streak_, degraded_streak_before_fault_);
+        next_state = MapPoseHealthState::FAULT;
+      }
     } else if (waiting_for_initial_costmap) {
       degraded_input_streak_ = 0;
       next_state = MapPoseHealthState::BOOTSTRAP;
@@ -830,6 +978,43 @@ void MapPoseNode::loadCostmapGeoreference()
         std::stod(value.substr(second_comma + 1U, close - second_comma - 1U))};
       artifact_georeference_ready_ = true;
     }
+  }
+}
+
+void MapPoseNode::loadReferenceCostmapFromYaml()
+{
+  if (costmap_yaml_path_.empty()) {
+    return;
+  }
+
+  try {
+    nav_msgs::msg::OccupancyGrid reference_map =
+      loadOccupancyGridFromYaml(costmap_yaml_path_, map_frame_id_);
+    if (reference_map.info.width == 0U || reference_map.info.height == 0U) {
+      return;
+    }
+
+    auto reference_score_field = buildGlobalCostmapScoreField(reference_map);
+    const rclcpp::Time stamp = now();
+
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    latest_global_costmap_ = std::move(reference_map);
+    latest_global_costmap_score_field_ = std::move(reference_score_field);
+    latest_global_costmap_ready_ = true;
+    latest_global_costmap_stamp_ = stamp;
+    latest_global_costmap_processed_stamp_ = stamp;
+    use_reference_costmap_ = true;
+    global_costmap_wait_started_ = stamp;
+    RCLCPP_INFO(
+      get_logger(),
+      "Loaded stable reference costmap from %s for map_pose scan matching; live mapping/global_costmap updates will not replace it.",
+      costmap_yaml_path_.c_str());
+  } catch (const std::exception & exception) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to load reference costmap from %s: %s",
+      costmap_yaml_path_.c_str(),
+      exception.what());
   }
 }
 
@@ -974,6 +1159,10 @@ void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
 
 void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
 {
+  if (use_reference_costmap_) {
+    return;
+  }
+
   const rclcpp::Time receipt_stamp = now();
   const bool costmap_ready =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;

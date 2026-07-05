@@ -53,7 +53,7 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_planner_server", default_value="true", description="Launch the Nav2 planner server."),
         DeclareLaunchArgument("enable_behavior_server", default_value="true", description="Launch the Nav2 behavior server."),
         DeclareLaunchArgument("enable_bt_navigator", default_value="true", description="Launch the Nav2 behavior-tree navigator."),
-        DeclareLaunchArgument("enable_waypoint_follower", default_value="true", description="Launch the Nav2 waypoint follower."),
+        DeclareLaunchArgument("enable_waypoint_follower", default_value="false", description="Launch the Nav2 waypoint follower."),
         DeclareLaunchArgument("enable_velocity_smoother", default_value="true", description="Launch the Nav2 velocity smoother."),
         GroupAction([
             IncludeLaunchDescription(

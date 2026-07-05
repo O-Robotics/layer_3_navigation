@@ -4,8 +4,8 @@
       "geometry": {
         "coordinates": [
           [
-            -79.87110348950749,
-            43.25569736475984
+            -79.8711035736709,
+            43.25570506380465
           ]
         ],
         "type": "LineString"
@@ -16,11 +16,11 @@
         "name": "actual_path_navsat",
         "position_source": "gnss/navsat",
         "raw_navsat_timestamps": [
-          "1782832036.559331162"
+          "1783021247.721960629"
         ],
         "sample_count": 1,
         "sample_timestamps": [
-          "14.703000000"
+          "17.786000000"
         ]
       },
       "type": "Feature"

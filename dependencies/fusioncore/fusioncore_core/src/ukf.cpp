@@ -67,9 +67,9 @@ Eigen::MatrixXd UKF::generate_sigma_points() {
   state_.P = (state_.P + state_.P.transpose()) * 0.5;
 
   // Without gyro measurements, P(WX/WY/WZ) grows unboundedly via q_angular_vel
-  // each predict step. The kinematic WZ→QZ coupling then makes P near-singular,
+  // each predict step. The kinematic WZ?QZ coupling then makes P near-singular,
   // triggering the identity-shift Cholesky repair which introduces asymmetry that
-  // Wm[0]≈-99 amplifies into QZ drift. Cap at a physically large but finite bound.
+  // Wm[0]?-99 amplifies into QZ drift. Cap at a physically large but finite bound.
   constexpr double kMaxAngVelVar = 1.0;
   state_.P(WX,WX) = std::min(state_.P(WX,WX), kMaxAngVelVar);
   state_.P(WY,WY) = std::min(state_.P(WY,WY), kMaxAngVelVar);
@@ -83,7 +83,7 @@ Eigen::MatrixXd UKF::generate_sigma_points() {
     // P has developed negative eigenvalues (common under sustained high-rate IMU
     // updates where the K*S*K^T subtraction overshoots in the bias dimensions).
     // Fix: identity shift: add eps*I to raise all eigenvalues by |min_eigenvalue|.
-    // Unlike the V*max(λ,ε)*V^T clamp, a shift preserves the eigenvectors and keeps
+    // Unlike the V*max(?,?)*V^T clamp, a shift preserves the eigenvectors and keeps
     // large position/velocity eigenvalues intact.  The clamp approach destroys them
     // because P's eigenvectors mix position and bias components after cross-coupling,
     // so clamping bias eigenvalues to 1e-9 also collapses position uncertainty when

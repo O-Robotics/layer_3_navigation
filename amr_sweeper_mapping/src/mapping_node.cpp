@@ -33,7 +33,7 @@ namespace
 {
 
 constexpr char kDefaultMissionRoutePath[] = "";
-constexpr char kFollowWaypointsExecutionMode[] = "follow_waypoints";
+constexpr char kNavigateThroughPosesExecutionMode[] = "navigate_through_poses";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
 constexpr char kScheduledMissionType[] = "vda5050_scheduled_mission";
 constexpr char kLocalScheduledMissionType[] = "vda5050_scheduled_mission_local";
@@ -320,7 +320,7 @@ std::vector<geometry_msgs::msg::PoseStamped> orientRoute(
 struct MissionRuntimeProfile
 {
   std::string mission_type;
-  std::string execution_mode{kFollowWaypointsExecutionMode};
+  std::string execution_mode{kNavigateThroughPosesExecutionMode};
 };
 
 MissionRuntimeProfile loadMissionRuntimeProfile(const std::string & mission_file_path)
@@ -848,12 +848,14 @@ MappingNode::MappingNode()
   declare_parameter("georef_lock_min_samples", 10);
   declare_parameter("max_segments_per_goal", 4);
   declare_parameter("max_waypoint_spacing_m", 0.5);
+  declare_parameter("advance_past_blocked_waypoints", true);
+  declare_parameter("max_blocked_waypoint_advances", 20);
   declare_parameter("pad_live_map_to_minimum_size", true);
   declare_parameter("min_global_map_size_m", 10.0);
   declare_parameter("status_period_seconds", 2.0);
   declare_parameter("mission_tick_period_seconds", 1.0);
-  declare_parameter("follow_waypoints_action", std::string("follow_waypoints"));
-  declare_parameter("waypoint_follower_state_service", std::string("waypoint_follower/get_state"));
+  declare_parameter("navigate_through_poses_action", std::string("navigate_through_poses"));
+  declare_parameter("navigator_state_service", std::string("bt_navigator/get_state"));
   declare_parameter("nav2_local_costmap_topic", std::string("local_costmap/costmap_raw"));
   declare_parameter(
     "nav2_local_costmap_updates_topic",
@@ -888,6 +890,7 @@ MappingNode::MappingNode()
   frame_id_ = get_parameter("frame_id").as_string();
   map_frame_id_ = get_parameter("map_frame").as_string();
   odom_frame_id_ = get_parameter("odom_frame").as_string();
+  mission_route_frame_id_ = frame_id_;
   base_frame_ = get_parameter("base_frame").as_string();
   navsat_topic_ = get_parameter("navsat_topic").as_string();
   heading_topic_ = get_parameter("heading_topic").as_string();
@@ -895,8 +898,8 @@ MappingNode::MappingNode()
   seeded_map_frame_id_ = get_parameter("seeded_map_frame").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
-  waypoint_follower_state_service_name_ =
-    get_parameter("waypoint_follower_state_service").as_string();
+  navigator_state_service_name_ =
+    get_parameter("navigator_state_service").as_string();
   nav2_local_costmap_topic_ = get_parameter("nav2_local_costmap_topic").as_string();
   nav2_local_costmap_updates_topic_ =
     get_parameter("nav2_local_costmap_updates_topic").as_string();
@@ -920,6 +923,9 @@ MappingNode::MappingNode()
   georef_lock_min_samples_ = std::max(1, static_cast<int>(get_parameter("georef_lock_min_samples").as_int()));
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
   max_waypoint_spacing_m_ = get_parameter("max_waypoint_spacing_m").as_double();
+  advance_past_blocked_waypoints_ = get_parameter("advance_past_blocked_waypoints").as_bool();
+  max_blocked_waypoint_advances_ =
+    std::max(0, static_cast<int>(get_parameter("max_blocked_waypoint_advances").as_int()));
   pad_live_map_to_minimum_size_ = get_parameter("pad_live_map_to_minimum_size").as_bool();
   min_global_map_size_m_ = get_parameter("min_global_map_size_m").as_double();
   nav2_costmap_ready_timeout_seconds_ = std::max(
@@ -1002,14 +1008,15 @@ MappingNode::MappingNode()
     end_mission_service_name_,
     rclcpp::ServicesQoS(),
     mission_callback_group_);
-  waypoint_follower_state_client_ =
+  navigator_state_client_ =
     create_client<lifecycle_msgs::srv::GetState>(
-    waypoint_follower_state_service_name_,
+    navigator_state_service_name_,
     rclcpp::ServicesQoS(),
     mission_callback_group_);
-  follow_waypoints_client_ = rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(
+  navigate_through_poses_client_ =
+    rclcpp_action::create_client<nav2_msgs::action::NavigateThroughPoses>(
     this,
-    get_parameter("follow_waypoints_action").as_string(),
+    get_parameter("navigate_through_poses_action").as_string(),
     mission_callback_group_);
 
   status_timer_ = create_wall_timer(
@@ -1935,12 +1942,16 @@ void MappingNode::integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan &
     return;
   }
 
+  const rclcpp::Time transform_stamp =
+    message.header.stamp.sec == 0 && message.header.stamp.nanosec == 0 ?
+    now() :
+    rclcpp::Time(message.header.stamp);
   geometry_msgs::msg::TransformStamped map_from_scan;
   try {
     map_from_scan = tf_buffer_->lookupTransform(
       map_frame_id_,
       message.header.frame_id,
-      tf2::TimePointZero,
+      transform_stamp,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException & exception) {
     RCLCPP_WARN_THROTTLE(
@@ -2172,6 +2183,7 @@ void MappingNode::tickMissionExecution()
   if (mission_completed_ && repeat_mission_) {
     mission_completed_ = false;
     active_chunk_index_ = 0U;
+    consecutive_blocked_waypoint_advances_ = 0;
   }
 
   if (!mission_active_ && !mission_completed_) {
@@ -2260,6 +2272,10 @@ void MappingNode::convertMissionRoute()
 
   mission_route_.clear();
   mission_route_.reserve(coordinates.size());
+  mission_route_frame_id_ = frame_id_;
+  if (can_use_authoritative_georeference) {
+    mission_route_frame_id_ = map_frame_id_;
+  }
 
   geometry_msgs::msg::Point mission_anchor_position;
   geometry_msgs::msg::Quaternion mission_anchor_orientation;
@@ -2275,7 +2291,7 @@ void MappingNode::convertMissionRoute()
 
   for (const MissionCoordinate & coordinate : coordinates) {
     geometry_msgs::msg::PoseStamped pose;
-    pose.header.frame_id = frame_id_;
+    pose.header.frame_id = mission_route_frame_id_;
     pose.pose.position.z = 0.0;
     pose.pose.orientation.w = 1.0;
 
@@ -2337,6 +2353,9 @@ void MappingNode::convertMissionRoute()
     writeAnchoredMissionRouteArtifact(coordinate_frame);
   }
   mission_chunks_ = chunkRoute(mission_route_);
+  mission_chunk_start_indices_ = chunkRouteStartIndices(mission_route_);
+  active_chunk_index_ = 0U;
+  consecutive_blocked_waypoint_advances_ = 0;
   mission_converted_ = !mission_chunks_.empty();
   publishRouteMarker();
   if (uses_base_footprint_anchor) {
@@ -2360,7 +2379,7 @@ void MappingNode::convertMissionRoute()
     "Prepared %zu mission waypoint(s) from %s into %s and %zu Nav2 chunk(s)%s.",
     mission_route_.size(),
     coordinate_frame.c_str(),
-    frame_id_.c_str(),
+    mission_route_frame_id_.c_str(),
     mission_chunks_.size(),
     is_builtin_mission ? " without densification for builtin mission" : "");
 }
@@ -2377,16 +2396,16 @@ void MappingNode::startNextMissionChunk()
     return;
   }
 
-  if (!follow_waypoints_client_->wait_for_action_server(std::chrono::seconds(1))) {
+  if (!navigate_through_poses_client_->wait_for_action_server(std::chrono::seconds(1))) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
       5000,
-      "Waiting for Nav2 follow_waypoints action server.");
+      "Waiting for Nav2 navigate_through_poses action server.");
     return;
   }
 
-  if (!isWaypointFollowerActive()) {
+  if (!isNavigatorActive()) {
     return;
   }
 
@@ -2454,7 +2473,7 @@ void MappingNode::startNextMissionChunk()
     }
   }
 
-  nav2_msgs::action::FollowWaypoints::Goal goal;
+  nav2_msgs::action::NavigateThroughPoses::Goal goal;
   const rclcpp::Time latest_transform_stamp(0, 0, get_clock()->get_clock_type());
   try {
     if (odom_only_navigation) {
@@ -2464,14 +2483,23 @@ void MappingNode::startNextMissionChunk()
         goal.poses.push_back(pose);
       }
     } else {
-      const auto map_to_odom = tf_buffer_->lookupTransform(
-        map_frame_id_,
-        odom_frame_id_,
-        tf2::TimePointZero);
       for (auto pose : mission_chunks_.at(active_chunk_index_)) {
         pose.header.stamp = latest_transform_stamp;
+        const std::string source_frame =
+          pose.header.frame_id.empty() ? mission_route_frame_id_ : pose.header.frame_id;
+        if (source_frame == map_frame_id_) {
+          pose.header.frame_id = map_frame_id_;
+          pose.header.stamp = latest_transform_stamp;
+          goal.poses.push_back(pose);
+          continue;
+        }
+
+        const auto map_from_source = tf_buffer_->lookupTransform(
+          map_frame_id_,
+          source_frame,
+          tf2::TimePointZero);
         geometry_msgs::msg::PoseStamped transformed_pose;
-        tf2::doTransform(pose, transformed_pose, map_to_odom);
+        tf2::doTransform(pose, transformed_pose, map_from_source);
         transformed_pose.header.frame_id = map_frame_id_;
         transformed_pose.header.stamp = latest_transform_stamp;
         goal.poses.push_back(transformed_pose);
@@ -2482,7 +2510,7 @@ void MappingNode::startNextMissionChunk()
       get_logger(),
       *get_clock(),
       2000,
-      "Waiting to transform mission chunk from %s into %s before dispatching Nav2 waypoints: %s",
+      "Waiting to transform mission chunk from %s into %s before dispatching Nav2 poses: %s",
       odom_frame_id_.c_str(),
       map_frame_id_.c_str(),
       exception.what());
@@ -2512,7 +2540,7 @@ void MappingNode::startNextMissionChunk()
       yaw * 180.0 / M_PI);
   }
 
-  rclcpp_action::Client<nav2_msgs::action::FollowWaypoints>::SendGoalOptions options;
+  rclcpp_action::Client<nav2_msgs::action::NavigateThroughPoses>::SendGoalOptions options;
   options.goal_response_callback =
     [this](const auto & goal_handle) {handleGoalResponse(goal_handle);};
   options.result_callback =
@@ -2520,10 +2548,10 @@ void MappingNode::startNextMissionChunk()
 
   mission_active_ = true;
   waiting_for_goal_result_ = true;
-  follow_waypoints_client_->async_send_goal(goal, options);
+  navigate_through_poses_client_->async_send_goal(goal, options);
   RCLCPP_INFO(
     get_logger(),
-    "Dispatching mission chunk %zu/%zu with %zu waypoint(s).",
+    "Dispatching mission chunk %zu/%zu with %zu pose(s).",
     active_chunk_index_ + 1U,
     mission_chunks_.size(),
     goal.poses.size());
@@ -2588,27 +2616,27 @@ bool MappingNode::areMissionCostmapsReadyForMissionStart() const
   return true;
 }
 
-bool MappingNode::isWaypointFollowerActive()
+bool MappingNode::isNavigatorActive()
 {
-  if (!waypoint_follower_state_client_->wait_for_service(std::chrono::milliseconds(0))) {
+  if (!navigator_state_client_->wait_for_service(std::chrono::milliseconds(0))) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
       5000,
-      "Waiting for waypoint follower lifecycle service %s.",
-      waypoint_follower_state_service_name_.c_str());
+      "Waiting for navigator lifecycle service %s.",
+      navigator_state_service_name_.c_str());
     return false;
   }
 
   auto request = std::make_shared<lifecycle_msgs::srv::GetState::Request>();
-  auto future = waypoint_follower_state_client_->async_send_request(request);
+  auto future = navigator_state_client_->async_send_request(request);
   if (future.wait_for(std::chrono::milliseconds(250)) != std::future_status::ready) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
       *get_clock(),
       5000,
-      "Waiting for waypoint follower lifecycle state from %s.",
-      waypoint_follower_state_service_name_.c_str());
+      "Waiting for navigator lifecycle state from %s.",
+      navigator_state_service_name_.c_str());
     return false;
   }
 
@@ -2618,7 +2646,7 @@ bool MappingNode::isWaypointFollowerActive()
       get_logger(),
       *get_clock(),
       5000,
-      "Waypoint follower lifecycle state request returned no response.");
+      "Navigator lifecycle state request returned no response.");
     return false;
   }
 
@@ -2627,7 +2655,7 @@ bool MappingNode::isWaypointFollowerActive()
       get_logger(),
       *get_clock(),
       5000,
-      "Waiting for waypoint follower to become active. Current state: %s (%u).",
+      "Waiting for navigator to become active. Current state: %s (%u).",
       response->current_state.label.c_str(),
       static_cast<unsigned int>(response->current_state.id));
     return false;
@@ -2637,17 +2665,17 @@ bool MappingNode::isWaypointFollowerActive()
 }
 
 void MappingNode::handleGoalResponse(
-  rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::SharedPtr goal_handle)
+  rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::SharedPtr goal_handle)
 {
   if (!goal_handle) {
     waiting_for_goal_result_ = false;
     mission_active_ = false;
-    if (!isWaypointFollowerActive()) {
+    if (!isNavigatorActive()) {
       RCLCPP_WARN_THROTTLE(
         get_logger(),
         *get_clock(),
         5000,
-        "Mission chunk was rejected before waypoint follower became active. Retrying.");
+        "Mission chunk was rejected before the navigator became active. Retrying.");
       return;
     }
 
@@ -2658,20 +2686,26 @@ void MappingNode::handleGoalResponse(
 }
 
 void MappingNode::handleGoalResult(
-  const rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::WrappedResult & result)
+  const rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::WrappedResult & result)
 {
   waiting_for_goal_result_ = false;
   mission_active_ = false;
 
   if (result.code != rclcpp_action::ResultCode::SUCCEEDED) {
-    mission_completed_ = true;
+    const std::string failure_reason =
+      "Nav2 navigate_through_poses ended with result code " +
+      std::to_string(static_cast<int>(result.code));
     RCLCPP_ERROR(get_logger(), "Mission chunk failed with result code %d", static_cast<int>(result.code));
-    markMissionTerminal(
-      "aborted",
-      "Nav2 follow_waypoints ended with result code " + std::to_string(static_cast<int>(result.code)));
+    if (advancePastBlockedMissionWaypoint(failure_reason)) {
+      return;
+    }
+
+    mission_completed_ = true;
+    markMissionTerminal("aborted", failure_reason);
     return;
   }
 
+  consecutive_blocked_waypoint_advances_ = 0;
   ++active_chunk_index_;
   if (active_chunk_index_ >= mission_chunks_.size()) {
     mission_completed_ = true;
@@ -2680,6 +2714,102 @@ void MappingNode::handleGoalResult(
       markMissionTerminal("completed", "autonomous mission completed");
     }
   }
+}
+
+
+bool MappingNode::advancePastBlockedMissionWaypoint(const std::string & failure_reason)
+{
+  if (!advance_past_blocked_waypoints_) {
+    return false;
+  }
+
+  if (active_chunk_index_ >= mission_chunks_.size() || mission_route_.size() < 2U) {
+    return false;
+  }
+
+  if (max_blocked_waypoint_advances_ >= 0 &&
+    consecutive_blocked_waypoint_advances_ >= max_blocked_waypoint_advances_)
+  {
+    RCLCPP_ERROR(
+      get_logger(),
+      "Blocked waypoint advance limit reached after %d skipped waypoint(s); aborting mission. Last failure: %s",
+      consecutive_blocked_waypoint_advances_,
+      failure_reason.c_str());
+    return false;
+  }
+
+  const auto & failed_chunk = mission_chunks_.at(active_chunk_index_);
+  if (failed_chunk.empty()) {
+    return false;
+  }
+
+  const std::size_t failed_chunk_start_route_index =
+    active_chunk_index_ < mission_chunk_start_indices_.size() ?
+    mission_chunk_start_indices_.at(active_chunk_index_) : active_chunk_index_;
+  const std::size_t blocked_route_index = std::min(
+    failed_chunk_start_route_index + failed_chunk.size() - 1U,
+    mission_route_.size() - 1U);
+  const std::size_t resume_route_index = blocked_route_index + 1U;
+
+  if (resume_route_index >= mission_route_.size()) {
+    RCLCPP_ERROR(
+      get_logger(),
+      "Mission chunk failed at the final waypoint, so there is no later waypoint to advance to. Last failure: %s",
+      failure_reason.c_str());
+    return false;
+  }
+
+  std::vector<geometry_msgs::msg::PoseStamped> remaining_route;
+  remaining_route.reserve(mission_route_.size() - resume_route_index + 1U);
+  if (latest_odometry_pose_ready_) {
+    geometry_msgs::msg::PoseStamped current_pose;
+    current_pose.header.frame_id = odom_frame_id_;
+    current_pose.pose.position = latest_odometry_position_;
+    current_pose.pose.orientation = latest_odometry_orientation_;
+    remaining_route.push_back(current_pose);
+  } else {
+    remaining_route.push_back(mission_route_.at(failed_chunk_start_route_index));
+  }
+  remaining_route.insert(
+    remaining_route.end(),
+    mission_route_.begin() + static_cast<long>(resume_route_index),
+    mission_route_.end());
+  remaining_route = orientRoute(std::move(remaining_route));
+
+  const std::size_t original_route_size = mission_route_.size();
+  const auto skipped_pose = mission_route_.at(blocked_route_index);
+  const auto resume_pose = mission_route_.at(resume_route_index);
+  mission_route_ = std::move(remaining_route);
+  mission_chunks_ = chunkRoute(mission_route_);
+  mission_chunk_start_indices_ = chunkRouteStartIndices(mission_route_);
+  active_chunk_index_ = 0U;
+  ++consecutive_blocked_waypoint_advances_;
+
+  if (mission_chunks_.empty()) {
+    RCLCPP_ERROR(
+      get_logger(),
+      "Skipping blocked waypoint %zu left no executable mission chunks. Last failure: %s",
+      blocked_route_index + 1U,
+      failure_reason.c_str());
+    return false;
+  }
+
+  publishRouteMarker();
+  RCLCPP_WARN(
+    get_logger(),
+    "Advancing past blocked mission waypoint %zu/%zu at x=%.3f y=%.3f after Nav2 failure (%s). Resuming toward waypoint %zu/%zu at x=%.3f y=%.3f; skipped waypoint count in this streak: %d/%d.",
+    blocked_route_index + 1U,
+    original_route_size,
+    skipped_pose.pose.position.x,
+    skipped_pose.pose.position.y,
+    failure_reason.c_str(),
+    resume_route_index + 1U,
+    original_route_size,
+    resume_pose.pose.position.x,
+    resume_pose.pose.position.y,
+    consecutive_blocked_waypoint_advances_,
+    max_blocked_waypoint_advances_);
+  return true;
 }
 
 void MappingNode::tryRequestMissionEnd()
@@ -3181,6 +3311,29 @@ std::vector<std::vector<geometry_msgs::msg::PoseStamped>> MappingNode::chunkRout
   }
 
   return chunks;
+}
+
+
+std::vector<std::size_t> MappingNode::chunkRouteStartIndices(
+  const std::vector<geometry_msgs::msg::PoseStamped> & route) const
+{
+  std::vector<std::size_t> start_indices;
+  if (route.size() < 2U) {
+    return start_indices;
+  }
+
+  const std::size_t max_points_per_goal = static_cast<std::size_t>(std::max(1, max_segments_per_goal_) + 1);
+  std::size_t start_index = 0U;
+  while (start_index < route.size() - 1U) {
+    const std::size_t end_index = std::min(start_index + max_points_per_goal, route.size());
+    start_indices.push_back(start_index);
+    if (end_index >= route.size()) {
+      break;
+    }
+    start_index = end_index - 1U;
+  }
+
+  return start_indices;
 }
 
 void MappingNode::markMissionTerminal(const std::string & outcome, const std::string & reason)

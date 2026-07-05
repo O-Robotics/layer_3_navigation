@@ -1,7 +1,7 @@
 {
   "actual_path_navsat_output_file": "src/layer_3_navigation/tests/actual_path_navsat.geojson",
   "actual_path_output_file": "src/layer_3_navigation/tests/actual_path.geojson",
-  "execution_mode": "follow_waypoints",
+  "execution_mode": "navigate_through_poses",
   "frame_id": "odom",
   "gaussian_mode": "voxel_gaussians",
   "manual_drive_required": false,

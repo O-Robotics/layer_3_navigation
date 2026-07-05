@@ -4,8 +4,8 @@
       "geometry": {
         "coordinates": [
           [
-            -0.003497893548319907,
-            -2.419375726163661e-06
+            0.0,
+            0.0
           ]
         ],
         "type": "LineString"
@@ -13,7 +13,16 @@
       "properties": {
         "coordinate_frame": "odom",
         "geographic_companion_file": "actual_path_navsat.geojson",
-        "name": "actual_path"
+        "name": "actual_path",
+        "orientation_source": "localization/odometry_fused",
+        "point_yaws_rad": [
+          -0.00032408399189409076
+        ],
+        "position_source": "localization/odometry_fused",
+        "sample_count": 1,
+        "sample_timestamps": [
+          "17.786000000"
+        ]
       },
       "type": "Feature"
     }

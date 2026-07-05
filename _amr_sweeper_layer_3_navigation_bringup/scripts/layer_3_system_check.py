@@ -7,7 +7,7 @@ from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from lifecycle_msgs.msg import State
 from lifecycle_msgs.srv import GetState
-from nav2_msgs.action import FollowWaypoints
+from nav2_msgs.action import NavigateThroughPoses
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
@@ -22,7 +22,7 @@ class Layer3SystemCheck(Node):
 
         self.declare_parameter("global_frame", "map")
         self.declare_parameter("robot_frame", "base_footprint")
-        self.declare_parameter("action_name", "follow_waypoints")
+        self.declare_parameter("action_name", "navigate_through_poses")
         self.declare_parameter("passed_topic", "layer_3/system_check_passed")
         self.declare_parameter(
             "required_lifecycle_nodes",
@@ -31,15 +31,12 @@ class Layer3SystemCheck(Node):
                 "smoother_server",
                 "planner_server",
                 "bt_navigator",
-                "waypoint_follower",
             ],
         )
         self.declare_parameter("action_wait_timeout_sec", 45.0)
         self.declare_parameter("tf_wait_timeout_sec", 45.0)
         self.declare_parameter("goal_result_timeout_sec", 30.0)
         self.declare_parameter("success_publish_period_sec", 1.0)
-        self.declare_parameter("goal_checker_id", "general_goal_checker")
-        self.declare_parameter("progress_checker_id", "progress_checker")
 
         self.global_frame = self.get_parameter("global_frame").get_parameter_value().string_value
         self.robot_frame = self.get_parameter("robot_frame").get_parameter_value().string_value
@@ -61,16 +58,9 @@ class Layer3SystemCheck(Node):
             0.1,
             self.get_parameter("success_publish_period_sec").get_parameter_value().double_value,
         )
-        self.goal_checker_id = (
-            self.get_parameter("goal_checker_id").get_parameter_value().string_value
-        )
-        self.progress_checker_id = (
-            self.get_parameter("progress_checker_id").get_parameter_value().string_value
-        )
-
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.action_client = ActionClient(self, FollowWaypoints, self.action_name)
+        self.action_client = ActionClient(self, NavigateThroughPoses, self.action_name)
         self.lifecycle_state_clients = {
             node_name: self.create_client(GetState, f"{node_name}/get_state")
             for node_name in self.required_lifecycle_nodes
@@ -123,12 +113,8 @@ class Layer3SystemCheck(Node):
                     )
                 return
 
-            goal = FollowWaypoints.Goal()
+            goal = NavigateThroughPoses.Goal()
             goal.poses.append(pose)
-            if hasattr(goal, "goal_checker_id"):
-                goal.goal_checker_id = self.goal_checker_id
-            if hasattr(goal, "progress_checker_id"):
-                goal.progress_checker_id = self.progress_checker_id
 
             self.goal_send_time = now
             self.goal_inflight = True

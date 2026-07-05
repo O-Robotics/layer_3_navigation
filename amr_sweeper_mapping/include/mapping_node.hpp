@@ -16,7 +16,7 @@
 #include <map_msgs/msg/occupancy_grid_update.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
-#include <nav2_msgs/action/follow_waypoints.hpp>
+#include <nav2_msgs/action/navigate_through_poses.hpp>
 #include <nav2_msgs/msg/costmap.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
@@ -118,11 +118,12 @@ private:
   void ensureMissionLoaded();
   void convertMissionRoute();
   void startNextMissionChunk();
-  [[nodiscard]] bool isWaypointFollowerActive();
+  [[nodiscard]] bool isNavigatorActive();
   void handleGoalResponse(
-    rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::SharedPtr goal_handle);
+    rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::SharedPtr goal_handle);
   void handleGoalResult(
-    const rclcpp_action::ClientGoalHandle<nav2_msgs::action::FollowWaypoints>::WrappedResult & result);
+    const rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::WrappedResult & result);
+  [[nodiscard]] bool advancePastBlockedMissionWaypoint(const std::string & failure_reason);
   void publishRouteMarker() const;
   void writeMissionSessionMetadata() const;
   void writeActualPathArtifact() const;
@@ -163,11 +164,13 @@ private:
   [[nodiscard]] bool areMissionCostmapsReadyForMissionStart() const;
   [[nodiscard]] std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunkRoute(
     const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
+  [[nodiscard]] std::vector<std::size_t> chunkRouteStartIndices(
+    const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   void markMissionTerminal(const std::string & outcome, const std::string & reason);
 
   std::string mission_file_;
   std::string mission_type_;
-  std::string execution_mode_{"follow_waypoints"};
+  std::string execution_mode_{"navigate_through_poses"};
   std::string mission_costmap_yaml_;
   std::string slam_backend_;
   std::string gaussian_mode_;
@@ -183,6 +186,7 @@ private:
   std::string frame_id_;
   std::string map_frame_id_;
   std::string odom_frame_id_;
+  std::string mission_route_frame_id_;
   std::string base_frame_;
   std::string navsat_topic_;
   std::string heading_topic_;
@@ -190,7 +194,7 @@ private:
   std::string seeded_map_frame_id_;
   std::string fromll_service_name_;
   std::string end_mission_service_name_;
-  std::string waypoint_follower_state_service_name_;
+  std::string navigator_state_service_name_;
   std::string nav2_local_costmap_topic_;
   std::string nav2_local_costmap_updates_topic_;
   std::string nav2_global_costmap_topic_;
@@ -214,8 +218,11 @@ private:
   bool mission_completed_{false};
   bool mission_end_requested_{false};
   bool mission_end_pending_{false};
+  bool advance_past_blocked_waypoints_{true};
   std::size_t active_chunk_index_{0U};
   int max_segments_per_goal_{4};
+  int max_blocked_waypoint_advances_{20};
+  int consecutive_blocked_waypoint_advances_{0};
   double global_map_resolution_m_{0.05};
   double max_waypoint_spacing_m_{0.5};
   double georef_lock_window_seconds_{3.0};
@@ -225,6 +232,7 @@ private:
   std::vector<geometry_msgs::msg::PoseStamped> mission_route_;
   std::vector<geometry_msgs::msg::Point> traveled_path_points_;
   std::vector<std::vector<geometry_msgs::msg::PoseStamped>> mission_chunks_;
+  std::vector<std::size_t> mission_chunk_start_indices_;
   std::string last_map_builder_status_{"unavailable"};
   bool pad_live_map_to_minimum_size_{true};
   double min_global_map_size_m_{10.0};
@@ -293,8 +301,8 @@ private:
   rclcpp::TimerBase::SharedPtr runtime_costmap_save_timer_;
   rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;
   rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedPtr end_mission_client_;
-  rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr waypoint_follower_state_client_;
-  rclcpp_action::Client<nav2_msgs::action::FollowWaypoints>::SharedPtr follow_waypoints_client_;
+  rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr navigator_state_client_;
+  rclcpp_action::Client<nav2_msgs::action::NavigateThroughPoses>::SharedPtr navigate_through_poses_client_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 };
