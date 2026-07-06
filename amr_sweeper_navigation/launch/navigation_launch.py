@@ -15,6 +15,7 @@
 import os
 from pathlib import Path
 import tempfile
+import math
 
 from ament_index_python.packages import get_package_share_directory
 import yaml
@@ -48,6 +49,34 @@ def _set_nested(mapping: dict, path: list[str], value) -> None:
         current = next_value
     if path[-1] in current:
         current[path[-1]] = value
+
+
+def _footprint_minimum_inflation_radius(footprint) -> float | None:
+    if isinstance(footprint, str):
+        try:
+            footprint = yaml.safe_load(footprint)
+        except yaml.YAMLError:
+            return None
+    if not isinstance(footprint, list) or len(footprint) < 2:
+        return None
+
+    points = []
+    for point in footprint:
+        if not isinstance(point, list) or len(point) < 2:
+            return None
+        try:
+            points.append((float(point[0]), float(point[1])))
+        except (TypeError, ValueError):
+            return None
+
+    largest_cross_section = 0.0
+    for first_index, first_point in enumerate(points):
+        for second_point in points[first_index + 1:]:
+            largest_cross_section = max(
+                largest_cross_section,
+                math.hypot(first_point[0] - second_point[0], first_point[1] - second_point[1]),
+            )
+    return largest_cross_section / 2.0
 
 
 def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
@@ -176,6 +205,48 @@ def _validate_nav2_params(context) -> None:
             f"Source params file: {source_params_file}. "
             f"Rewritten params file: {rewritten_params_path}."
         )
+
+    global_costmap_params = (
+        params_data
+        .get("global_costmap", {})
+        .get("global_costmap", {})
+        .get("ros__parameters", {})
+    )
+    configured_plugins = global_costmap_params.get("plugins", [])
+    inflation_layer = global_costmap_params.get("inflation_layer", {})
+    inflation_radius = inflation_layer.get("inflation_radius")
+    minimum_inflation_radius = _footprint_minimum_inflation_radius(
+        global_costmap_params.get("footprint")
+    )
+    if "inflation_layer" not in configured_plugins:
+        raise RuntimeError(
+            "Global costmap is missing inflation_layer in its plugins list. "
+            "SmacPlanner2D non-circular collision checking expects a loaded "
+            f"inflation layer. Source params file: {source_params_file}. "
+            f"Rewritten params file: {rewritten_params_path}."
+        )
+    if inflation_layer.get("plugin") != "nav2_costmap_2d::InflationLayer":
+        raise RuntimeError(
+            "Global costmap inflation_layer plugin is not nav2_costmap_2d::InflationLayer. "
+            f"Configured value: {inflation_layer.get('plugin')!r}. "
+            f"Source params file: {source_params_file}. "
+            f"Rewritten params file: {rewritten_params_path}."
+        )
+    if minimum_inflation_radius is not None:
+        try:
+            configured_inflation_radius = float(inflation_radius)
+        except (TypeError, ValueError):
+            configured_inflation_radius = -1.0
+        if configured_inflation_radius < minimum_inflation_radius:
+            raise RuntimeError(
+                "Global costmap inflation_radius is too small for the configured "
+                "non-circular footprint. SmacPlanner2D recommends at least half "
+                "of the robot's largest cross-section. "
+                f"Configured inflation_radius: {inflation_radius}; "
+                f"minimum: {minimum_inflation_radius:.3f}. "
+                f"Source params file: {source_params_file}. "
+                f"Rewritten params file: {rewritten_params_path}."
+            )
 
 
 def _controller_server_selector_params(context) -> dict:
