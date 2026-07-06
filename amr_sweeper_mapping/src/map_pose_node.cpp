@@ -719,14 +719,10 @@ bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
   }
 
   try {
-    const rclcpp::Time transform_stamp =
-      snapshot.latest_scan.header.stamp.sec == 0 && snapshot.latest_scan.header.stamp.nanosec == 0 ?
-      now() :
-      rclcpp::Time(snapshot.latest_scan.header.stamp);
     tf_buffer_->lookupTransform(
       base_frame_id_,
       snapshot.latest_scan.header.frame_id,
-      transform_stamp,
+      tf2::TimePointZero,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException &) {
     return false;
@@ -787,14 +783,10 @@ std::string MapPoseNode::composeHealthReason(const StateSnapshot & snapshot) con
     return "scan_frame_missing";
   }
   try {
-    const rclcpp::Time transform_stamp =
-      snapshot.latest_scan.header.stamp.sec == 0 && snapshot.latest_scan.header.stamp.nanosec == 0 ?
-      now() :
-      rclcpp::Time(snapshot.latest_scan.header.stamp);
     tf_buffer_->lookupTransform(
       base_frame_id_,
       snapshot.latest_scan.header.frame_id,
-      transform_stamp,
+      tf2::TimePointZero,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException &) {
     return "scan_to_base_tf_missing";
@@ -1436,12 +1428,10 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
 
   geometry_msgs::msg::TransformStamped base_from_scan_message;
   try {
-    const rclcpp::Time transform_stamp = scan.header.stamp.sec == 0 && scan.header.stamp.nanosec == 0 ?
-      now() : rclcpp::Time(scan.header.stamp);
     base_from_scan_message = tf_buffer_->lookupTransform(
       base_frame_id_,
       scan.header.frame_id,
-      transform_stamp,
+      tf2::TimePointZero,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException & exception) {
     RCLCPP_WARN_THROTTLE(
