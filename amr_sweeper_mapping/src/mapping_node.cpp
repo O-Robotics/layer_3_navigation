@@ -1942,16 +1942,12 @@ void MappingNode::integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan &
     return;
   }
 
-  const rclcpp::Time transform_stamp =
-    message.header.stamp.sec == 0 && message.header.stamp.nanosec == 0 ?
-    now() :
-    rclcpp::Time(message.header.stamp);
   geometry_msgs::msg::TransformStamped map_from_scan;
   try {
     map_from_scan = tf_buffer_->lookupTransform(
       map_frame_id_,
       message.header.frame_id,
-      transform_stamp,
+      tf2::TimePointZero,
       tf2::durationFromSec(0.05));
   } catch (const tf2::TransformException & exception) {
     RCLCPP_WARN_THROTTLE(
