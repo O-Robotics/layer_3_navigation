@@ -92,6 +92,19 @@ def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
     )
 
 
+def _rewrite_bt_xml_paths(params_data: dict) -> None:
+    bt_xml_path = os.path.join(
+        get_package_share_directory('amr_sweeper_navigation'),
+        'config',
+        'navigate_through_poses_replanning_1hz.xml',
+    )
+    _set_nested(
+        params_data,
+        ['bt_navigator', 'ros__parameters', 'default_nav_through_poses_bt_xml'],
+        bt_xml_path,
+    )
+
+
 def _rewrite_nav2_params(context) -> dict:
     rewritten_params_path = _materialize_nav2_params(context, include_root_key=False)
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
@@ -119,6 +132,7 @@ def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
 
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
     _qualify_nav2_topics(params_data, namespace_value)
+    _rewrite_bt_xml_paths(params_data)
 
     temp_file = Path(tempfile.gettempdir()) / (
         f"amr_sweeper_nav2_params_{'namespaced' if include_root_key else 'flat'}_{os.getpid()}.yaml"

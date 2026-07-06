@@ -8,7 +8,7 @@ bt_navigator:
     bt_loop_duration:                100                                 # Behavior tree tick period in milliseconds. Faster than the programmed stack because these missions are short and local.
     default_server_timeout:          1000                                # Milliseconds to wait for BT action goal acknowledgements. Nav2 interprets this value as ms, not seconds.
     wait_for_service_timeout:        1000                                # Milliseconds to wait when connecting to required ROS services. Common default is 1000 ms.
-    default_nav_through_poses_bt_xml: "/home/alfolsen/dev/rob_ws/src/layer_3_navigation/amr_sweeper_navigation/config/navigate_through_poses_replanning_1hz.xml"  # Use a workspace-owned tree so navigate_through_poses replans at 1 Hz.
+    default_nav_through_poses_bt_xml: ""  # Filled by navigation_launch.py from the installed amr_sweeper_navigation package share path.
     # -- Result channels -------------------------------------------------------
     error_code_names:                ["compute_path_error_code", "follow_path_error_code"]  # Jazzy bt_navigator expects these planner/controller result channels to be named explicitly.
 
