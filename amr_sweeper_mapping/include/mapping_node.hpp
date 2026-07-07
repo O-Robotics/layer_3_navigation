@@ -112,6 +112,7 @@ private:
   [[nodiscard]] std::string composeMapBuilderStatus() const;
   [[nodiscard]] bool updateStartupTfReadiness(const std::string & scan_frame_id);
   void persistRuntimeCostmapArtifact();
+  void mergeCompletedRuntimeCostmapIntoMissionCostmap();
   void tickMissionExecution();
   void tryRequestMissionEnd();
   void publishMapAlignmentTransform();
@@ -186,6 +187,7 @@ private:
   std::string actual_path_navsat_output_file_;
   std::string startup_saved_costmap_yaml_;
   std::string saved_costmap_yaml_;
+  std::string persistent_mission_costmap_yaml_;
   std::string mission_window_start_;
   std::string mission_window_end_;
   std::string frame_id_;
@@ -210,6 +212,7 @@ private:
   int static_obstacle_min_observations_{6};
   int startup_tf_ready_streak_required_{3};
   double static_obstacle_min_occupied_fraction_{0.75};
+  double static_obstacle_min_free_fraction_{0.75};
   bool bootstrap_empty_global_costmap_{false};
   bool bootstrap_global_costmap_published_{false};
   bool auto_start_mission_{true};
@@ -223,6 +226,7 @@ private:
   bool mission_completed_{false};
   bool mission_end_requested_{false};
   bool mission_end_pending_{false};
+  bool persistent_mission_costmap_merged_{false};
   bool advance_past_blocked_waypoints_{true};
   std::size_t active_chunk_index_{0U};
   int max_segments_per_goal_{1};

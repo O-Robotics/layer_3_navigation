@@ -72,6 +72,8 @@ private:
     nav_msgs::msg::OccupancyGrid latest_global_costmap;
     std::shared_ptr<const std::vector<float>> latest_global_costmap_score_field;
     rclcpp::Time latest_odometry_stamp{0, 0, RCL_ROS_TIME};
+    rclcpp::Time latest_navsat_stamp{0, 0, RCL_ROS_TIME};
+    rclcpp::Time latest_heading_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_scan_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_global_costmap_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_map_pose_stamp{0, 0, RCL_ROS_TIME};
@@ -203,6 +205,7 @@ private:
   nav_msgs::msg::OccupancyGrid pending_global_costmap_;
   std::shared_ptr<std::vector<float>> latest_global_costmap_score_field_;
   rclcpp::Time latest_odometry_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time latest_navsat_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_heading_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_scan_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_global_costmap_stamp_{0, 0, RCL_ROS_TIME};

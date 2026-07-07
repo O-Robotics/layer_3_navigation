@@ -43,52 +43,30 @@ controller_server:
       xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.2
     FollowPath:
-      plugin: nav2_mppi_controller::MPPIController
-      time_steps: 40
-      model_dt: 0.1
-      batch_size: 1600
-      iteration_count: 1
-      prune_distance: 3.5
+      plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
+      desired_linear_vel: 0.18
+      lookahead_dist: 0.8
+      min_lookahead_dist: 0.45
+      max_lookahead_dist: 1.5
+      lookahead_time: 1.5
+      rotate_to_heading_angular_vel: 0.5
       transform_tolerance: 0.2
-      temperature: 0.2
-      gamma: 0.005
-      motion_model: DiffDrive
-      visualize: false
-      regenerate_noises: false
-      retry_attempt_limit: 3
-      vx_max: 0.18
-      vx_min: 0.0
-      vy_max: 0.0
-      wz_max: 0.6
-      ax_max: 1.0
-      ax_min: -1.0
-      ay_max: 0.0
-      ay_min: 0.0
-      az_max: 1.0
-      vx_std: 0.14
-      vy_std: 0.0
-      wz_std: 0.45
-      critics:
-      - ConstraintCritic
-      - ObstaclesCritic
-      - GoalCritic
-      - GoalAngleCritic
-      - PathAlignCritic
-      - PathFollowCritic
-      - PathAngleCritic
-      - PreferForwardCritic
-      ObstaclesCritic.cost_power: 1
-      ObstaclesCritic.repulsion_weight: 1.5
-      ObstaclesCritic.critical_weight: 20.0
-      ObstaclesCritic.collision_cost: 1000000.0
-      ObstaclesCritic.consider_footprint: true
-      GoalCritic.cost_weight: 5.0
-      GoalAngleCritic.cost_weight: 3.0
-      PathAlignCritic.cost_weight: 12.0
-      PathFollowCritic.cost_weight: 10.0
-      PathAngleCritic.cost_weight: 2.0
-      PathAngleCritic.mode: 0
-      PreferForwardCritic.cost_weight: 2.0
+      use_velocity_scaled_lookahead_dist: true
+      min_approach_linear_velocity: 0.05
+      approach_velocity_scaling_dist: 0.8
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 1.0
+      use_regulated_linear_velocity_scaling: true
+      use_fixed_curvature_lookahead: false
+      curvature_lookahead_dist: 0.25
+      use_cost_regulated_linear_velocity_scaling: false
+      regulated_linear_scaling_min_radius: 0.8
+      regulated_linear_scaling_min_speed: 0.05
+      use_rotate_to_heading: true
+      allow_reversing: false
+      rotate_to_heading_min_angle: 0.785
+      max_angular_accel: 1.0
+      max_robot_pose_search_dist: 10.0
 local_costmap:
   local_costmap:
     ros__parameters:
@@ -178,7 +156,7 @@ planner_server:
     - GridBased
     GridBased:
       plugin: nav2_navfn_planner::NavfnPlanner
-      tolerance: 0.5
+      tolerance: 0.25
       use_astar: true
       allow_unknown: true
 smoother_server:

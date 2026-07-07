@@ -187,6 +187,8 @@ def _build_nodes(context):
         common_runtime_parameters["startup_saved_costmap_yaml"] = startup_saved_costmap_yaml
     if saved_costmap_yaml:
         common_runtime_parameters["saved_costmap_yaml"] = saved_costmap_yaml
+    if static_reference_costmap_yaml:
+        common_runtime_parameters["persistent_mission_costmap_yaml"] = static_reference_costmap_yaml
     if bootstrap_empty_global_costmap:
         common_runtime_parameters["bootstrap_empty_global_costmap"] = True
     if mission_window_start:

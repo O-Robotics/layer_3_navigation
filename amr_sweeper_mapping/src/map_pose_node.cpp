@@ -688,6 +688,8 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.latest_global_costmap = latest_global_costmap_;
   snapshot.latest_global_costmap_score_field = latest_global_costmap_score_field_;
   snapshot.latest_odometry_stamp = latest_odometry_stamp_;
+  snapshot.latest_navsat_stamp = latest_navsat_stamp_;
+  snapshot.latest_heading_stamp = latest_heading_stamp_;
   snapshot.latest_scan_stamp = latest_scan_stamp_;
   snapshot.latest_global_costmap_stamp = latest_global_costmap_stamp_;
   snapshot.latest_map_pose_stamp = latest_map_pose_stamp_;
@@ -717,6 +719,10 @@ bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
   }
 
   if ((now() - snapshot.latest_scan_stamp).seconds() > scan_timeout_seconds_) {
+    return false;
+  }
+
+  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
     return false;
   }
 
@@ -784,6 +790,9 @@ std::string MapPoseNode::composeHealthReason(const StateSnapshot & snapshot) con
       return "global_costmap_missing";
     }
     return "global_costmap_waiting";
+  }
+  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
+    return "global_costmap_stale";
   }
   if (snapshot.latest_scan.header.frame_id.empty()) {
     return "scan_frame_missing";
@@ -1129,6 +1138,9 @@ void MapPoseNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
 {
   std::lock_guard<std::mutex> lock(state_mutex_);
   latest_navsat_ = *message;
+  latest_navsat_stamp_ = message->header.stamp.sec == 0 && message->header.stamp.nanosec == 0 ?
+    now() :
+    rclcpp::Time(message->header.stamp);
   latest_navsat_ready_ = true;
 }
 
@@ -1362,6 +1374,20 @@ double MapPoseNode::georeferenceConsistencyConfidence(
   const tf2::Transform & candidate_map_to_base) const
 {
   if (!snapshot.latest_navsat_ready || !snapshot.latest_heading_ready || !artifact_georeference_ready_) {
+    return 1.0;
+  }
+
+  if (
+    snapshot.latest_navsat_stamp.nanoseconds() == 0 ||
+    snapshot.latest_heading_stamp.nanoseconds() == 0)
+  {
+    return 1.0;
+  }
+
+  if (
+    (now() - snapshot.latest_navsat_stamp).seconds() > costmap_timeout_seconds_ ||
+    (now() - snapshot.latest_heading_stamp).seconds() > costmap_timeout_seconds_)
+  {
     return 1.0;
   }
 

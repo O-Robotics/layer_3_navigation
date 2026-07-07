@@ -193,6 +193,31 @@ bool fitAffineComponent(
   return solveLinear3x3(augmented, coefficients);
 }
 
+std::optional<nlohmann::json> georeferenceMetadataFromArtifact(
+  const LoadedCostmapArtifact & artifact)
+{
+  if (!artifact.georeference_valid) {
+    return std::nullopt;
+  }
+
+  nlohmann::json georeference{
+    {"type", artifact.georeference_type.empty() ? std::string("affine_xy_to_wgs84") : artifact.georeference_type},
+    {"source_crs", artifact.georeference_source_crs.empty() ? std::string("EPSG:4326") : artifact.georeference_source_crs},
+    {"sample_count", artifact.georeference_sample_count},
+    {"longitude_coefficients", {
+       artifact.longitude_coefficients[0],
+       artifact.longitude_coefficients[1],
+       artifact.longitude_coefficients[2]}},
+    {"latitude_coefficients", {
+       artifact.latitude_coefficients[0],
+       artifact.latitude_coefficients[1],
+       artifact.latitude_coefficients[2]}}};
+  if (!artifact.georeference_companion_file.empty()) {
+    georeference["companion_file"] = artifact.georeference_companion_file;
+  }
+  return georeference;
+}
+
 std::optional<nlohmann::json> buildGeoReferenceMetadata(
   const std::vector<MapPoint> & local_trace,
   const std::vector<GeoPoint> & geo_trace,
@@ -838,6 +863,45 @@ LoadedCostmapArtifact loadCostmapArtifactFromYaml(const std::string & yaml_path)
   return artifact;
 }
 
+std::optional<int8_t> artifactCellOccupancy(
+  const LoadedCostmapArtifact & artifact,
+  const double world_x,
+  const double world_y)
+{
+  if (
+    artifact.width_cells == 0U || artifact.height_cells == 0U ||
+    artifact.resolution <= 0.0 || artifact.costs.empty())
+  {
+    return std::nullopt;
+  }
+
+  const int cell_x = static_cast<int>(std::floor((world_x - artifact.origin_x) / artifact.resolution));
+  const int cell_y = static_cast<int>(std::floor((world_y - artifact.origin_y) / artifact.resolution));
+  if (
+    cell_x < 0 || cell_y < 0 ||
+    cell_x >= static_cast<int>(artifact.width_cells) ||
+    cell_y >= static_cast<int>(artifact.height_cells))
+  {
+    return std::nullopt;
+  }
+
+  const std::size_t index =
+    static_cast<std::size_t>(cell_y) * artifact.width_cells + static_cast<std::size_t>(cell_x);
+  const double occupied_ratio =
+    static_cast<double>(artifact.costs.at(index)) / 255.0;
+  if (artifact.mode == "scale" || artifact.mode == "raw") {
+    return static_cast<int8_t>(
+      std::lround(std::clamp(occupied_ratio, 0.0, 1.0) * 100.0));
+  }
+  if (occupied_ratio >= artifact.occupied_thresh) {
+    return static_cast<int8_t>(100);
+  }
+  if (occupied_ratio <= artifact.free_thresh) {
+    return static_cast<int8_t>(0);
+  }
+  return std::nullopt;
+}
+
 void saveOccupancyGridArtifact(
   const nav_msgs::msg::OccupancyGrid & map,
   const std::filesystem::path & yaml_path,
@@ -926,6 +990,7 @@ MappingNode::MappingNode()
   declare_parameter("actual_path_navsat_output_file", std::string(""));
   declare_parameter("startup_saved_costmap_yaml", std::string(""));
   declare_parameter("saved_costmap_yaml", std::string(""));
+  declare_parameter("persistent_mission_costmap_yaml", std::string(""));
   declare_parameter("mission_costmap_yaml", std::string(""));
   declare_parameter("mission_window_start", std::string(""));
   declare_parameter("mission_window_end", std::string(""));
@@ -948,6 +1013,7 @@ MappingNode::MappingNode()
   declare_parameter("runtime_costmap_save_period_seconds", 10.0);
   declare_parameter("static_obstacle_min_observations", 6);
   declare_parameter("static_obstacle_min_occupied_fraction", 0.75);
+  declare_parameter("static_obstacle_min_free_fraction", 0.75);
   declare_parameter("georef_lock_window_seconds", 3.0);
   declare_parameter("georef_lock_min_samples", 10);
   declare_parameter("georef_lock_max_navsat_spread_m", 2.0);
@@ -988,6 +1054,7 @@ MappingNode::MappingNode()
   actual_path_navsat_output_file_ = get_parameter("actual_path_navsat_output_file").as_string();
   startup_saved_costmap_yaml_ = get_parameter("startup_saved_costmap_yaml").as_string();
   saved_costmap_yaml_ = get_parameter("saved_costmap_yaml").as_string();
+  persistent_mission_costmap_yaml_ = get_parameter("persistent_mission_costmap_yaml").as_string();
   mission_costmap_yaml_ = get_parameter("mission_costmap_yaml").as_string();
   mission_window_start_ = get_parameter("mission_window_start").as_string();
   mission_window_end_ = get_parameter("mission_window_end").as_string();
@@ -1025,6 +1092,8 @@ MappingNode::MappingNode()
     static_cast<int>(get_parameter("static_obstacle_min_observations").as_int());
   static_obstacle_min_occupied_fraction_ =
     get_parameter("static_obstacle_min_occupied_fraction").as_double();
+  static_obstacle_min_free_fraction_ =
+    get_parameter("static_obstacle_min_free_fraction").as_double();
   georef_lock_window_seconds_ = std::max(0.1, get_parameter("georef_lock_window_seconds").as_double());
   georef_lock_max_navsat_spread_m_ = std::max(0.0, get_parameter("georef_lock_max_navsat_spread_m").as_double());
   georef_lock_max_heading_deviation_deg_ = std::max(0.0, get_parameter("georef_lock_max_heading_deviation_deg").as_double());
@@ -1893,7 +1962,8 @@ nav_msgs::msg::OccupancyGrid MappingNode::buildStaticRuntimeCostmapArtifact() co
   if (
     artifact_map.data.size() != latest_live_map_.data.size() ||
     latest_live_map_.data.size() != global_map_observations_.size() ||
-    latest_live_map_.data.size() != global_map_occupied_observations_.size())
+    latest_live_map_.data.size() != global_map_occupied_observations_.size() ||
+    latest_live_map_.data.size() != global_map_free_observations_.size())
   {
     return artifact_map;
   }
@@ -1905,19 +1975,144 @@ nav_msgs::msg::OccupancyGrid MappingNode::buildStaticRuntimeCostmapArtifact() co
     }
 
     const uint16_t occupied_observations = global_map_occupied_observations_.at(index);
+    const uint16_t free_observations = global_map_free_observations_.at(index);
     const double occupied_fraction =
       static_cast<double>(occupied_observations) / static_cast<double>(total_observations);
+    const double free_fraction =
+      static_cast<double>(free_observations) / static_cast<double>(total_observations);
+
     if (
-      occupied_fraction < static_obstacle_min_occupied_fraction_ ||
-      latest_live_map_.data.at(index) < 65)
+      occupied_fraction >= static_obstacle_min_occupied_fraction_ &&
+      latest_live_map_.data.at(index) >= 65)
     {
+      artifact_map.data.at(index) = 100;
       continue;
     }
 
-    artifact_map.data.at(index) = 100;
+    if (
+      free_fraction >= static_obstacle_min_free_fraction_ &&
+      latest_live_map_.data.at(index) >= 0 &&
+      latest_live_map_.data.at(index) <= 35)
+    {
+      artifact_map.data.at(index) = 0;
+    }
   }
 
   return artifact_map;
+}
+
+void MappingNode::mergeCompletedRuntimeCostmapIntoMissionCostmap()
+{
+  if (persistent_mission_costmap_merged_) {
+    return;
+  }
+  if (persistent_mission_costmap_yaml_.empty() || saved_costmap_yaml_.empty()) {
+    return;
+  }
+
+  const std::filesystem::path persistent_yaml_path(resolveRuntimePath(persistent_mission_costmap_yaml_));
+  const std::filesystem::path runtime_yaml_path(resolveRuntimePath(saved_costmap_yaml_));
+  if (persistent_yaml_path.empty() || runtime_yaml_path.empty() || persistent_yaml_path == runtime_yaml_path) {
+    persistent_mission_costmap_merged_ = true;
+    return;
+  }
+
+  try {
+    const LoadedCostmapArtifact persistent_artifact =
+      loadCostmapArtifactFromYaml(persistent_yaml_path.string());
+    const LoadedCostmapArtifact runtime_artifact =
+      loadCostmapArtifactFromYaml(runtime_yaml_path.string());
+
+    if (persistent_artifact.resolution <= 0.0 || runtime_artifact.resolution <= 0.0) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Skipping persistent mission costmap merge because one of the artifacts has an invalid resolution. persistent=%s runtime=%s",
+        persistent_yaml_path.string().c_str(),
+        runtime_yaml_path.string().c_str());
+      return;
+    }
+
+    if (std::abs(persistent_artifact.resolution - runtime_artifact.resolution) > 1.0e-6) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Skipping persistent mission costmap merge because the artifact resolutions differ. persistent=%.6f runtime=%.6f",
+        persistent_artifact.resolution,
+        runtime_artifact.resolution);
+      return;
+    }
+
+    const double resolution = persistent_artifact.resolution;
+    const double persistent_max_x =
+      persistent_artifact.origin_x + resolution * static_cast<double>(persistent_artifact.width_cells);
+    const double persistent_max_y =
+      persistent_artifact.origin_y + resolution * static_cast<double>(persistent_artifact.height_cells);
+    const double runtime_max_x =
+      runtime_artifact.origin_x + resolution * static_cast<double>(runtime_artifact.width_cells);
+    const double runtime_max_y =
+      runtime_artifact.origin_y + resolution * static_cast<double>(runtime_artifact.height_cells);
+
+    const double merged_min_x = std::min(persistent_artifact.origin_x, runtime_artifact.origin_x);
+    const double merged_min_y = std::min(persistent_artifact.origin_y, runtime_artifact.origin_y);
+    const double merged_max_x = std::max(persistent_max_x, runtime_max_x);
+    const double merged_max_y = std::max(persistent_max_y, runtime_max_y);
+
+    nav_msgs::msg::OccupancyGrid merged_map;
+    merged_map.header.frame_id = map_frame_id_;
+    merged_map.header.stamp = now();
+    merged_map.info.map_load_time = merged_map.header.stamp;
+    merged_map.info.resolution = static_cast<float>(resolution);
+    merged_map.info.width = static_cast<uint32_t>(
+      std::max(1.0, std::ceil((merged_max_x - merged_min_x) / resolution)));
+    merged_map.info.height = static_cast<uint32_t>(
+      std::max(1.0, std::ceil((merged_max_y - merged_min_y) / resolution)));
+    merged_map.info.origin.position.x = merged_min_x;
+    merged_map.info.origin.position.y = merged_min_y;
+    merged_map.info.origin.position.z = 0.0;
+    merged_map.info.origin.orientation.w = 1.0;
+    merged_map.data.assign(
+      static_cast<std::size_t>(merged_map.info.width) * merged_map.info.height,
+      static_cast<int8_t>(-1));
+
+    for (uint32_t row = 0U; row < merged_map.info.height; ++row) {
+      for (uint32_t col = 0U; col < merged_map.info.width; ++col) {
+        const double world_x = merged_min_x + (static_cast<double>(col) + 0.5) * resolution;
+        const double world_y = merged_min_y + (static_cast<double>(row) + 0.5) * resolution;
+        const auto persistent_cell = artifactCellOccupancy(persistent_artifact, world_x, world_y);
+        const auto runtime_cell = artifactCellOccupancy(runtime_artifact, world_x, world_y);
+
+        int8_t merged_cell = -1;
+        if (persistent_cell.has_value() && runtime_cell.has_value()) {
+          merged_cell = static_cast<int8_t>(std::lround(
+            (static_cast<double>(*persistent_cell) + static_cast<double>(*runtime_cell)) * 0.5));
+        } else if (runtime_cell.has_value()) {
+          merged_cell = *runtime_cell;
+        } else if (persistent_cell.has_value()) {
+          merged_cell = *persistent_cell;
+        }
+
+        const std::size_t index =
+          static_cast<std::size_t>(row) * merged_map.info.width + static_cast<std::size_t>(col);
+        merged_map.data.at(index) = merged_cell;
+      }
+    }
+
+    auto georeference_metadata = georeferenceMetadataFromArtifact(persistent_artifact);
+    if (!georeference_metadata.has_value()) {
+      georeference_metadata = georeferenceMetadataFromArtifact(runtime_artifact);
+    }
+    saveOccupancyGridArtifact(merged_map, persistent_yaml_path, georeference_metadata);
+    persistent_mission_costmap_merged_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Merged completed runtime costmap %s back into persistent mission costmap %s by averaging overlapping cell occupancies.",
+      runtime_yaml_path.string().c_str(),
+      persistent_yaml_path.string().c_str());
+  } catch (const std::exception & exception) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to merge completed runtime costmap into persistent mission costmap: %s",
+      exception.what());
+  }
 }
 
 void MappingNode::persistRuntimeCostmapArtifact()
@@ -1934,12 +2129,17 @@ void MappingNode::persistRuntimeCostmapArtifact()
   const std::filesystem::path yaml_path(resolveRuntimePath(saved_costmap_yaml_));
   try {
     std::optional<nlohmann::json> georeference_metadata;
-    if (!manual_mapping_mode_ && !synchronized_path_samples_.empty()) {
+    std::vector<SynchronizedPathSample> synchronized_samples;
+    {
+      std::lock_guard<std::mutex> lock(synchronized_path_mutex_);
+      synchronized_samples = synchronized_path_samples_;
+    }
+    if (!manual_mapping_mode_ && !synchronized_samples.empty()) {
       std::vector<MapPoint> local_trace;
       std::vector<GeoPoint> geo_trace;
-      local_trace.reserve(synchronized_path_samples_.size());
-      geo_trace.reserve(synchronized_path_samples_.size());
-      for (const auto & sample : synchronized_path_samples_) {
+      local_trace.reserve(synchronized_samples.size());
+      geo_trace.reserve(synchronized_samples.size());
+      for (const auto & sample : synchronized_samples) {
         local_trace.push_back({sample.odom_position.x, sample.odom_position.y});
         geo_trace.push_back({sample.raw_navsat.latitude, sample.raw_navsat.longitude});
       }
@@ -3039,9 +3239,10 @@ void MappingNode::tryRequestMissionEnd()
   request->force = false;
   request->request_idling = true;
 
+  const std::string request_outcome = request->outcome;
   end_mission_client_->async_send_request(
     request,
-    [this](rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedFuture future) {
+    [this, request_outcome](rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedFuture future) {
       try {
         const auto response = future.get();
         if (!response->success) {
@@ -3051,6 +3252,9 @@ void MappingNode::tryRequestMissionEnd()
             response->message.c_str());
           mission_end_requested_ = false;
           return;
+        }
+        if (request_outcome == "completed") {
+          mergeCompletedRuntimeCostmapIntoMissionCostmap();
         }
         mission_end_pending_ = false;
         RCLCPP_INFO(get_logger(), "Mission executor finalized mission: %s", response->message.c_str());
@@ -3563,6 +3767,9 @@ void MappingNode::markMissionTerminal(const std::string & outcome, const std::st
 {
   if (repeat_mission_) {
     return;
+  }
+  if (outcome == "completed") {
+    persistRuntimeCostmapArtifact();
   }
   pending_end_outcome_ = outcome;
   pending_end_reason_ = reason;
