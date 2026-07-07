@@ -467,7 +467,6 @@ def _build_launches(context):
         )
 
         actions.extend([odometry_projection_node, fusioncore_node, configure_fusioncore, activate_fusioncore])
-
         gated_entities = []
         if effective_use_amr_sweeper_mapping:
             gated_entities.append(delayed_mapping_launch)

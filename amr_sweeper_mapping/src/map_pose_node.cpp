@@ -189,6 +189,7 @@ nav_msgs::msg::OccupancyGrid loadOccupancyGridFromYaml(
   double resolution = 0.0;
   double origin_x = 0.0;
   double origin_y = 0.0;
+  std::string mode = "trinary";
   double occupied_thresh = 0.65;
   double free_thresh = 0.196;
   bool negate = false;
@@ -202,6 +203,8 @@ nav_msgs::msg::OccupancyGrid loadOccupancyGridFromYaml(
     const std::string value = trim(line.substr(colon + 1U));
     if (key == "image") {
       image_name = stripQuotes(value);
+    } else if (key == "mode") {
+      mode = stripQuotes(value);
     } else if (key == "resolution") {
       resolution = std::stod(value);
     } else if (key == "origin") {
@@ -246,10 +249,13 @@ nav_msgs::msg::OccupancyGrid loadOccupancyGridFromYaml(
   map.info.origin.orientation.w = 1.0;
   map.data.assign(static_cast<std::size_t>(width) * height, -1);
 
-  auto to_cost = [max_value, negate, occupied_thresh, free_thresh](const int pixel_value) -> int8_t {
+  auto to_cost = [max_value, negate, mode, occupied_thresh, free_thresh](const int pixel_value) -> int8_t {
       const int bounded = std::clamp(pixel_value, 0, std::max(1, max_value));
       const double normalized = static_cast<double>(bounded) / static_cast<double>(std::max(1, max_value));
       const double occupied = negate ? normalized : (1.0 - normalized);
+      if (mode == "scale" || mode == "raw") {
+        return static_cast<int8_t>(std::lround(std::clamp(occupied, 0.0, 1.0) * 100.0));
+      }
       if (occupied >= occupied_thresh) {
         return 100;
       }

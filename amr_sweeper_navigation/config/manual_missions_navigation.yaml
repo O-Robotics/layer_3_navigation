@@ -1,265 +1,264 @@
 bt_navigator:
   ros__parameters:
-    # -- Frames and timing -----------------------------------------------------
-    use_sim_time:                    false                               # Use simulated clock if /clock is being published. Nav2 default is typically false on real robots.
-    global_frame:                    odom                                # Builtin local missions stay entirely in odom so SLAM map->odom corrections do not move the planning frame mid-run.
-    robot_base_frame:                base_footprint                      # Robot body frame Nav2 plans and controls against. Common default is base_link.
-    odom_topic:                      localization/odometry_fused         # Odometry topic consumed by the navigator for robot motion estimates. Under the default namespace this resolves to /amr_sweeper/localization/odometry_fused.
-    bt_loop_duration:                200                                 # Behavior tree tick period in milliseconds. Common Nav2 default is 10 ms; this config runs a slower 5 Hz tree tick.
-    default_server_timeout:          2000                                # Milliseconds to wait for BT action goal acknowledgements. Nav2 interprets this value as ms, not seconds.
-    wait_for_service_timeout:        2000                                # Milliseconds to wait when connecting to required ROS services. Common default is 1000 ms.
-    # -- Result channels -------------------------------------------------------
-    error_code_names:                ["compute_path_error_code", "follow_path_error_code"]  # Jazzy bt_navigator expects these planner/controller result channels to be named explicitly.
-
+    use_sim_time: false
+    global_frame: odom
+    robot_base_frame: base_footprint
+    odom_topic: localization/odometry_fused
+    bt_loop_duration: 200
+    default_server_timeout: 2000
+    wait_for_service_timeout: 2000
+    error_code_names:
+    - compute_path_error_code
+    - follow_path_error_code
 bt_navigator_navigate_through_poses_rclcpp_node:
   ros__parameters:
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-
+    use_sim_time: false
 bt_navigator_navigate_to_pose_rclcpp_node:
   ros__parameters:
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-
+    use_sim_time: false
 controller_server:
   ros__parameters:
-    # -- Controller runtime ----------------------------------------------------
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    controller_frequency:            5.0                                 # Reduced controller cadence to ease controller load and keep all mission types aligned.
-    min_x_velocity_threshold:        0.001                               # Linear X deadband below which motion is treated as zero. Default is commonly 0.001 m/s.
-    min_y_velocity_threshold:        0.001                               # Linear Y deadband below which motion is treated as zero. Default is commonly 0.5 for holonomic robots; near-zero fits diff drive.
-    min_theta_velocity_threshold:    0.001                               # Angular deadband below which rotation is treated as zero. Default is commonly 0.001 rad/s.
-    failure_tolerance:               1.0                                 # Time in seconds the controller may fail before aborting. Common examples use 0.3; 1.0 gives brief tolerance for outdoor odom jitter.
-    progress_checker_plugins:        ["progress_checker"]                # Progress checker plugins available to the controller. Jazzy expects this plural key.
-    goal_checker_plugins:            ["general_goal_checker"]            # Goal checker plugins available to the controller. Common examples load one SimpleGoalChecker.
-    current_progress_checker:        "progress_checker"                  # Explicitly select the active progress checker so Nav2 does not warn while defaulting to the only loaded plugin.
-    current_goal_checker:            "general_goal_checker"              # Explicitly select the active goal checker so Nav2 does not warn while defaulting to the only loaded plugin.
-    controller_plugins:              ["FollowPath"]                      # Controller plugins available to execute paths. Common examples load one DWB FollowPath plugin.
-
-    # -- Progress checking -----------------------------------------------------
+    use_sim_time: false
+    controller_frequency: 10.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 1.0
+    progress_checker_plugins:
+    - progress_checker
+    goal_checker_plugins:
+    - general_goal_checker
+    current_progress_checker: progress_checker
+    current_goal_checker: general_goal_checker
+    controller_plugins:
+    - FollowPath
     progress_checker:
-      plugin:                        "nav2_controller::SimpleProgressChecker"  # Progress checker implementation. Common default/example plugin is SimpleProgressChecker.
-      required_movement_radius:      0.05                                # Match the default-missions progress threshold across mission types.
-      movement_time_allowance:       20.0                                # Match the default-missions progress timeout across mission types.
-
-    # -- Goal checking ---------------------------------------------------------
+      plugin: nav2_controller::SimpleProgressChecker
+      required_movement_radius: 0.05
+      movement_time_allowance: 20.0
     general_goal_checker:
-      stateful:                      true                                # Goal checker remembers once the robot has entered tolerance. Nav2 example default is typically true.
-      plugin:                        "nav2_controller::SimpleGoalChecker"  # Goal checker implementation. Common default/example plugin is SimpleGoalChecker.
-      xy_goal_tolerance:             0.30                                # Match the default-missions outer goal tolerance so all mission types converge with the same controller family behavior.
-      yaw_goal_tolerance:            0.20                                # Match the default-missions heading tolerance so chunk-to-chunk alignment stays consistent.
-
-    # -- Local planner ---------------------------------------------------------
+      stateful: true
+      plugin: nav2_controller::SimpleGoalChecker
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.2
     FollowPath:
-      plugin:                        "nav2_rotation_shim_controller::RotationShimController"  # Match the default-missions controller family so heading acquisition is handled by the shim before path tracking.
-      angular_dist_threshold:        0.785                               # Match the default-missions shim engagement threshold.
-      angular_disengage_threshold:   0.3925                              # Match the default-missions shim handoff threshold.
-      forward_sampling_distance:     0.5                                 # Match the default-missions path-heading sampling distance.
-      rotate_to_heading_angular_vel: 0.30                                # Reduced turn-in rate to keep manual mission heading changes gentler.
-      max_angular_accel:             0.6                                 # Reduced shim angular acceleration to match the calmer turn behavior.
-      simulate_ahead_time:           1.0                                 # Match the default-missions collision-check horizon for shim motions.
-      rotate_to_goal_heading:        true                                # Match the default-missions goal-heading alignment behavior.
-
-      primary_controller:           "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"  # Use the same RPP child controller as default missions.
-      primary_controller.desired_linear_vel: 0.14                        # Match the reduced shared mission cruise speed from default missions.
-      primary_controller.lookahead_dist: 0.55                            # Match the default-missions base lookahead distance.
-      primary_controller.min_lookahead_dist: 0.30                        # Match the default-missions minimum lookahead.
-      primary_controller.max_lookahead_dist: 0.90                        # Match the default-missions maximum lookahead.
-      primary_controller.lookahead_time: 1.5                             # Match the default-missions velocity-scaled lookahead timing.
-      primary_controller.transform_tolerance: 0.2                        # Match the default-missions TF tolerance for the controller family.
-      primary_controller.use_velocity_scaled_lookahead_dist: true        # Match the default-missions adaptive lookahead behavior.
-      primary_controller.min_approach_linear_velocity: 0.05              # Match the default-missions approach crawl speed.
-      primary_controller.approach_velocity_scaling_dist: 0.8             # Match the default-missions early slowdown distance.
-      primary_controller.use_collision_detection: true                   # Keep the standard RPP collision checking enabled across mission types.
-      primary_controller.max_allowed_time_to_collision_up_to_carrot: 1.0 # Match the default-missions near-term collision projection window.
-      primary_controller.use_regulated_linear_velocity_scaling: true     # Match the default-missions curvature-based speed regulation.
-      primary_controller.use_fixed_curvature_lookahead: false            # Match the default-missions adaptive curvature handling.
-      primary_controller.curvature_lookahead_dist: 0.25                  # Match the default-missions curvature probe distance.
-      primary_controller.use_cost_regulated_linear_velocity_scaling: false  # Match the default-missions current cost-regulation setting.
-      primary_controller.regulated_linear_scaling_min_radius: 0.8        # Match the default-missions slowdown radius threshold.
-      primary_controller.regulated_linear_scaling_min_speed: 0.05        # Match the default-missions minimum regulated speed.
-      primary_controller.use_rotate_to_heading: false                    # Rotation Shim owns heading acquisition in this controller family.
-      primary_controller.allow_reversing: false                          # Match the default-missions forward-only tracking behavior.
-      primary_controller.max_angular_accel: 0.6                          # Match the reduced shim angular acceleration envelope.
-      primary_controller.stateful: true                                  # Match the default-missions stateful controller behavior.
-
+      plugin: nav2_mppi_controller::MPPIController
+      time_steps: 40
+      model_dt: 0.1
+      batch_size: 1600
+      iteration_count: 1
+      prune_distance: 3.5
+      transform_tolerance: 0.2
+      temperature: 0.2
+      gamma: 0.005
+      motion_model: DiffDrive
+      visualize: false
+      regenerate_noises: false
+      retry_attempt_limit: 3
+      vx_max: 0.18
+      vx_min: 0.0
+      vy_max: 0.0
+      wz_max: 0.6
+      ax_max: 1.0
+      ax_min: -1.0
+      ay_max: 0.0
+      ay_min: 0.0
+      az_max: 1.0
+      vx_std: 0.14
+      vy_std: 0.0
+      wz_std: 0.45
+      critics:
+      - ConstraintCritic
+      - ObstaclesCritic
+      - GoalCritic
+      - GoalAngleCritic
+      - PathAlignCritic
+      - PathFollowCritic
+      - PathAngleCritic
+      - PreferForwardCritic
+      ObstaclesCritic.cost_power: 1
+      ObstaclesCritic.repulsion_weight: 1.5
+      ObstaclesCritic.critical_weight: 20.0
+      ObstaclesCritic.collision_cost: 1000000.0
+      ObstaclesCritic.consider_footprint: true
+      GoalCritic.cost_weight: 5.0
+      GoalAngleCritic.cost_weight: 3.0
+      PathAlignCritic.cost_weight: 12.0
+      PathFollowCritic.cost_weight: 10.0
+      PathAngleCritic.cost_weight: 2.0
+      PathAngleCritic.mode: 0
+      PreferForwardCritic.cost_weight: 2.0
 local_costmap:
   local_costmap:
     ros__parameters:
-      # -- Local costmap core --------------------------------------------------
-      update_frequency:              5.0                                 # Costmap update rate in Hz. Common Nav2 example default is 5 Hz.
-      publish_frequency:             2.0                                 # Costmap publish rate in Hz for downstream consumers and visualization. Common examples use 2 Hz.
-      global_frame:                  odom                                # Builtin local missions keep the controller costmap in odom to match the global planner frame.
-      robot_base_frame:              base_footprint                      # Robot body frame used to place the footprint in the costmap. Common default is base_link.
-      use_sim_time:                  false                               # Use simulated clock if /clock is present. Default is typically false.
-      rolling_window:                true                                # Keep the local costmap centered on the robot instead of storing a fixed map. Common local costmap default is true.
-      width:                         5                                   # Width of the local rolling costmap in meters.
-      height:                        5                                   # Height of the local rolling costmap in meters.
-      resolution:                    0.05                                # Costmap cell size in meters. Common local costmap example value is 0.05 m.
-      footprint:                     "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]"  # Robot footprint polygon in meters in base_footprint. Replaces robot_radius=0.22 to include the front tool width.
-      plugins:                       ["obstacle_layer", "inflation_layer"]  # Nav2 owns the rolling local obstacle map directly from live sensors, following the standard costmap layering model.
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_footprint
+      use_sim_time: false
+      rolling_window: true
+      width: 5
+      height: 5
+      resolution: 0.05
+      footprint: '[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]'
+      plugins:
+      - obstacle_layer
+      - inflation_layer
       qos_overrides:
         /amr_sweeper/depth_camera/scan:
           subscription:
-            reliability:             best_effort
-            history:                 keep_last
-            depth:                   5
+            reliability: best_effort
+            history: keep_last
+            depth: 5
       obstacle_layer:
-        plugin:                      "nav2_costmap_2d::ObstacleLayer"
-        enabled:                     true
-        footprint_clearing_enabled:  true
-        combination_method:          1
-        observation_sources:         scan
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        footprint_clearing_enabled: true
+        combination_method: 1
+        observation_sources: scan
         scan:
-          topic:                     depth_camera/scan
-          data_type:                 "LaserScan"
-          min_obstacle_height:       0.0
-          max_obstacle_height:       0.5
-          clearing:                  true
-          marking:                   true
-          obstacle_max_range:        4.0
-          obstacle_min_range:        0.20
-          raytrace_max_range:        4.5
-          raytrace_min_range:        0.20
-          inf_is_valid:              true
-
-      # -- Inflation layer -----------------------------------------------------
+          topic: depth_camera/scan
+          data_type: LaserScan
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.5
+          clearing: true
+          marking: true
+          obstacle_max_range: 4.0
+          obstacle_min_range: 0.2
+          raytrace_max_range: 4.5
+          raytrace_min_range: 0.2
+          inf_is_valid: true
       inflation_layer:
-        plugin:                      "nav2_costmap_2d::InflationLayer"   # Inflation layer implementation. This is Nav2's standard inflation plugin.
-        cost_scaling_factor:         3.0                                 # How quickly inflated costs decay away from obstacles. Common examples use 3.0.
-        inflation_radius:            0.55                                # Distance in meters to inflate around obstacles. Common examples often use 0.55 m.
-                                  
-      always_send_full_costmap:      false                               # Publish incremental updates instead of the full map every cycle. Common default/example is false.
-
+        plugin: nav2_costmap_2d::InflationLayer
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+      always_send_full_costmap: false
 global_costmap:
   global_costmap:
     ros__parameters:
-      # -- Global costmap core -------------------------------------------------
-      update_frequency:              4.0                                 # Keep the planner's global costmap well ahead of Nav2 freshness timeouts; 1 Hz was too close to the timeout boundary during clears and replans.
-      publish_frequency:             2.0                                 # Publish often enough for recoveries and diagnostics without making the planner wait on a near-1-second update cadence.
-      global_frame:                  odom                                # Builtin local missions plan in odom instead of the SLAM map frame.
-      rolling_window:                true                                # Keep the global planner centered on the robot for small local sweep patterns.
-      robot_base_frame:              base_footprint                      # Robot body frame used to place the footprint in the costmap. Common default is base_link.
-      use_sim_time:                  false                               # Use simulated clock if /clock is present. Default is typically false.
-      footprint:                     "[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]"  # Same swept footprint as local_costmap. Replaces robot_radius=0.22 for better global planning around the tool.
-      width:                         10                                  # Match the expected builtin mission footprint with a robot-centered 10x10 m planning surface.
-      height:                        10                                  # Match the expected builtin mission footprint with a robot-centered 10x10 m planning surface.
-      resolution:                    0.05                                # Match the live SLAM occupancy map resolution so global planning layers stay aligned.
-      track_unknown_space:           false                               # Odom-based builtin local missions do not rely on unknown-space reasoning from SLAM.
-      plugins:                       ["static_layer", "inflation_layer"]  # Builtin local missions still plan in odom, but they now consume mapping-published costmaps instead of raw scans.
-
+      update_frequency: 4.0
+      publish_frequency: 2.0
+      global_frame: odom
+      rolling_window: true
+      robot_base_frame: base_footprint
+      use_sim_time: false
+      footprint: '[[0.55, 0.30], [0.55, -0.30], [-0.28, -0.30], [-0.28, 0.30]]'
+      width: 10
+      height: 10
+      resolution: 0.05
+      track_unknown_space: false
+      plugins:
+      - static_layer
+      - inflation_layer
       static_layer:
-        plugin:                      "nav2_costmap_2d::StaticLayer"
-        map_topic:                   mapping/global_costmap
+        plugin: nav2_costmap_2d::StaticLayer
+        map_topic: mapping/global_costmap
         map_subscribe_transient_local: true
-        subscribe_to_updates:        false
-
-      # -- Inflation layer -----------------------------------------------------
+        subscribe_to_updates: false
       inflation_layer:
-        plugin:                      "nav2_costmap_2d::InflationLayer"   # Inflation layer implementation. This is Nav2's standard inflation plugin.
-        cost_scaling_factor:         3.0                                 # How quickly inflated costs decay away from obstacles. Common examples use 3.0.
-        inflation_radius:            0.55                                # Distance in meters to inflate around obstacles. Common examples often use 0.55 m.
-
-      always_send_full_costmap:      false                               # Publish incremental updates instead of the full map every cycle. Common default/example is false.
-
+        plugin: nav2_costmap_2d::InflationLayer
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+      always_send_full_costmap: false
 map_server:
   ros__parameters:
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    yaml_filename:                   ""                                  # No static map file is used for builtin local missions.
-
+    use_sim_time: false
+    yaml_filename: ''
 map_saver:
   ros__parameters:
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    save_map_timeout:                5.0                                 # Seconds to wait for map save operations to complete. Common examples use 5.0 s.
-    free_thresh_default:             0.25                                # Probability threshold below which a cell is saved as free. Common examples use 0.25.
-    occupied_thresh_default:         0.65                                # Probability threshold above which a cell is saved as occupied. Common examples use 0.65.
-    map_subscribe_transient_local:   true                                # Subscribe with transient-local durability so latched map data is received. Common examples use true.
-
+    use_sim_time: false
+    save_map_timeout: 5.0
+    free_thresh_default: 0.25
+    occupied_thresh_default: 0.65
+    map_subscribe_transient_local: true
 planner_server:
   ros__parameters:
-    # -- Planner runtime -------------------------------------------------------
-    expected_planner_frequency:      0.5                                 # Expected planner run rate in Hz for diagnostics. Common examples use 20 Hz or 1 Hz depending on workload.
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    planner_plugins:                 ["GridBased"]                       # Planner plugins available to generate global paths. Common examples load one GridBased planner.
-
-    # -- GridBased planner -----------------------------------------------------
+    expected_planner_frequency: 0.5
+    use_sim_time: false
+    planner_plugins:
+    - GridBased
     GridBased:
-      plugin:                        "nav2_navfn_planner::NavfnPlanner"  # Planner implementation. Common example plugin is NavfnPlanner.
-      tolerance:                     0.5                                 # Goal tolerance in meters if exact goal cell is not reachable. Common examples use 0.5 m.
-      use_astar:                     false                               # Use Dijkstra when false or A* when true. Common Navfn example default is false.
-      allow_unknown:                 true                                # Permit planning through unknown cells. Common mapped examples often use true.
-
+      plugin: nav2_navfn_planner::NavfnPlanner
+      tolerance: 0.5
+      use_astar: false
+      allow_unknown: true
 smoother_server:
   ros__parameters:
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    smoother_plugins:                ["simple_smoother"]                 # Path smoother plugins available after planning. Common examples load one simple smoother.
-
+    use_sim_time: false
+    smoother_plugins:
+    - simple_smoother
     simple_smoother:
-      plugin:                        "nav2_smoother::SimpleSmoother"     # Smoother implementation. Common example plugin is SimpleSmoother.
-      tolerance:                     1.0e-10                             # Convergence tolerance for smoothing iterations. Common examples use 1.0e-10.
-      max_its:                       1000                                # Maximum smoothing iterations. Common examples use 1000.
-      do_refinement:                 true                                # Run a final refinement pass after smoothing. Common examples use true.
-
+      plugin: nav2_smoother::SimpleSmoother
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: true
 behavior_server:
   ros__parameters:
-    # -- Costmap interfaces ----------------------------------------------------
-    local_costmap_topic:             local_costmap/costmap_raw           # Local costmap topic used by recovery behaviors.
-    global_costmap_topic:            global_costmap/costmap_raw          # Global costmap topic used by recovery behaviors.
-    local_footprint_topic:           local_costmap/published_footprint   # Local footprint topic used by recovery behaviors.
-    global_footprint_topic:          global_costmap/published_footprint  # Global footprint topic used by recovery behaviors.
-
-    # -- Behavior plugins ------------------------------------------------------
-    cycle_frequency:                 10.0                                # Behavior server update rate in Hz. Common examples use 10 Hz.
-    behavior_plugins:                ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]  # Recovery/utility behaviors available to the behavior tree. This matches Nav2's standard example set.
-
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins:
+    - spin
+    - backup
+    - drive_on_heading
+    - assisted_teleop
+    - wait
     spin:
-      plugin:                        "nav2_behaviors::Spin"              # Recovery behavior that rotates the robot in place. Standard Nav2 behavior plugin.
-
+      plugin: nav2_behaviors::Spin
     backup:
-      plugin:                        "nav2_behaviors::BackUp"            # Recovery behavior that drives backward. Standard Nav2 behavior plugin.
-
+      plugin: nav2_behaviors::BackUp
     drive_on_heading:
-      plugin:                        "nav2_behaviors::DriveOnHeading"    # Behavior that drives along the current heading. Standard Nav2 behavior plugin.
-
+      plugin: nav2_behaviors::DriveOnHeading
     wait:
-      plugin:                        "nav2_behaviors::Wait"              # Behavior that pauses for a duration. Standard Nav2 behavior plugin.
-
+      plugin: nav2_behaviors::Wait
     assisted_teleop:
-      plugin:                        "nav2_behaviors::AssistedTeleop"    # Behavior that allows guarded teleoperation. Standard Nav2 behavior plugin.
-
-    # -- Frames and motion limits ---------------------------------------------
-    global_frame:                    odom                                # Recovery behaviors should stay in the same odom frame as builtin local planning.
-    robot_base_frame:                base_footprint                      # Robot body frame used by recovery behaviors. Common default is base_link.
-    transform_tolerance:             1.0                                 # TF lookup tolerance in seconds for behavior execution. Keep recoveries tolerant of map -> odom correction cadence.
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    simulate_ahead_time:             2.0                                 # Seconds to project motion ahead for some recovery behaviors. Common examples use 2.0 s.
-    max_rotational_vel:              0.25                                # Maximum rotational speed in rad/s for behavior server motions. Reduced for gentler heading changes.
-    min_rotational_vel:              0.1                                 # Minimum commanded rotational speed in rad/s for behavior server motions. Common examples use 0.4.
-    rotational_acc_lim:              0.8                                 # Angular acceleration limit in rad/s^2 for behavior server motions. Common examples use 3.2.
-
+      plugin: nav2_behaviors::AssistedTeleop
+    global_frame: odom
+    robot_base_frame: base_footprint
+    transform_tolerance: 1.0
+    use_sim_time: false
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 0.25
+    min_rotational_vel: 0.1
+    rotational_acc_lim: 0.8
 waypoint_follower:
   ros__parameters:
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    loop_rate:                       5                                   # Waypoint follower loop rate in Hz. Common examples use 20 Hz.
-    stop_on_failure:                 false                               # Continue to later waypoints after a failure when false. Common examples often use false.
-    waypoint_task_executor_plugin:   "wait_at_waypoint"                  # Task executor plugin run at each waypoint. Common examples use wait_at_waypoint.
-
+    use_sim_time: false
+    loop_rate: 5
+    stop_on_failure: false
+    waypoint_task_executor_plugin: wait_at_waypoint
     wait_at_waypoint:
-      plugin:                        "nav2_waypoint_follower::WaitAtWaypoint"  # Waypoint task executor that pauses at each waypoint. Standard Nav2 example plugin.
-      enabled:                       true                                # Enable the waypoint task executor. Common examples use true.
-      waypoint_pause_duration:       200                                 # Pause duration in milliseconds at each waypoint. Common examples often use 200 ms.
-
+      plugin: nav2_waypoint_follower::WaitAtWaypoint
+      enabled: true
+      waypoint_pause_duration: 200
 velocity_smoother:
   ros__parameters:
-    use_sim_time:                    false                               # Use simulated clock if /clock is present. Default is typically false.
-    smoothing_frequency:             10.0                                # Output smoothing rate in Hz. Was 15.0; common examples often use 20.0 Hz.
-    scale_velocities:                false                               # Uniformly scale velocity components when one axis would violate limits. Common examples often use false.
-    feedback:                        "OPEN_LOOP"                         # Use commanded velocity instead of odometry feedback for smoothing. Common default/example is OPEN_LOOP.
-
-    max_velocity:                    [0.15, 0.0, 0.25]                   # Maximum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Reduced theta cap to keep turns calmer.
-    min_velocity:                    [-0.15, 0.0, -0.3]                  # Minimum commanded [x, y, theta] velocities in [m/s, m/s, rad/s]. Theta was -0.25; common examples mirror max limits.
-    max_accel:                       [1.0, 0.0, 0.8]                     # Maximum acceleration [x, y, theta] in [m/s^2, m/s^2, rad/s^2]. X was 2.5; common examples are often [2.5, 0.0, 3.2].
-    max_decel:                       [-1.0, 0.0, -0.8]                   # Maximum deceleration [x, y, theta] in [m/s^2, m/s^2, rad/s^2]. X was -2.5; common examples mirror accel limits.
-
-    odom_topic:                      "odom"                              # Odometry topic used if closed-loop feedback is enabled. Nav2 examples often use odom.
-    odom_duration:                   0.1                                 # Seconds of odometry history considered by the smoother. Common examples use 0.1 s.
-    deadband_velocity:               [0.0, 0.0, 0.0]                     # Small commanded velocities below these thresholds are snapped to zero. Common examples use all zeros.
-    velocity_timeout:                1.0                                 # Seconds before output is forced to zero if no new command arrives. Common examples use 1.0 s.
+    use_sim_time: false
+    smoothing_frequency: 10.0
+    scale_velocities: false
+    feedback: OPEN_LOOP
+    max_velocity:
+    - 0.15
+    - 0.0
+    - 0.25
+    min_velocity:
+    - -0.15
+    - 0.0
+    - -0.3
+    max_accel:
+    - 1.0
+    - 0.0
+    - 0.8
+    max_decel:
+    - -1.0
+    - 0.0
+    - -0.8
+    odom_topic: odom
+    odom_duration: 0.1
+    deadband_velocity:
+    - 0.0
+    - 0.0
+    - 0.0
+    velocity_timeout: 1.0

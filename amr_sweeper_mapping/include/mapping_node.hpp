@@ -82,6 +82,7 @@ struct LoadedCostmapArtifact
   double resolution{0.0};
   double origin_x{0.0};
   double origin_y{0.0};
+  std::string mode{"trinary"};
   double occupied_thresh{0.65};
   double free_thresh{0.196};
   bool georeference_valid{false};
@@ -138,12 +139,16 @@ private:
   void loadSavedCostmapIfConfigured();
   void initializeMapFromArtifact(const LoadedCostmapArtifact & artifact);
   [[nodiscard]] std::optional<LoadedCostmapArtifact> projectArtifactIntoCurrentMap(
-    const LoadedCostmapArtifact & artifact) const;
+    const LoadedCostmapArtifact & artifact,
+    const RawNavSatSample & anchor_navsat,
+    double anchor_heading_yaw) const;
   [[nodiscard]] bool useAuthoritativeMissionGeoreference() const;
   void tryInitializeSavedCostmapFromSensors();
   void pruneGeoreferenceSamples();
   [[nodiscard]] std::optional<RawNavSatSample> stabilizedNavSatSample() const;
   [[nodiscard]] std::optional<double> stabilizedHeadingYaw() const;
+  [[nodiscard]] std::optional<double> navSatHistoryMaxSpreadMeters() const;
+  [[nodiscard]] std::optional<double> headingHistoryMaxDeviationRadians(double reference_yaw) const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid buildStaticRuntimeCostmapArtifact() const;
   void tryPublishBootstrapGlobalCostmap();
   void initializeGlobalMap(const geometry_msgs::msg::Point & center);
@@ -220,12 +225,14 @@ private:
   bool mission_end_pending_{false};
   bool advance_past_blocked_waypoints_{true};
   std::size_t active_chunk_index_{0U};
-  int max_segments_per_goal_{4};
+  int max_segments_per_goal_{1};
   int max_blocked_waypoint_advances_{20};
   int consecutive_blocked_waypoint_advances_{0};
   double global_map_resolution_m_{0.05};
   double max_waypoint_spacing_m_{0.5};
   double georef_lock_window_seconds_{3.0};
+  double georef_lock_max_navsat_spread_m_{2.0};
+  double georef_lock_max_heading_deviation_deg_{12.0};
   int georef_lock_min_samples_{10};
   std::string pending_end_outcome_{"completed"};
   std::string pending_end_reason_;
@@ -276,6 +283,8 @@ private:
   bool saved_costmap_initialized_{false};
   std::optional<LoadedCostmapArtifact> authoritative_saved_costmap_artifact_;
   std::optional<LoadedCostmapArtifact> pending_saved_costmap_artifact_;
+  std::optional<RawNavSatSample> locked_georef_navsat_sample_;
+  std::optional<double> locked_georef_heading_yaw_;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
   mutable std::mutex synchronized_path_mutex_;
   std::optional<RawNavSatSample> latest_raw_navsat_sample_;

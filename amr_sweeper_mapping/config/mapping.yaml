@@ -51,8 +51,10 @@
     map_pose_status_topic:         mapping/map_pose_status          # map_pose_node health topic. BOOTSTRAP, DEGRADED, HEALTHY, and WARNING all allow scan integration; FAULT blocks it.
     startup_tf_lookup_timeout_seconds: 0.05                        # Wait this long per scan while the local tf listener warms up and ingests the full map -> sensor chain before startup scan integration begins.
     startup_tf_ready_streak_required: 3                            # Require this many consecutive successful map -> scan transform checks before the first scan is allowed into the runtime map builder.
-    georef_lock_window_seconds:    3.0                              # Wait this long while collecting GNSS and IMU heading samples before locking the saved georeferenced costmap into the metric map frame.
-    georef_lock_min_samples:       10                               # Minimum samples required inside the stabilization window before the one-time startup costmap lock is accepted.
+    georef_lock_window_seconds:    3.0                              # Startup seeding window used to collect GNSS and IMU heading samples before the saved georeferenced costmap is projected into the metric map frame.
+    georef_lock_min_samples:       10                               # Minimum samples required inside the seeding window before the one-time startup costmap projection is accepted.
+    georef_lock_max_navsat_spread_m: 2.0                            # Reject the startup seed if the GNSS samples inside the window spread farther than this from their centroid. Set <= 0 to disable the check.
+    georef_lock_max_heading_deviation_deg: 12.0                     # Reject the startup seed if the heading samples inside the window deviate farther than this from their circular mean. Set <= 0 to disable the check.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
     global_map_resolution_m:       0.05                             # Resolution of the in-package global occupancy-grid map builder.
     runtime_costmap_save_period_seconds: 10.0                       # Periodically write the runtime mission costmap artifact back into the active run folder while scans refine it.
@@ -66,7 +68,7 @@
     # -- Mission execution policy ---------------------------------------------
     auto_start_mission:            false
     repeat_mission:                false
-    max_segments_per_goal:         4
+    max_segments_per_goal:                 1000
     max_waypoint_spacing_m:        0.5                             # Densify long route segments so Nav2 plans to nearer intermediate targets while SLAM is still expanding the live map.
     advance_past_blocked_waypoints: true                           # When Nav2 cannot reach a chunk target, skip that blocked waypoint and continue toward the next route waypoint.
     max_blocked_waypoint_advances: 20                              # Abort after this many consecutive blocked-waypoint skips to avoid endless coverage loss.
