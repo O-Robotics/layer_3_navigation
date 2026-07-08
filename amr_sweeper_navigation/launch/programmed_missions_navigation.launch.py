@@ -52,7 +52,7 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_planner_server", default_value="true", description="Launch the Nav2 planner server."),
         DeclareLaunchArgument("enable_behavior_server", default_value="true", description="Launch the Nav2 behavior server."),
         DeclareLaunchArgument("enable_bt_navigator", default_value="true", description="Launch the Nav2 behavior-tree navigator."),
-        DeclareLaunchArgument("enable_velocity_smoother", default_value="false", description="Launch the Nav2 velocity smoother."),
+        DeclareLaunchArgument("enable_velocity_smoother", default_value="true", description="Launch the Nav2 velocity smoother."),
         GroupAction([
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(launch_dir, "navigation_launch.py")),

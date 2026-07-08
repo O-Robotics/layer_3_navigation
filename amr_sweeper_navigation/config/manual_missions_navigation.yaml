@@ -43,12 +43,12 @@ controller_server:
       yaw_goal_tolerance: 0.2
     FollowPath:
       plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
-      desired_linear_vel: 0.18
+      desired_linear_vel: 0.5
       lookahead_dist: 0.8
       min_lookahead_dist: 0.45
       max_lookahead_dist: 1.5
       lookahead_time: 1.5
-      rotate_to_heading_angular_vel: 0.5
+      rotate_to_heading_angular_vel: 1.5
       transform_tolerance: 0.2
       use_velocity_scaled_lookahead_dist: true
       min_approach_linear_velocity: 0.05
@@ -198,7 +198,7 @@ behavior_server:
     transform_tolerance: 1.0
     use_sim_time: false
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.25
+    max_rotational_vel: 1.5
     min_rotational_vel: 0.1
     rotational_acc_lim: 0.8
 velocity_smoother:
@@ -210,11 +210,11 @@ velocity_smoother:
     max_velocity:
     - 0.15
     - 0.0
-    - 0.25
+    - 1.5
     min_velocity:
     - -0.15
     - 0.0
-    - -0.3
+    - -1.5
     max_accel:
     - 1.0
     - 0.0
