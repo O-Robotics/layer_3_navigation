@@ -3726,8 +3726,12 @@ std::vector<std::vector<geometry_msgs::msg::PoseStamped>> MappingNode::chunkRout
     return chunks;
   }
 
+  // Make the route start its own goal so Nav2 must explicitly drive to the
+  // first waypoint before the remaining mission path is executed.
+  chunks.push_back({route.front()});
+
   const std::size_t max_points_per_goal = static_cast<std::size_t>(std::max(1, max_segments_per_goal_) + 1);
-  std::size_t start_index = 0U;
+  std::size_t start_index = 1U;
   while (start_index < route.size() - 1U) {
     const std::size_t end_index = std::min(start_index + max_points_per_goal, route.size());
     chunks.emplace_back(route.begin() + static_cast<long>(start_index), route.begin() + static_cast<long>(end_index));
@@ -3749,8 +3753,10 @@ std::vector<std::size_t> MappingNode::chunkRouteStartIndices(
     return start_indices;
   }
 
+  start_indices.push_back(0U);
+
   const std::size_t max_points_per_goal = static_cast<std::size_t>(std::max(1, max_segments_per_goal_) + 1);
-  std::size_t start_index = 0U;
+  std::size_t start_index = 1U;
   while (start_index < route.size() - 1U) {
     const std::size_t end_index = std::min(start_index + max_points_per_goal, route.size());
     start_indices.push_back(start_index);

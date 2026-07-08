@@ -1169,13 +1169,16 @@ void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
 
 void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
 {
-  if (use_reference_costmap_) {
-    return;
-  }
-
   const rclcpp::Time receipt_stamp = now();
   const bool costmap_ready =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;
+
+  if (use_reference_costmap_) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    latest_global_costmap_stamp_ = receipt_stamp;
+    latest_global_costmap_ready_ = costmap_ready;
+    return;
+  }
 
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
