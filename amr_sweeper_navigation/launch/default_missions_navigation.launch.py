@@ -26,7 +26,6 @@ def generate_launch_description():
     enable_planner_server = LaunchConfiguration("enable_planner_server")
     enable_behavior_server = LaunchConfiguration("enable_behavior_server")
     enable_bt_navigator = LaunchConfiguration("enable_bt_navigator")
-    enable_waypoint_follower = LaunchConfiguration("enable_waypoint_follower")
     enable_velocity_smoother = LaunchConfiguration("enable_velocity_smoother")
 
     return LaunchDescription([
@@ -53,7 +52,6 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_planner_server", default_value="true", description="Launch the Nav2 planner server."),
         DeclareLaunchArgument("enable_behavior_server", default_value="true", description="Launch the Nav2 behavior server."),
         DeclareLaunchArgument("enable_bt_navigator", default_value="true", description="Launch the Nav2 behavior-tree navigator."),
-        DeclareLaunchArgument("enable_waypoint_follower", default_value="false", description="Launch the Nav2 waypoint follower."),
         DeclareLaunchArgument("enable_velocity_smoother", default_value="true", description="Launch the Nav2 velocity smoother."),
         GroupAction([
             IncludeLaunchDescription(
@@ -72,7 +70,6 @@ def generate_launch_description():
                     "enable_planner_server": enable_planner_server,
                     "enable_behavior_server": enable_behavior_server,
                     "enable_bt_navigator": enable_bt_navigator,
-                    "enable_waypoint_follower": enable_waypoint_follower,
                     "enable_velocity_smoother": enable_velocity_smoother,
                 }.items(),
             ),

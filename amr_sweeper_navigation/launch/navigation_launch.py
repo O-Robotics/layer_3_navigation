@@ -199,7 +199,6 @@ def _validate_nav2_params(context) -> None:
         "bt_navigator",
         "bt_navigator_navigate_through_poses_rclcpp_node",
         "bt_navigator_navigate_to_pose_rclcpp_node",
-        "waypoint_follower",
         "velocity_smoother",
     ]
     missing_keys = [key for key in required_keys if key not in nav2_params]
@@ -291,8 +290,6 @@ def _build_nav2_group(context):
         LaunchConfiguration('enable_behavior_server').perform(context).lower() == 'true')
     enable_bt_navigator = (
         LaunchConfiguration('enable_bt_navigator').perform(context).lower() == 'true')
-    enable_waypoint_follower = (
-        LaunchConfiguration('enable_waypoint_follower').perform(context).lower() == 'true')
     enable_velocity_smoother = (
         LaunchConfiguration('enable_velocity_smoother').perform(context).lower() == 'true')
 
@@ -307,8 +304,6 @@ def _build_nav2_group(context):
         lifecycle_nodes.append('behavior_server')
     if enable_bt_navigator:
         lifecycle_nodes.append('bt_navigator')
-    if enable_waypoint_follower:
-        lifecycle_nodes.append('waypoint_follower')
     if enable_velocity_smoother:
         lifecycle_nodes.append('velocity_smoother')
 
@@ -381,17 +376,6 @@ def _build_nav2_group(context):
                 parameters=[configured_params],
                 remappings=[('goal_pose', 'navigation/bt_navigator/goal_pose'),
                             ('transition_event', 'navigation/bt_navigator/transition_event')],))
-    if enable_waypoint_follower:
-        actions.append(Node(
-                namespace=namespace_value,
-                package='nav2_waypoint_follower',
-                executable='waypoint_follower',
-                name='waypoint_follower',
-                output='screen',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[configured_params],
-                remappings=[('transition_event', 'navigation/waypoint_follower/transition_event')],))
     if enable_velocity_smoother:
         actions.append(Node(
                 namespace=namespace_value,
@@ -480,10 +464,6 @@ def generate_launch_description():
         default_value='true',
         description='Launch the Nav2 behavior-tree navigator')
 
-    declare_enable_waypoint_follower_cmd = DeclareLaunchArgument(
-        'enable_waypoint_follower',
-        default_value='true',
-        description='Launch the Nav2 waypoint follower')
 
     declare_enable_velocity_smoother_cmd = DeclareLaunchArgument(
         'enable_velocity_smoother',
@@ -515,7 +495,6 @@ def generate_launch_description():
     ld.add_action(declare_enable_planner_server_cmd)
     ld.add_action(declare_enable_behavior_server_cmd)
     ld.add_action(declare_enable_bt_navigator_cmd)
-    ld.add_action(declare_enable_waypoint_follower_cmd)
     ld.add_action(declare_enable_velocity_smoother_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_respawn_cmd)
