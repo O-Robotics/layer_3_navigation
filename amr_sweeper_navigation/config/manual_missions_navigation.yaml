@@ -127,12 +127,37 @@ global_costmap:
       track_unknown_space: false
       plugins:
       - static_layer
+      - obstacle_layer
       - inflation_layer
+      qos_overrides:
+        /amr_sweeper/depth_camera/scan:
+          subscription:
+            reliability: best_effort
+            history: keep_last
+            depth: 5
       static_layer:
         plugin: nav2_costmap_2d::StaticLayer
         map_topic: mapping/global_costmap
         map_subscribe_transient_local: true
         subscribe_to_updates: false
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        footprint_clearing_enabled: true
+        combination_method: 1
+        observation_sources: scan
+        scan:
+          topic: depth_camera/scan
+          data_type: LaserScan
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.5
+          clearing: true
+          marking: true
+          obstacle_max_range: 4.0
+          obstacle_min_range: 0.2
+          raytrace_max_range: 4.5
+          raytrace_min_range: 0.2
+          inf_is_valid: true
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
