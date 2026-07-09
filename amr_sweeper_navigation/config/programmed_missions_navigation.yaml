@@ -207,11 +207,11 @@ velocity_smoother:
     scale_velocities: false
     feedback: CLOSED_LOOP
     max_velocity:
-    - 0.15
+    - 0.5
     - 0.0
     - 1.5
     min_velocity:
-    - -0.15
+    - -0.5
     - 0.0
     - -1.5
     max_accel:

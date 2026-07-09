@@ -41,6 +41,11 @@ constexpr char kDefaultNavSatTopic[] = "gnss/navsat";
 constexpr char kDefaultScanTopic[] = "depth_camera/scan";
 constexpr double kEarthRadiusMeters = 6378137.0;
 constexpr double kDegreesToRadians = M_PI / 180.0;
+constexpr double kTrinaryOccupiedThreshold = 0.65;
+constexpr double kTrinaryFreeThreshold = 0.196;
+constexpr unsigned char kUnknownTrinaryPixel = 205U;
+constexpr unsigned char kLegacyUnknownScalePixelLow = 127U;
+constexpr unsigned char kLegacyUnknownScalePixelHigh = 128U;
 
 struct LocalPoint
 {
@@ -61,6 +66,16 @@ struct ArtifactSeedProjection
   double sin_map_yaw{0.0};
   double alignment_dx{0.0};
   double alignment_dy{0.0};
+};
+
+struct AffineMapTransform
+{
+  double xx{1.0};
+  double xy{0.0};
+  double yx{0.0};
+  double yy{1.0};
+  double tx{0.0};
+  double ty{0.0};
 };
 
 std::string trim(const std::string & value)
@@ -216,6 +231,57 @@ std::optional<nlohmann::json> georeferenceMetadataFromArtifact(
     georeference["companion_file"] = artifact.georeference_companion_file;
   }
   return georeference;
+}
+
+bool artifactUsesScaleEncoding(const LoadedCostmapArtifact & artifact)
+{
+  return artifact.mode == "scale" || artifact.mode == "raw";
+}
+
+bool rawCostRepresentsLegacyUnknown(
+  const LoadedCostmapArtifact & artifact,
+  const unsigned char raw_cost)
+{
+  if (!artifactUsesScaleEncoding(artifact)) {
+    return false;
+  }
+
+  return
+    artifact.occupied_thresh >= 0.99 &&
+    artifact.free_thresh <= 0.01 &&
+    (raw_cost == kLegacyUnknownScalePixelLow || raw_cost == kLegacyUnknownScalePixelHigh);
+}
+
+unsigned char unknownFillValueForArtifact(const LoadedCostmapArtifact & artifact)
+{
+  return artifactUsesScaleEncoding(artifact) ? kLegacyUnknownScalePixelHigh : kUnknownTrinaryPixel;
+}
+
+std::optional<unsigned char> artifactCellRawCost(
+  const LoadedCostmapArtifact & artifact,
+  const double world_x,
+  const double world_y)
+{
+  if (
+    artifact.width_cells == 0U || artifact.height_cells == 0U ||
+    artifact.resolution <= 0.0 || artifact.costs.empty())
+  {
+    return std::nullopt;
+  }
+
+  const int cell_x = static_cast<int>(std::floor((world_x - artifact.origin_x) / artifact.resolution));
+  const int cell_y = static_cast<int>(std::floor((world_y - artifact.origin_y) / artifact.resolution));
+  if (
+    cell_x < 0 || cell_y < 0 ||
+    cell_x >= static_cast<int>(artifact.width_cells) ||
+    cell_y >= static_cast<int>(artifact.height_cells))
+  {
+    return std::nullopt;
+  }
+
+  const std::size_t index =
+    static_cast<std::size_t>(cell_y) * artifact.width_cells + static_cast<std::size_t>(cell_x);
+  return artifact.costs.at(index);
 }
 
 std::optional<nlohmann::json> buildGeoReferenceMetadata(
@@ -868,28 +934,13 @@ std::optional<int8_t> artifactCellOccupancy(
   const double world_x,
   const double world_y)
 {
-  if (
-    artifact.width_cells == 0U || artifact.height_cells == 0U ||
-    artifact.resolution <= 0.0 || artifact.costs.empty())
-  {
+  const auto raw_cost = artifactCellRawCost(artifact, world_x, world_y);
+  if (!raw_cost.has_value() || rawCostRepresentsLegacyUnknown(artifact, *raw_cost)) {
     return std::nullopt;
   }
 
-  const int cell_x = static_cast<int>(std::floor((world_x - artifact.origin_x) / artifact.resolution));
-  const int cell_y = static_cast<int>(std::floor((world_y - artifact.origin_y) / artifact.resolution));
-  if (
-    cell_x < 0 || cell_y < 0 ||
-    cell_x >= static_cast<int>(artifact.width_cells) ||
-    cell_y >= static_cast<int>(artifact.height_cells))
-  {
-    return std::nullopt;
-  }
-
-  const std::size_t index =
-    static_cast<std::size_t>(cell_y) * artifact.width_cells + static_cast<std::size_t>(cell_x);
-  const double occupied_ratio =
-    static_cast<double>(artifact.costs.at(index)) / 255.0;
-  if (artifact.mode == "scale" || artifact.mode == "raw") {
+  const double occupied_ratio = static_cast<double>(*raw_cost) / 255.0;
+  if (artifactUsesScaleEncoding(artifact)) {
     return static_cast<int8_t>(
       std::lround(std::clamp(occupied_ratio, 0.0, 1.0) * 100.0));
   }
@@ -901,7 +952,6 @@ std::optional<int8_t> artifactCellOccupancy(
   }
   return std::nullopt;
 }
-
 void saveOccupancyGridArtifact(
   const nav_msgs::msg::OccupancyGrid & map,
   const std::filesystem::path & yaml_path,
@@ -924,9 +974,14 @@ void saveOccupancyGridArtifact(
     for (uint32_t col = 0U; col < map.info.width; ++col) {
       const std::size_t index = static_cast<std::size_t>(row) * map.info.width + col;
       const int8_t cell = map.data.at(index);
-      const double occupied_ratio = cell < 0 ? 0.5 : std::clamp(static_cast<double>(cell) / 100.0, 0.0, 1.0);
-      const unsigned char pixel = static_cast<unsigned char>(
-        std::lround((1.0 - occupied_ratio) * 255.0));
+      unsigned char pixel = kUnknownTrinaryPixel;
+      if (cell >= 0) {
+        if (cell >= static_cast<int8_t>(std::lround(kTrinaryOccupiedThreshold * 100.0))) {
+          pixel = 0U;
+        } else if (cell <= static_cast<int8_t>(std::floor(kTrinaryFreeThreshold * 100.0))) {
+          pixel = 255U;
+        }
+      }
       image_stream.write(reinterpret_cast<const char *>(&pixel), 1);
     }
   }
@@ -938,12 +993,12 @@ void saveOccupancyGridArtifact(
   yaml_stream << std::setprecision(std::numeric_limits<double>::max_digits10);
   yaml_stream
     << "image: " << image_path.filename().string() << "\n"
-    << "mode: scale\n"
+    << "mode: trinary\n"
     << "resolution: " << map.info.resolution << "\n"
     << "origin: [" << map.info.origin.position.x << ", " << map.info.origin.position.y << ", 0.0]\n"
     << "negate: 0\n"
-    << "occupied_thresh: 0.99\n"
-    << "free_thresh: 0.01\n";
+    << "occupied_thresh: " << kTrinaryOccupiedThreshold << "\n"
+    << "free_thresh: " << kTrinaryFreeThreshold << "\n";
   if (georeference.has_value()) {
     const auto & metadata = *georeference;
     yaml_stream << "georeference_type: " <<
@@ -1737,6 +1792,25 @@ std::optional<LoadedCostmapArtifact> MappingNode::projectArtifactIntoCurrentMap(
     max_y = std::max(max_y, corner.y);
   }
 
+  const geometry_msgs::msg::Point projected_origin =
+    projectArtifactPointIntoCurrentMap(artifact, projection, artifact.origin_x, artifact.origin_y);
+  const geometry_msgs::msg::Point projected_unit_x =
+    projectArtifactPointIntoCurrentMap(artifact, projection, artifact.origin_x + 1.0, artifact.origin_y);
+  const geometry_msgs::msg::Point projected_unit_y =
+    projectArtifactPointIntoCurrentMap(artifact, projection, artifact.origin_x, artifact.origin_y + 1.0);
+
+  const AffineMapTransform transform{
+    projected_unit_x.x - projected_origin.x,
+    projected_unit_y.x - projected_origin.x,
+    projected_unit_x.y - projected_origin.y,
+    projected_unit_y.y - projected_origin.y,
+    projected_origin.x,
+    projected_origin.y};
+  const double determinant = transform.xx * transform.yy - transform.xy * transform.yx;
+  if (std::abs(determinant) <= 1.0e-9) {
+    return std::nullopt;
+  }
+
   LoadedCostmapArtifact projected = artifact;
   projected.origin_x = min_x;
   projected.origin_y = min_y;
@@ -1746,40 +1820,28 @@ std::optional<LoadedCostmapArtifact> MappingNode::projectArtifactIntoCurrentMap(
     std::max(1.0, std::ceil((max_y - min_y) / artifact.resolution)));
   projected.costs.assign(
     static_cast<std::size_t>(projected.width_cells) * projected.height_cells,
-    static_cast<unsigned char>(127U));
+    unknownFillValueForArtifact(artifact));
 
-  for (unsigned int row = 0U; row < artifact.height_cells; ++row) {
-    for (unsigned int col = 0U; col < artifact.width_cells; ++col) {
-      const std::size_t source_index =
-        static_cast<std::size_t>(row) * artifact.width_cells + col;
-      const unsigned char source_cost = artifact.costs.at(source_index);
+  for (unsigned int row = 0U; row < projected.height_cells; ++row) {
+    for (unsigned int col = 0U; col < projected.width_cells; ++col) {
+      const double map_x =
+        projected.origin_x + (static_cast<double>(col) + 0.5) * projected.resolution;
+      const double map_y =
+        projected.origin_y + (static_cast<double>(row) + 0.5) * projected.resolution;
+      const double centered_x = map_x - transform.tx;
+      const double centered_y = map_y - transform.ty;
       const double artifact_x =
-        artifact.origin_x + (static_cast<double>(col) + 0.5) * artifact.resolution;
+        (transform.yy * centered_x - transform.xy * centered_y) / determinant;
       const double artifact_y =
-        artifact.origin_y + (static_cast<double>(row) + 0.5) * artifact.resolution;
-      const geometry_msgs::msg::Point projected_point =
-        projectArtifactPointIntoCurrentMap(artifact, projection, artifact_x, artifact_y);
-      const int target_x = static_cast<int>(std::floor(
-        (projected_point.x - projected.origin_x) / artifact.resolution));
-      const int target_y = static_cast<int>(std::floor(
-        (projected_point.y - projected.origin_y) / artifact.resolution));
-      if (
-        target_x < 0 || target_y < 0 ||
-        target_x >= static_cast<int>(projected.width_cells) ||
-        target_y >= static_cast<int>(projected.height_cells))
-      {
+        (-transform.yx * centered_x + transform.xx * centered_y) / determinant;
+      const auto source_cost = artifactCellRawCost(artifact, artifact_x, artifact_y);
+      if (!source_cost.has_value()) {
         continue;
       }
 
       const std::size_t target_index =
-        static_cast<std::size_t>(target_y) * projected.width_cells +
-        static_cast<std::size_t>(target_x);
-      unsigned char & target_cost = projected.costs[target_index];
-      if (target_cost == static_cast<unsigned char>(127U)) {
-        target_cost = source_cost;
-      } else if (source_cost != static_cast<unsigned char>(127U)) {
-        target_cost = std::max(target_cost, source_cost);
-      }
+        static_cast<std::size_t>(row) * projected.width_cells + static_cast<std::size_t>(col);
+      projected.costs[target_index] = *source_cost;
     }
   }
 
@@ -1885,9 +1947,14 @@ void MappingNode::initializeMapFromArtifact(const LoadedCostmapArtifact & artifa
   global_map_occupied_observations_.assign(artifact.costs.size(), 0U);
   global_map_free_observations_.assign(artifact.costs.size(), 0U);
 
-  const bool preserve_scaled_costs = artifact.mode == "scale" || artifact.mode == "raw";
+  const bool preserve_scaled_costs = artifactUsesScaleEncoding(artifact);
   for (std::size_t index = 0U; index < artifact.costs.size(); ++index) {
-    const double occupied_ratio = static_cast<double>(artifact.costs.at(index)) / 255.0;
+    const unsigned char raw_cost = artifact.costs.at(index);
+    if (rawCostRepresentsLegacyUnknown(artifact, raw_cost)) {
+      continue;
+    }
+
+    const double occupied_ratio = static_cast<double>(raw_cost) / 255.0;
     if (preserve_scaled_costs) {
       latest_live_map_.data.at(index) = static_cast<int8_t>(
         std::lround(std::clamp(occupied_ratio, 0.0, 1.0) * 100.0));
@@ -2081,10 +2148,7 @@ void MappingNode::mergeCompletedRuntimeCostmapIntoMissionCostmap()
         const auto runtime_cell = artifactCellOccupancy(runtime_artifact, world_x, world_y);
 
         int8_t merged_cell = -1;
-        if (persistent_cell.has_value() && runtime_cell.has_value()) {
-          merged_cell = static_cast<int8_t>(std::lround(
-            (static_cast<double>(*persistent_cell) + static_cast<double>(*runtime_cell)) * 0.5));
-        } else if (runtime_cell.has_value()) {
+        if (runtime_cell.has_value()) {
           merged_cell = *runtime_cell;
         } else if (persistent_cell.has_value()) {
           merged_cell = *persistent_cell;
@@ -2104,7 +2168,7 @@ void MappingNode::mergeCompletedRuntimeCostmapIntoMissionCostmap()
     persistent_mission_costmap_merged_ = true;
     RCLCPP_INFO(
       get_logger(),
-      "Merged completed runtime costmap %s back into persistent mission costmap %s by averaging overlapping cell occupancies.",
+      "Merged completed runtime costmap %s back into persistent mission costmap %s while preferring runtime cell occupancies in overlapping regions.",
       runtime_yaml_path.string().c_str(),
       persistent_yaml_path.string().c_str());
   } catch (const std::exception & exception) {
