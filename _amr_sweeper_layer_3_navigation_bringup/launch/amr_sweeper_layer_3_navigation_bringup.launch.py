@@ -41,6 +41,14 @@ def _primary_topic_or_disabled(enabled: bool, topic: str, disabled_topic: str) -
     return topic if enabled else disabled_topic
 
 
+def _fusioncore_no_ntrip_overrides() -> dict:
+    return {
+        "gnss.min_fix_type": 1,
+        "gnss.base_noise_xy": 8.0,
+        "gnss.base_noise_z": 12.0,
+    }
+
+
 def _normalize_namespace(namespace: str) -> str:
     return namespace.strip().strip('/')
 
@@ -217,6 +225,7 @@ def _build_launches(context):
     use_imu2 = LaunchConfiguration('use_imu2').perform(context).lower() == 'true'
     use_encoder = LaunchConfiguration('use_encoder').perform(context).lower() == 'true'
     use_gnss = LaunchConfiguration('use_gnss').perform(context).lower() == 'true'
+    use_ntrip_client = LaunchConfiguration('use_ntrip_client').perform(context).lower() == 'true'
     use_amr_sweeper_navigation = LaunchConfiguration('use_amr_sweeper_navigation').perform(context).lower() == 'true'
     use_amr_sweeper_mapping = LaunchConfiguration('use_amr_sweeper_mapping').perform(context).lower() == 'true'
     mission_execution_directory = LaunchConfiguration('mission_execution_directory').perform(context)
@@ -336,6 +345,7 @@ def _build_launches(context):
             'namespace': namespace,
             'use_sim_time': use_sim_time,
             'use_simulation': use_simulation,
+            'use_ntrip_client': 'true' if use_ntrip_client else 'false',
             'mission_execution_directory': mission_execution_directory,
             'mission_file': effective_mission_file,
             'mission_id': effective_mission_id,
@@ -388,6 +398,8 @@ def _build_launches(context):
                 use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
             "publish.tf": False,
         }
+        if use_gnss and not use_ntrip_client and not use_simulation_bool:
+            fusion_overrides.update(_fusioncore_no_ntrip_overrides())
         if use_simulation_bool:
             # Simulation brings wheel odometry online later than hardware. Keep FusionCore
             # from initializing before encoder data exists, otherwise the filter can start
@@ -518,6 +530,11 @@ def generate_launch_description():
         DeclareLaunchArgument('use_imu2', default_value=localization_defaults['use_imu2']),
         DeclareLaunchArgument('use_encoder', default_value=localization_defaults['use_encoder']),
         DeclareLaunchArgument('use_gnss', default_value=localization_defaults['use_gnss']),
+        DeclareLaunchArgument(
+            'use_ntrip_client',
+            default_value='true',
+            description='If false, relax FusionCore RTK gating and reduce GNSS trust to match autonomous fixes.',
+        ),
         DeclareLaunchArgument('use_amr_sweeper_navigation', default_value='true'),
         DeclareLaunchArgument('use_amr_sweeper_mapping', default_value='true'),
         DeclareLaunchArgument('missions_directory', default_value='missions/logs'),

@@ -21,6 +21,14 @@ def _primary_topic_or_disabled(enabled: bool, topic: str, disabled_topic: str) -
     return topic if enabled else disabled_topic
 
 
+def _fusioncore_no_ntrip_overrides() -> dict:
+    return {
+        "gnss.min_fix_type": 1,
+        "gnss.base_noise_xy": 8.0,
+        "gnss.base_noise_z": 12.0,
+    }
+
+
 def _load_localization_parameters() -> dict:
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
@@ -71,6 +79,7 @@ def _launch_fusioncore(context, *args, **kwargs):
     use_encoder = LaunchConfiguration("use_encoder").perform(context).lower() == "true"
     use_visual_odometry = LaunchConfiguration("use_visual_odometry").perform(context).lower() == "true"
     use_gnss = LaunchConfiguration("use_gnss").perform(context).lower() == "true"
+    use_ntrip_client = LaunchConfiguration("use_ntrip_client").perform(context).lower() == "true"
     if use_simulation:
         use_imu2 = False
         use_visual_odometry = False
@@ -94,6 +103,8 @@ def _launch_fusioncore(context, *args, **kwargs):
         "gnss.azimuth_topic": _topic_if_enabled(use_gnss, parameters.get("gnss.azimuth_topic", "")),
         "publish.tf": False,
     }
+    if use_gnss and not use_ntrip_client and not use_simulation:
+        fusion_overrides.update(_fusioncore_no_ntrip_overrides())
     projection_node = Node(
         package="amr_sweeper_localization",
         executable="odometry_projection_node",
@@ -202,6 +213,11 @@ def generate_launch_description():
                 "use_gnss",
                 default_value=defaults["use_gnss"],
                 description="Enable the primary GNSS input",
+            ),
+            DeclareLaunchArgument(
+                "use_ntrip_client",
+                default_value="true",
+                description="If false, relax FusionCore RTK gating and reduce GNSS trust to match autonomous fixes.",
             ),
             OpaqueFunction(function=_launch_fusioncore),
         ]

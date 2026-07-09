@@ -56,6 +56,12 @@ def _uses_odom_only_runtime(mission_type):
     return mission_type in {"builtin_local_pattern", "vda5050_scheduled_mission_local"}
 
 
+def _map_pose_no_ntrip_overrides():
+    return {
+        "georef_consistency_min_confidence": 0.05,
+    }
+
+
 def _build_nodes(context):
     default_record_map_mission_file = str(
         Path(get_package_share_directory("amr_sweeper_navigation"))
@@ -77,6 +83,7 @@ def _build_nodes(context):
     configured_mission_costmap_yaml = LaunchConfiguration("mission_costmap_yaml").perform(context)
     auto_start_mission = LaunchConfiguration("auto_start_mission").perform(context).lower() == "true"
     use_gaussian = LaunchConfiguration("use_gaussian").perform(context).lower() == "true"
+    use_ntrip_client = LaunchConfiguration("use_ntrip_client").perform(context).lower() == "true"
     bootstrap_empty_global_costmap = (
         LaunchConfiguration("bootstrap_empty_global_costmap").perform(context).lower() == "true"
     )
@@ -205,6 +212,8 @@ def _build_nodes(context):
     if builtin_local_pattern_mode:
         map_pose_runtime_parameters["map_frame"] = "odom"
         map_pose_runtime_parameters["odom_frame"] = "odom"
+    if not use_ntrip_client:
+        map_pose_runtime_parameters.update(_map_pose_no_ntrip_overrides())
 
     actions.append(
         Node(
@@ -301,6 +310,11 @@ def generate_launch_description():
                 "use_gaussian",
                 default_value="true",
                 description="Launch gaussian_node when true.",
+            ),
+            DeclareLaunchArgument(
+                "use_ntrip_client",
+                default_value="true",
+                description="If false, reduce map_pose reliance on GNSS consistency because corrections are unavailable.",
             ),
             DeclareLaunchArgument(
                 "use_test",
