@@ -20,7 +20,7 @@ fusioncore:
     imu.topic:                              "imu/data_raw"        # Primary IMU topic consumed by FusionCore.
     imu.gyro_noise:                         0.005                 # Gyroscope white-noise sigma used by the filter model.
     imu.accel_noise:                        0.25                  # Accelerometer white-noise sigma used by the filter model.
-    imu.has_magnetometer:                   true                  # Fuse IMU roll/pitch only; yaw is supplied separately via compass azimuth.
+    imu.has_magnetometer:                   true                  # JY901 runs its onboard nine-axis (accel+gyro+mag) algorithm, so imu.topic's orientation yaw is magnetometer-corrected; fuse the full 3D orientation and treat its heading as validated. Combined with gnss.track_heading_enabled below for a second, independent yaw correction.
     imu.remove_gravitational_acceleration:  false                 # Keep raw acceleration intact because the driver/controller handle gravity conventions.
     imu.frame_id:                           "imu_link"            # Physical frame in which the IMU measurements are expressed.
     imu.lever_arm_x:                        0.0                   # IMU X offset from the fused body origin in meters.
