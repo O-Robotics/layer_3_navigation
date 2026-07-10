@@ -49,7 +49,7 @@ controller_server:
       min_lookahead_dist: 0.45
       max_lookahead_dist: 1.5
       lookahead_time: 1.5
-      rotate_to_heading_angular_vel: 1.5
+      rotate_to_heading_angular_vel: 0.785
       transform_tolerance: 0.2
       use_velocity_scaled_lookahead_dist: true
       min_approach_linear_velocity: 0.05
@@ -65,7 +65,7 @@ controller_server:
       use_rotate_to_heading: true
       allow_reversing: false
       rotate_to_heading_min_angle: 0.785
-      max_angular_accel: 1.0
+      max_angular_accel: 1.2
       max_robot_pose_search_dist: 10.0
 local_costmap:
   local_costmap:
@@ -234,19 +234,19 @@ velocity_smoother:
     max_velocity:
     - 0.5
     - 0.0
-    - 1.5
+    - 0.785
     min_velocity:
     - -0.5
     - 0.0
-    - -1.5
+    - -0.785
     max_accel:
     - 1.0
     - 0.0
-    - 0.8
+    - 1.2
     max_decel:
     - -1.0
     - 0.0
-    - -0.8
+    - -1.2
     odom_topic: odom
     odom_duration: 0.1
     deadband_velocity:
