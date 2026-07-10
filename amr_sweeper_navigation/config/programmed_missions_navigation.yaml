@@ -236,7 +236,7 @@ velocity_smoother:
     - 0.0
     - 0.785
     min_velocity:
-    - -0.5
+    - -0.17
     - 0.0
     - -0.785
     max_accel:
