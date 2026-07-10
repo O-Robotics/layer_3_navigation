@@ -192,8 +192,11 @@ def _apply_mission_costmap_extent(
         # robot; only the static whole-map profile should adopt the mission extent.
         return
 
-    global_costmap_params['width'] = width_m
-    global_costmap_params['height'] = height_m
+    # Costmap2DROS declares width/height as integer-typed parameters (cell-grid
+    # extent in meters, but typed as int) while resolution/origin are doubles;
+    # handing it a float here trips rclcpp's InvalidParameterTypeException.
+    global_costmap_params['width'] = int(round(width_m))
+    global_costmap_params['height'] = int(round(height_m))
     global_costmap_params['resolution'] = resolution
     global_costmap_params['origin_x'] = origin_x
     global_costmap_params['origin_y'] = origin_y
