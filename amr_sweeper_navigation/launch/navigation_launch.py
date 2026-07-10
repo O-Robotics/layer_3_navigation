@@ -125,6 +125,80 @@ def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
     )
 
 
+def _read_mission_costmap_extent(mission_costmap_yaml_path: str):
+    """Parse a map_server-style costmap YAML (+ its referenced PGM) and return
+    (width_m, height_m, resolution, origin_x, origin_y), or None if the file is
+    missing or malformed."""
+    yaml_path = Path(mission_costmap_yaml_path)
+    if not yaml_path.is_file():
+        return None
+    try:
+        costmap_yaml = yaml.safe_load(yaml_path.read_text()) or {}
+    except yaml.YAMLError:
+        return None
+
+    resolution = costmap_yaml.get('resolution')
+    origin = costmap_yaml.get('origin')
+    image_name = costmap_yaml.get('image')
+    if not resolution or not image_name or not isinstance(origin, list) or len(origin) < 2:
+        return None
+
+    image_path = yaml_path.parent / image_name
+    try:
+        with open(image_path, 'rb') as image_file:
+            magic = image_file.readline().strip()
+            if magic not in (b'P5', b'P2'):
+                return None
+            dims_line = image_file.readline()
+            while dims_line.strip().startswith(b'#'):
+                dims_line = image_file.readline()
+            width_cells, height_cells = (int(token) for token in dims_line.split())
+    except (OSError, ValueError):
+        return None
+
+    resolution = float(resolution)
+    return (
+        width_cells * resolution,
+        height_cells * resolution,
+        resolution,
+        float(origin[0]),
+        float(origin[1]),
+    )
+
+
+def _apply_mission_costmap_extent(
+    params_data: dict, namespace_value: str, mission_costmap_yaml_path: str,
+) -> None:
+    """Size the (non-rolling) global costmap to match the active mission's
+    costmap artifact instead of letting Nav2 fall back to its own built-in
+    default width/height/origin, which locks in a generic, frame-centered
+    canvas that the static layer can never resize away from."""
+    if not mission_costmap_yaml_path:
+        return
+    extent = _read_mission_costmap_extent(mission_costmap_yaml_path)
+    if extent is None:
+        return
+    width_m, height_m, resolution, origin_x, origin_y = extent
+
+    nav2_params = _nav2_params_root(params_data, namespace_value)
+    global_costmap_params = (
+        nav2_params
+        .get('global_costmap', {})
+        .get('global_costmap', {})
+        .get('ros__parameters', {})
+    )
+    if not isinstance(global_costmap_params, dict) or global_costmap_params.get('rolling_window', False):
+        # Rolling-window profiles keep a small, fixed-size window centered on the
+        # robot; only the static whole-map profile should adopt the mission extent.
+        return
+
+    global_costmap_params['width'] = width_m
+    global_costmap_params['height'] = height_m
+    global_costmap_params['resolution'] = resolution
+    global_costmap_params['origin_x'] = origin_x
+    global_costmap_params['origin_y'] = origin_y
+
+
 def _rewrite_bt_xml_paths(params_data: dict, namespace_value: str) -> None:
     nav2_params = _nav2_params_root(params_data, namespace_value)
     bt_xml_path = os.path.join(
@@ -167,6 +241,11 @@ def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
     _qualify_nav2_topics(params_data, namespace_value)
     _rewrite_bt_xml_paths(params_data, namespace_value)
+    _apply_mission_costmap_extent(
+        params_data,
+        namespace_value,
+        LaunchConfiguration('mission_costmap_yaml').perform(context),
+    )
 
     temp_file = Path(tempfile.gettempdir()) / (
         f"amr_sweeper_nav2_params_{'namespaced' if include_root_key else 'flat'}_{os.getpid()}.yaml"
