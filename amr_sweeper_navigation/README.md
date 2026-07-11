@@ -58,5 +58,5 @@ The package also owns the built-in mission files directly:
 ## Notes
 - Depends on `amr_sweeper_localization` for robot pose estimation.
 - Publishes navigation wheel commands that are expected by the layer 2 command chain.
-- Nav2 now consumes `mapping/global_costmap` for global planning and builds its rolling local costmap directly from live sensor observations.
+- Nav2 now consumes `mapping/static_costmap` for global planning and builds its rolling local costmap directly from live sensor observations.
 - `mapping/waypoint_path` is visualization-only; routed mission execution reaches Nav2 through the `navigate_through_poses` action server.

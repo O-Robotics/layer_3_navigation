@@ -44,6 +44,7 @@ constexpr double kDegreesToRadians = M_PI / 180.0;
 constexpr double kTrinaryOccupiedThreshold = 0.65;
 constexpr double kTrinaryFreeThreshold = 0.196;
 constexpr unsigned char kUnknownTrinaryPixel = 205U;
+constexpr unsigned char kUnknownTrinaryOccupancyByte = 50U;
 constexpr unsigned char kLegacyUnknownScalePixelLow = 127U;
 constexpr unsigned char kLegacyUnknownScalePixelHigh = 128U;
 
@@ -243,7 +244,7 @@ bool rawCostRepresentsLegacyUnknown(
   const unsigned char raw_cost)
 {
   if (!artifactUsesScaleEncoding(artifact)) {
-    return false;
+    return raw_cost == kUnknownTrinaryOccupancyByte;
   }
 
   return
@@ -254,7 +255,10 @@ bool rawCostRepresentsLegacyUnknown(
 
 unsigned char unknownFillValueForArtifact(const LoadedCostmapArtifact & artifact)
 {
-  return artifactUsesScaleEncoding(artifact) ? kLegacyUnknownScalePixelHigh : kUnknownTrinaryPixel;
+  if (artifactUsesScaleEncoding(artifact)) {
+    return kLegacyUnknownScalePixelHigh;
+  }
+  return kUnknownTrinaryOccupancyByte;
 }
 
 std::optional<unsigned char> artifactCellRawCost(
@@ -1088,6 +1092,9 @@ MappingNode::MappingNode()
     "nav2_local_costmap_updates_topic",
     std::string("local_costmap/costmap_updates"));
   declare_parameter("nav2_global_costmap_topic", std::string("global_costmap/costmap_raw"));
+  declare_parameter(
+    "nav2_global_costmap_updates_topic",
+    std::string("global_costmap/costmap_updates"));
   declare_parameter("map_pose_status_topic", std::string("mapping/map_pose_status"));
   declare_parameter("nav2_costmap_ready_timeout_seconds", 2.5);
   declare_parameter("startup_tf_lookup_timeout_seconds", 0.05);
@@ -1132,6 +1139,8 @@ MappingNode::MappingNode()
   nav2_local_costmap_updates_topic_ =
     get_parameter("nav2_local_costmap_updates_topic").as_string();
   nav2_global_costmap_topic_ = get_parameter("nav2_global_costmap_topic").as_string();
+  nav2_global_costmap_updates_topic_ =
+    get_parameter("nav2_global_costmap_updates_topic").as_string();
   map_pose_status_topic_ = get_parameter("map_pose_status_topic").as_string();
   auto_start_mission_ = get_parameter("auto_start_mission").as_bool();
   repeat_mission_ = get_parameter("repeat_mission").as_bool();
@@ -1218,9 +1227,14 @@ MappingNode::MappingNode()
     nav2_global_costmap_topic_,
     rclcpp::SystemDefaultsQoS(),
     std::bind(&MappingNode::handleNav2GlobalCostmap, this, std::placeholders::_1));
+  nav2_global_costmap_updates_subscription_ =
+    create_subscription<map_msgs::msg::OccupancyGridUpdate>(
+    nav2_global_costmap_updates_topic_,
+    rclcpp::SystemDefaultsQoS(),
+    std::bind(&MappingNode::handleNav2GlobalCostmapUpdate, this, std::placeholders::_1));
   status_publisher_ = create_publisher<std_msgs::msg::String>("mapping/status", 10);
   global_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
-    "mapping/global_costmap",
+    "mapping/static_costmap",
     rclcpp::QoS(1).reliable().transient_local());
   waypoint_path_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
     "mapping/waypoint_path",
@@ -1362,6 +1376,21 @@ void MappingNode::handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedP
       static_cast<double>(message->metadata.resolution),
       message->metadata.origin.position.x,
       message->metadata.origin.position.y);
+  }
+}
+
+void MappingNode::handleNav2GlobalCostmapUpdate(
+  const map_msgs::msg::OccupancyGridUpdate::SharedPtr message)
+{
+  latest_nav2_global_costmap_stamp_ = now();
+  if (!nav2_global_costmap_ready_) {
+    nav2_global_costmap_ready_ = true;
+    RCLCPP_INFO(
+      get_logger(),
+      "Nav2 global costmap updates are now publishing on %s with size=%ux%u.",
+      nav2_global_costmap_updates_topic_.c_str(),
+      message->width,
+      message->height);
   }
 }
 
@@ -3031,7 +3060,7 @@ bool MappingNode::areMissionCostmapsReadyForMissionStart() const
       nav2_local_costmap_ready_ ? "ready" : "missing",
       nav2_local_costmap_topic_.c_str(),
       latest_padded_live_map_ready_ ? "ready" : "missing",
-      "mapping/global_costmap");
+      "mapping/static_costmap");
     return false;
   }
 
@@ -3040,15 +3069,15 @@ bool MappingNode::areMissionCostmapsReadyForMissionStart() const
       get_logger(),
       *get_clock(),
       2000,
-      "Waiting for mapping/global_costmap before dispatching the first mission chunk. "
-      "Nav2 consumes mapping/global_costmap via StaticLayer, so the upstream mapping publisher "
+      "Waiting for mapping/static_costmap before dispatching the first mission chunk. "
+      "Nav2 consumes mapping/static_costmap via StaticLayer, so the upstream mapping publisher "
       "must be ready before mission start.");
     return false;
   }
 
   const rclcpp::Time now_time = now();
   const double local_age = (now_time - latest_nav2_local_costmap_stamp_).seconds();
-  const double global_age = (now_time - latest_global_costmap_publish_stamp_).seconds();
+  const double global_age = (now_time - latest_nav2_global_costmap_stamp_).seconds();
   if (local_age > nav2_costmap_ready_timeout_seconds_ ||
     global_age > nav2_costmap_ready_timeout_seconds_)
   {
@@ -3062,17 +3091,6 @@ bool MappingNode::areMissionCostmapsReadyForMissionStart() const
       global_age,
       nav2_costmap_ready_timeout_seconds_);
     return false;
-  }
-
-  if (!nav2_global_costmap_ready_) {
-    RCLCPP_INFO_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      5000,
-      "Mission-start costmaps are ready and mission start is allowed, but the Nav2 global raw "
-      "diagnostic topic is not fully visible yet. global_raw=%s (%s).",
-      nav2_global_costmap_ready_ ? "ready" : "missing",
-      nav2_global_costmap_topic_.c_str());
   }
 
   return true;
@@ -3479,37 +3497,31 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
     source_min_x + static_cast<double>(message.info.width) * resolution;
   const double source_max_y =
     source_min_y + static_cast<double>(message.info.height) * resolution;
-  const bool can_center_from_existing_static_map = saved_costmap_initialized_ || seeded_runtime_map_ready_;
+  const bool has_seeded_static_map = saved_costmap_initialized_ || seeded_runtime_map_ready_;
 
   if (!padded_live_map_bounds_ready_) {
-    if (!latest_odometry_pose_ready_ || !anchor_available) {
-      if (can_center_from_existing_static_map) {
-        const double source_center_x = 0.5 * (source_min_x + source_max_x);
-        const double source_center_y = 0.5 * (source_min_y + source_max_y);
-        padded_live_map_min_x_ = source_center_x - min_global_map_size_m_ * 0.5;
-        padded_live_map_max_x_ = source_center_x + min_global_map_size_m_ * 0.5;
-        padded_live_map_min_y_ = source_center_y - min_global_map_size_m_ * 0.5;
-        padded_live_map_max_y_ = source_center_y + min_global_map_size_m_ * 0.5;
-        padded_live_map_bounds_ready_ = true;
-        RCLCPP_INFO(
-          get_logger(),
-          "Initialized persistent padded live-map bounds directly from the seeded static map extents in %s because the startup %s -> %s TF was not ready yet: [%.3f, %.3f] x [%.3f, %.3f].",
-          message.header.frame_id.c_str(),
-          map_frame_id_.c_str(),
-          odom_frame_id_.c_str(),
-          padded_live_map_min_x_,
-          padded_live_map_max_x_,
-          padded_live_map_min_y_,
-          padded_live_map_max_y_);
-      } else {
-        RCLCPP_INFO_THROTTLE(
-          get_logger(),
-          *get_clock(),
-          2000,
-          "Waiting to initialize the mission startup map until the robot reference pose can be centered in %s.",
-          message.header.frame_id.c_str());
-        return nav_msgs::msg::OccupancyGrid{};
-      }
+    if (has_seeded_static_map) {
+      padded_live_map_min_x_ = source_min_x;
+      padded_live_map_max_x_ = source_max_x;
+      padded_live_map_min_y_ = source_min_y;
+      padded_live_map_max_y_ = source_max_y;
+      padded_live_map_bounds_ready_ = true;
+      RCLCPP_INFO(
+        get_logger(),
+        "Initialized persistent padded live-map bounds from the seeded static map extents in %s: [%.3f, %.3f] x [%.3f, %.3f].",
+        message.header.frame_id.c_str(),
+        padded_live_map_min_x_,
+        padded_live_map_max_x_,
+        padded_live_map_min_y_,
+        padded_live_map_max_y_);
+    } else if (!latest_odometry_pose_ready_ || !anchor_available) {
+      RCLCPP_INFO_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        2000,
+        "Waiting to initialize the mission startup map until the robot reference pose can be centered in %s.",
+        message.header.frame_id.c_str());
+      return nav_msgs::msg::OccupancyGrid{};
     } else {
       padded_live_map_min_x_ = anchor_x - min_global_map_size_m_ * 0.5;
       padded_live_map_max_x_ = anchor_x + min_global_map_size_m_ * 0.5;
@@ -3757,14 +3769,38 @@ void MappingNode::publishGlobalMaps()
   }
 
   for (std::size_t index = 0U; index < latest_live_map_.data.size(); ++index) {
+    const bool seed_index_available =
+      seeded_runtime_map_ready_ &&
+      seeded_runtime_map_.info.width == latest_live_map_.info.width &&
+      seeded_runtime_map_.info.height == latest_live_map_.info.height &&
+      seeded_runtime_map_.data.size() == latest_live_map_.data.size();
+    const int8_t seeded_value = seed_index_available ? seeded_runtime_map_.data.at(index) : -1;
+    const bool only_seeded_threshold_observation =
+      seeded_value >= 0 &&
+      global_map_observations_.at(index) == 1U &&
+      ((global_map_scores_.at(index) == 20 &&
+      global_map_occupied_observations_.at(index) == 1U) ||
+      (global_map_scores_.at(index) == -20 &&
+      global_map_free_observations_.at(index) == 1U));
+    if (seeded_value >= 0 &&
+      (global_map_observations_.at(index) == 0U || only_seeded_threshold_observation))
+    {
+      latest_live_map_.data.at(index) = seeded_value;
+      continue;
+    }
     if (global_map_observations_.at(index) == 0U) {
       latest_live_map_.data.at(index) = -1;
       continue;
     }
     const int score = std::clamp<int>(global_map_scores_.at(index), -20, 20);
-    const int occupancy = score >= 0 ?
+    int occupancy = score >= 0 ?
       std::min(100, 50 + score * 2) :
       std::max(0, 50 + score * 2);
+    if (score >= 20) {
+      occupancy = 100;
+    } else if (score <= -20) {
+      occupancy = 0;
+    }
     latest_live_map_.data.at(index) = static_cast<int8_t>(occupancy);
   }
 

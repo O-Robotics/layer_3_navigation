@@ -108,6 +108,7 @@ private:
   void handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
   void handleNav2LocalCostmapUpdate(const map_msgs::msg::OccupancyGridUpdate::SharedPtr message);
   void handleNav2GlobalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message);
+  void handleNav2GlobalCostmapUpdate(const map_msgs::msg::OccupancyGridUpdate::SharedPtr message);
   void publishCoordinatorStatus();
   [[nodiscard]] std::string composeMapBuilderStatus() const;
   [[nodiscard]] bool updateStartupTfReadiness(const std::string & scan_frame_id);
@@ -205,6 +206,7 @@ private:
   std::string nav2_local_costmap_topic_;
   std::string nav2_local_costmap_updates_topic_;
   std::string nav2_global_costmap_topic_;
+  std::string nav2_global_costmap_updates_topic_;
   std::string map_pose_status_topic_;
   double runtime_costmap_save_period_seconds_{10.0};
   double nav2_costmap_ready_timeout_seconds_{2.5};
@@ -304,6 +306,8 @@ private:
   rclcpp::Subscription<map_msgs::msg::OccupancyGridUpdate>::SharedPtr
     nav2_local_costmap_updates_subscription_;
   rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr nav2_global_costmap_subscription_;
+  rclcpp::Subscription<map_msgs::msg::OccupancyGridUpdate>::SharedPtr
+    nav2_global_costmap_updates_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_costmap_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr waypoint_path_publisher_;

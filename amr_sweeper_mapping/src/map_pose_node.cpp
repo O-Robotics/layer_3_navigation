@@ -302,7 +302,7 @@ MapPoseNode::MapPoseNode()
   declare_parameter("navsat_topic", std::string("gnss/navsat"));
   declare_parameter("heading_topic", std::string("imu/data_heading"));
   declare_parameter("scan_topic", std::string("depth_camera/scan"));
-  declare_parameter("global_costmap_topic", std::string("mapping/global_costmap"));
+  declare_parameter("global_costmap_topic", std::string("mapping/static_costmap"));
   declare_parameter("status_topic", std::string("mapping/map_pose_status"));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("costmap_yaml_path", std::string(""));
@@ -1014,7 +1014,7 @@ void MapPoseNode::loadReferenceCostmapFromYaml()
     global_costmap_wait_started_ = stamp;
     RCLCPP_INFO(
       get_logger(),
-      "Loaded stable reference costmap from %s for map_pose scan matching; live mapping/global_costmap updates will not replace it.",
+      "Loaded stable reference costmap from %s for map_pose scan matching; live mapping/static_costmap updates will not replace it.",
       costmap_yaml_path_.c_str());
   } catch (const std::exception & exception) {
     RCLCPP_WARN(

@@ -91,7 +91,7 @@ def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
     _set_nested(
         nav2_params,
         ['global_costmap', 'global_costmap', 'ros__parameters', 'static_layer', 'map_topic'],
-        _qualify_topic(namespace_value, 'mapping/global_costmap'),
+        _qualify_topic(namespace_value, 'mapping/static_costmap'),
     )
     _set_nested(
         nav2_params,

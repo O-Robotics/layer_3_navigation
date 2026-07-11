@@ -8,7 +8,7 @@
     navsat_topic:                        gnss/navsat                      # Georeferenced GNSS fix used as an ongoing consistency input for the runtime map -> odom pose estimator.
     heading_topic:                       imu/data_heading                 # IMU heading used as an ongoing consistency input for the runtime map -> odom pose estimator.
     scan_topic:                          depth_camera/scan                # LaserScan used to match the robot against the already locked global costmap so map -> odom can absorb drift without shifting the costmap in map.
-    global_costmap_topic:                mapping/global_costmap           # Runtime global costmap that acts as the known map for scan-to-map pose correction.
+    global_costmap_topic:                mapping/static_costmap           # Runtime static costmap that acts as the known map for scan-to-map pose correction.
     status_topic:                        mapping/map_pose_status         # Structured health/state topic for map_pose_node. BOOTSTRAP publishes immediately, HEALTHY means all correction inputs are live, and FAULT means mapping should stop integrating scans.
     fromll_service:                      /fromLL                          # Coordinate-conversion service that projects lon/lat fixes into the metric map frame.
     costmap_yaml_path:                   ""                               # Optional static reference costmap YAML, preferably the mission-folder artifact; its embedded georeference metadata is used only to score pose consistency, not to move the live runtime costmap itself.
@@ -48,7 +48,7 @@
     costmap_timeout_seconds:             2.0                              # Wait at most this long for the first valid mission global costmap; once received, the cached map stays valid for runtime scan correlation.
     odometry_timeout_seconds:            1.0                              # Treat odometry as failed if FusionCore stops updating for this long; without odom the map -> odom chain cannot be trusted.
     scan_match_period_seconds:           0.5                              # Run the expensive scan-to-map correction at a bounded cadence while still publishing map -> odom at publish_period_seconds.
-    global_costmap_min_update_period_seconds: 0.5                         # Rebuild the likelihood field from mapping/global_costmap at most at this cadence; freshness timestamps still update on every map message.
+    global_costmap_min_update_period_seconds: 0.5                         # Rebuild the likelihood field from mapping/static_costmap at most at this cadence; freshness timestamps still update on every map message.
     startup_ready_streak_required:       3                                # Hold map -> odom at identity until scan freshness, TF connectivity, and the static reference map stay healthy for this many consecutive publish cycles.
     degraded_streak_before_warning:      3                                # After startup, allow brief input dropouts as DEGRADED before escalating to WARNING.
     degraded_streak_before_fault:        6                                # After startup, prolonged missing or stale correction inputs become FAULT so downstream mapping can stop trusting updates.
