@@ -5,7 +5,7 @@
   "frame_id": "odom",
   "gaussian_mode": "voxel_gaussians",
   "manual_drive_required": false,
-  "mission_costmap_yaml": "",
+  "mission_static_costmap_yaml": "",
   "mission_file": "",
   "mission_id": "",
   "mission_route_file": "",

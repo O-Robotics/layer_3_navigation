@@ -1,6 +1,7 @@
 #ifndef AMR_SWEEPER_MAPPING__AMR_SWEEPER_MAPPING_NODE_HPP_
 #define AMR_SWEEPER_MAPPING__AMR_SWEEPER_MAPPING_NODE_HPP_
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -113,7 +114,7 @@ private:
   [[nodiscard]] std::string composeMapBuilderStatus() const;
   [[nodiscard]] bool updateStartupTfReadiness(const std::string & scan_frame_id);
   void persistRuntimeCostmapArtifact();
-  void mergeCompletedRuntimeCostmapIntoMissionCostmap();
+  void mergeCompletedRuntimeCostmapIntoMissionStaticCostmap();
   void tickMissionExecution();
   void tryRequestMissionEnd();
   void publishMapAlignmentTransform();
@@ -168,7 +169,7 @@ private:
   void markCellFree(int grid_x, int grid_y);
   void markCellOccupied(int grid_x, int grid_y);
   void publishGlobalMaps();
-  [[nodiscard]] bool areMissionCostmapsReadyForMissionStart() const;
+  [[nodiscard]] bool areMissionStaticCostmapsReadyForMissionStart() const;
   [[nodiscard]] std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunkRoute(
     const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   [[nodiscard]] std::vector<std::size_t> chunkRouteStartIndices(
@@ -178,7 +179,7 @@ private:
   std::string mission_file_;
   std::string mission_type_;
   std::string execution_mode_{"navigate_through_poses"};
-  std::string mission_costmap_yaml_;
+  std::string mission_static_costmap_yaml_;
   std::string slam_backend_;
   std::string gaussian_mode_;
   std::string mission_route_file_;
@@ -188,7 +189,7 @@ private:
   std::string actual_path_navsat_output_file_;
   std::string startup_saved_costmap_yaml_;
   std::string saved_costmap_yaml_;
-  std::string persistent_mission_costmap_yaml_;
+  std::string persistent_mission_static_costmap_yaml_;
   std::string mission_window_start_;
   std::string mission_window_end_;
   std::string frame_id_;
@@ -228,7 +229,7 @@ private:
   bool mission_completed_{false};
   bool mission_end_requested_{false};
   bool mission_end_pending_{false};
-  bool persistent_mission_costmap_merged_{false};
+  bool persistent_mission_static_costmap_merged_{false};
   bool advance_past_blocked_waypoints_{true};
   std::size_t active_chunk_index_{0U};
   int max_segments_per_goal_{1};
@@ -237,6 +238,7 @@ private:
   double global_map_resolution_m_{0.05};
   double max_waypoint_spacing_m_{0.5};
   double georef_lock_window_seconds_{3.0};
+  double georef_lock_fallback_timeout_seconds_{6.0};
   double georef_lock_max_navsat_spread_m_{2.0};
   double georef_lock_max_heading_deviation_deg_{12.0};
   int georef_lock_min_samples_{10};
@@ -287,6 +289,13 @@ private:
   nav_msgs::msg::OccupancyGrid seeded_runtime_map_;
   bool seeded_runtime_map_ready_{false};
   bool saved_costmap_initialized_{false};
+  bool pending_seed_deadline_armed_{false};
+  bool pending_seed_timeout_logged_{false};
+  // Wall/steady clock, deliberately NOT rclcpp::Time: under use_sim_time the ROS
+  // clock reads as time-zero until the first /clock message arrives, which would
+  // make a now()-based deadline computed at construction time already appear
+  // expired the moment real timestamps start flowing.
+  std::chrono::steady_clock::time_point pending_seed_deadline_{};
   std::optional<LoadedCostmapArtifact> authoritative_saved_costmap_artifact_;
   std::optional<LoadedCostmapArtifact> pending_saved_costmap_artifact_;
   std::optional<RawNavSatSample> locked_georef_navsat_sample_;

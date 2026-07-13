@@ -125,11 +125,11 @@ def _qualify_nav2_topics(params_data: dict, namespace_value: str) -> None:
     )
 
 
-def _read_mission_costmap_extent(mission_costmap_yaml_path: str):
+def _read_mission_static_costmap_extent(mission_static_costmap_yaml_path: str):
     """Parse a map_server-style costmap YAML (+ its referenced PGM) and return
     (width_m, height_m, resolution, origin_x, origin_y), or None if the file is
     missing or malformed."""
-    yaml_path = Path(mission_costmap_yaml_path)
+    yaml_path = Path(mission_static_costmap_yaml_path)
     if not yaml_path.is_file():
         return None
     try:
@@ -166,16 +166,16 @@ def _read_mission_costmap_extent(mission_costmap_yaml_path: str):
     )
 
 
-def _apply_mission_costmap_extent(
-    params_data: dict, namespace_value: str, mission_costmap_yaml_path: str,
+def _apply_mission_static_costmap_extent(
+    params_data: dict, namespace_value: str, mission_static_costmap_yaml_path: str,
 ) -> None:
     """Size the (non-rolling) global costmap to match the active mission's
     costmap artifact instead of letting Nav2 fall back to its own built-in
     default width/height/origin, which locks in a generic, frame-centered
     canvas that the static layer can never resize away from."""
-    if not mission_costmap_yaml_path:
+    if not mission_static_costmap_yaml_path:
         return
-    extent = _read_mission_costmap_extent(mission_costmap_yaml_path)
+    extent = _read_mission_static_costmap_extent(mission_static_costmap_yaml_path)
     if extent is None:
         return
     width_m, height_m, resolution, origin_x, origin_y = extent
@@ -244,10 +244,10 @@ def _materialize_nav2_params(context, *, include_root_key: bool) -> str:
     params_data = yaml.safe_load(Path(rewritten_params_path).read_text()) or {}
     _qualify_nav2_topics(params_data, namespace_value)
     _rewrite_bt_xml_paths(params_data, namespace_value)
-    _apply_mission_costmap_extent(
+    _apply_mission_static_costmap_extent(
         params_data,
         namespace_value,
-        LaunchConfiguration('mission_costmap_yaml').perform(context),
+        LaunchConfiguration('mission_static_costmap_yaml').perform(context),
     )
 
     temp_file = Path(tempfile.gettempdir()) / (
@@ -516,10 +516,10 @@ def generate_launch_description():
         default_value=os.path.join(bringup_dir, 'config', 'programmed_missions_navigation.yaml'),
         description='Full path to the ROS2 parameters file to use for all launched nodes')
 
-    declare_mission_costmap_yaml_cmd = DeclareLaunchArgument(
-        'mission_costmap_yaml',
+    declare_mission_static_costmap_yaml_cmd = DeclareLaunchArgument(
+        'mission_static_costmap_yaml',
         default_value='',
-        description='Exact mission run costmap YAML from execution_context.json. Leave empty outside mission execution.')
+        description='Exact mission run static costmap YAML from execution_context.json. Leave empty outside mission execution.')
 
     declare_enable_controller_server_cmd = DeclareLaunchArgument(
         'enable_controller_server',
@@ -571,7 +571,7 @@ def generate_launch_description():
     ld.add_action(declare_use_simulation_cmd)
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_params_file_cmd)
-    ld.add_action(declare_mission_costmap_yaml_cmd)
+    ld.add_action(declare_mission_static_costmap_yaml_cmd)
     ld.add_action(declare_enable_controller_server_cmd)
     ld.add_action(declare_enable_smoother_server_cmd)
     ld.add_action(declare_enable_planner_server_cmd)

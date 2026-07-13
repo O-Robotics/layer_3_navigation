@@ -232,7 +232,7 @@ def _build_launches(context):
     mission_file = LaunchConfiguration('mission_file').perform(context)
     mission_id = LaunchConfiguration('mission_id').perform(context)
     mission_type = LaunchConfiguration('mission_type').perform(context)
-    mission_costmap_yaml = LaunchConfiguration('mission_costmap_yaml').perform(context)
+    mission_static_costmap_yaml = LaunchConfiguration('mission_static_costmap_yaml').perform(context)
     auto_start_mission = LaunchConfiguration('auto_start_mission').perform(context)
     use_gaussian = LaunchConfiguration('use_gaussian').perform(context)
     use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
@@ -268,7 +268,11 @@ def _build_launches(context):
     effective_execution_mode = mission_context.get("execution_mode", "")
     effective_mission_file = mission_file or mission_context.get("mission_file", "")
     effective_mission_id = mission_id or mission_context.get("mission_id", "")
-    effective_mission_costmap_yaml = mission_costmap_yaml or mission_context.get("mission_costmap_yaml", "")
+    effective_mission_static_costmap_yaml = (
+        mission_static_costmap_yaml
+        or mission_context.get("mission_static_costmap_yaml", "")
+        or mission_context.get("mission_costmap_yaml", "")
+    )
     navigation_launch_filename = _resolve_navigation_launch_filename(
         effective_mission_type,
         effective_execution_mode,
@@ -319,7 +323,7 @@ def _build_launches(context):
             'namespace': namespace,
             'use_sim_time': use_sim_time,
             'use_simulation': use_simulation,
-            'mission_costmap_yaml': effective_mission_costmap_yaml,
+            'mission_static_costmap_yaml': effective_mission_static_costmap_yaml,
         }.items(),
     )
     layer_3_system_check = Node(
@@ -350,7 +354,7 @@ def _build_launches(context):
             'mission_file': effective_mission_file,
             'mission_id': effective_mission_id,
             'mission_type': effective_mission_type,
-            'mission_costmap_yaml': effective_mission_costmap_yaml,
+            'mission_static_costmap_yaml': effective_mission_static_costmap_yaml,
             'bootstrap_empty_global_costmap': 'true' if run_layer_3_system_check else 'false',
             'use_gaussian': use_gaussian,
             'auto_start_mission': auto_start_mission,
@@ -558,7 +562,7 @@ def generate_launch_description():
         DeclareLaunchArgument('mission_file', default_value=''),
         DeclareLaunchArgument('mission_id', default_value=''),
         DeclareLaunchArgument('mission_type', default_value=''),
-        DeclareLaunchArgument('mission_costmap_yaml', default_value=''),
+        DeclareLaunchArgument('mission_static_costmap_yaml', default_value=''),
         DeclareLaunchArgument('use_gaussian', default_value='true'),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('use_test', default_value='false'),

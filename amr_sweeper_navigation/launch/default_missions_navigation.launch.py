@@ -18,7 +18,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     autostart = LaunchConfiguration("autostart")
     params_file = LaunchConfiguration("params_file")
-    mission_costmap_yaml = LaunchConfiguration("mission_costmap_yaml")
+    mission_static_costmap_yaml = LaunchConfiguration("mission_static_costmap_yaml")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
     enable_controller_server = LaunchConfiguration("enable_controller_server")
@@ -41,9 +41,9 @@ def generate_launch_description():
             description="Full path to the Nav2 parameter file",
         ),
         DeclareLaunchArgument(
-            "mission_costmap_yaml",
+            "mission_static_costmap_yaml",
             default_value="",
-            description="Exact mission run costmap YAML from execution_context.json. Leave empty for builtin local missions.",
+            description="Exact mission run static costmap YAML from execution_context.json. Leave empty for builtin local missions.",
         ),
         DeclareLaunchArgument("use_respawn", default_value="false", description="Whether to respawn if a node crashes."),
         DeclareLaunchArgument("log_level", default_value="info", description="log level"),
@@ -61,7 +61,7 @@ def generate_launch_description():
                     "use_simulation": use_simulation,
                     "use_sim_time": use_sim_time,
                     "params_file": params_file,
-                    "mission_costmap_yaml": mission_costmap_yaml,
+                    "mission_static_costmap_yaml": mission_static_costmap_yaml,
                     "autostart": autostart,
                     "use_respawn": use_respawn,
                     "log_level": log_level,

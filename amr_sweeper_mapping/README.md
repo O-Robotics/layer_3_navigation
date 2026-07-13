@@ -38,7 +38,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including globa
 - During mission runs the mapping launch now keeps these roles separate: `map_pose_node` reads the mission-folder reference costmap, while `mapping_node` persists live scan updates into the run-folder costmap copy.
 - Runtime costmap artifacts now embed georeference metadata in the YAML file so the exported YAML/PGM pair can be related back to the real world outside the robot.
 - The required runtime input is the exact scheduler-selected mission execution directory passed as the `mission_execution_directory` launch argument.
-- The mission route and mission costmap must come from that execution folder's stamped `*_context.json` file, not from shared top-level alias files.
+- The mission route and mission static costmap must come from that execution folder's stamped `*_context.json` file, not from shared top-level alias files.
 - `auto_start_mission` defaults to `false`; FSM `RUNNING` profiles are expected to enable it explicitly when mission execution is intended.
 - Standalone launch is still supported. When no mission-specific costmap yaml is provided, the package skips artifact seeding and continues building the runtime global map from live inputs instead of failing startup.
 - Runtime artifacts such as the `mapping` section inside `<mission_id>_<run_timestamp>_context.json`, `<mission_id>_<run_timestamp>_path_actual.geojson`, and gaussian outputs are only written when a mission execution folder is resolved from `mission_execution_directory`.

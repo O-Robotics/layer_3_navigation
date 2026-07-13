@@ -34,9 +34,9 @@
     mission_id:                    ""
     mission_output_directory:      ""                               # Leave empty until a mission execution folder is injected; stamped mapping metadata should only land inside per-run folders.
     actual_path_output_file:       ""                               # Leave empty until the stamped execution context provides the per-run actual-path destination.
-    mission_costmap_yaml:          ""                               # Exact mission costmap yaml from the stamped execution context when launched by layer 0.
+    mission_static_costmap_yaml:          ""                               # Exact mission static costmap yaml from the stamped execution context when launched by layer 0.
     saved_costmap_yaml:            ""                               # Optional georeferenced saved costmap YAML/PGM artifact to lock once into the metric map frame at startup before live scan updates continue.
-    persistent_mission_costmap_yaml: ""                             # Persistent mission-folder <mission_id>_costmap YAML that should receive the averaged post-run merge after mission completion.
+    persistent_mission_static_costmap_yaml: ""                             # Persistent mission-folder <mission_id>_static_costmap YAML that should receive the averaged post-run merge after mission completion.
     mission_window_start:          ""
     mission_window_end:            ""
 
@@ -53,12 +53,13 @@
     startup_tf_lookup_timeout_seconds: 0.05                        # Wait this long per scan while the local tf listener warms up and ingests the full map -> sensor chain before startup scan integration begins.
     startup_tf_ready_streak_required: 3                            # Require this many consecutive successful map -> scan transform checks before the first scan is allowed into the runtime map builder.
     georef_lock_window_seconds:    3.0                              # Startup seeding window used to collect GNSS and IMU heading samples before the saved georeferenced costmap is projected into the metric map frame.
+    georef_lock_fallback_timeout_seconds: 6.0                       # Hold scan integration (no from-scratch map) until the georeferenced seed locks or this much time has passed since it started loading, whichever comes first. Clamped to be >= georef_lock_window_seconds.
     georef_lock_min_samples:       10                               # Minimum samples required inside the seeding window before the one-time startup costmap projection is accepted.
     georef_lock_max_navsat_spread_m: 2.0                            # Reject the startup seed if the GNSS samples inside the window spread farther than this from their centroid. Set <= 0 to disable the check.
     georef_lock_max_heading_deviation_deg: 12.0                     # Reject the startup seed if the heading samples inside the window deviate farther than this from their circular mean. Set <= 0 to disable the check.
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
     global_map_resolution_m:       0.05                             # Resolution of the in-package global occupancy-grid map builder.
-    runtime_costmap_save_period_seconds: 10.0                       # Periodically write the runtime mission costmap artifact back into the active run folder while scans refine it.
+    runtime_costmap_save_period_seconds: 10.0                       # Periodically write the runtime mission static costmap artifact back into the active run folder while scans refine it.
     static_obstacle_min_observations: 6                             # Minimum number of consistent scan observations before a seeded or live cell is allowed to change the saved runtime costmap artifact.
     static_obstacle_min_occupied_fraction: 0.75                     # Minimum occupied-observation fraction required before a cell is treated as static structure instead of a transient obstacle.
     static_obstacle_min_free_fraction: 0.75                         # Minimum free-observation fraction required before repeated scans carve a seeded or transient obstacle back to free space in the saved runtime costmap artifact.

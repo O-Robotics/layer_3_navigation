@@ -80,7 +80,9 @@ def _build_nodes(context):
     configured_mission_type = LaunchConfiguration("mission_type").perform(context).lower()
     use_test = LaunchConfiguration("use_test").perform(context).lower() == "true"
     test_output_directory = LaunchConfiguration("test_output_directory").perform(context)
-    configured_mission_costmap_yaml = LaunchConfiguration("mission_costmap_yaml").perform(context)
+    configured_mission_static_costmap_yaml = LaunchConfiguration(
+        "mission_static_costmap_yaml"
+    ).perform(context)
     auto_start_mission = LaunchConfiguration("auto_start_mission").perform(context).lower() == "true"
     use_gaussian = LaunchConfiguration("use_gaussian").perform(context).lower() == "true"
     use_ntrip_client = LaunchConfiguration("use_ntrip_client").perform(context).lower() == "true"
@@ -104,25 +106,35 @@ def _build_nodes(context):
     actual_path_navsat_output_file = mission_context.get("actual_path_navsat_file", "")
     if not actual_path_navsat_output_file and mission_run_directory:
         actual_path_navsat_output_file = str(Path(mission_run_directory) / "actual_path_navsat.geojson")
-    mission_costmap_yaml = configured_mission_costmap_yaml or mission_context.get(
+    mission_static_costmap_yaml = configured_mission_static_costmap_yaml or mission_context.get(
+        "mission_static_costmap_yaml", ""
+    ) or mission_context.get(
         "mission_costmap_yaml", ""
     )
-    saved_costmap_yaml = mission_context.get("saved_costmap_yaml", "") or mission_costmap_yaml
+    saved_costmap_yaml = (
+        mission_context.get("saved_static_costmap_yaml", "")
+        or mission_context.get("saved_costmap_yaml", "")
+        or mission_static_costmap_yaml
+    )
     # Keep the runtime map artifact separate from the static localization reference map.
     # The mapping coordinator should update the run-folder copy, while map_pose_node should
     # correlate against the mission-folder copy so it does not localize against its own live output.
     static_reference_costmap_yaml = (
-        mission_context.get("source_mission_costmap_yaml", "")
+        mission_context.get("source_mission_static_costmap_yaml", "")
+        or mission_context.get("persistent_mission_static_costmap_yaml", "")
+        or mission_context.get("source_mission_costmap_yaml", "")
         or mission_context.get("persistent_mission_costmap_yaml", "")
         or saved_costmap_yaml
     )
     # For mapping startup seeding, prefer the exact run-specific mission artifact first.
-    # Scheduled mission execution copies the selected mission costmap into the run folder
+    # Scheduled mission execution copies the selected mission static costmap into the run folder
     # and that copy can carry georeference metadata even when the persistent mission-folder
     # artifact is an older local-frame map. Falling back to the persistent file first causes
     # mapping_node to reject startup seeding for map-frame missions.
     startup_saved_costmap_yaml = (
-        mission_costmap_yaml
+        mission_static_costmap_yaml
+        or mission_context.get("source_mission_static_costmap_yaml", "")
+        or mission_context.get("persistent_mission_static_costmap_yaml", "")
         or mission_context.get("source_mission_costmap_yaml", "")
         or mission_context.get("persistent_mission_costmap_yaml", "")
         or saved_costmap_yaml
@@ -188,14 +200,14 @@ def _build_nodes(context):
         common_runtime_parameters["actual_path_output_file"] = actual_path_output_file
     if actual_path_navsat_output_file:
         common_runtime_parameters["actual_path_navsat_output_file"] = actual_path_navsat_output_file
-    if mission_costmap_yaml:
-        common_runtime_parameters["mission_costmap_yaml"] = mission_costmap_yaml
+    if mission_static_costmap_yaml:
+        common_runtime_parameters["mission_static_costmap_yaml"] = mission_static_costmap_yaml
     if startup_saved_costmap_yaml:
         common_runtime_parameters["startup_saved_costmap_yaml"] = startup_saved_costmap_yaml
     if saved_costmap_yaml:
         common_runtime_parameters["saved_costmap_yaml"] = saved_costmap_yaml
     if static_reference_costmap_yaml:
-        common_runtime_parameters["persistent_mission_costmap_yaml"] = static_reference_costmap_yaml
+        common_runtime_parameters["persistent_mission_static_costmap_yaml"] = static_reference_costmap_yaml
     if bootstrap_empty_global_costmap:
         common_runtime_parameters["bootstrap_empty_global_costmap"] = True
     if mission_window_start:
@@ -327,10 +339,10 @@ def generate_launch_description():
                 description="Generic test artifact directory used only when use_test is enabled without a mission execution folder.",
             ),
             DeclareLaunchArgument(
-                "mission_costmap_yaml",
+                "mission_static_costmap_yaml",
                 default_value="",
                 description=(
-                    "Exact mission costmap yaml. Leave empty to resolve it from execution_context.json "
+                    "Exact mission static costmap yaml. Leave empty to resolve it from execution_context.json "
                     "or continue standalone without artifact seeding."
                 ),
             ),

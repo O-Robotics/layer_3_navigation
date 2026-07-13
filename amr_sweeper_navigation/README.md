@@ -35,7 +35,7 @@ This package hosts the real-robot Nav2 bringup for the AMR Sweeper and keeps the
 - `namespace`: default `amr_sweeper`
 - `use_sim_time`: default `false`
 - `params_file`: default depends on the selected mission-class launch
-- `mission_costmap_yaml`: default empty; layer 3 bringup injects the exact mission run costmap from `execution_context.json` when needed
+- `mission_static_costmap_yaml`: default empty; layer 3 bringup injects the exact mission run costmap from `execution_context.json` when needed
 - `autostart`: default `true`
 - `use_respawn`: default `false`
 - `log_level`: default `info`
