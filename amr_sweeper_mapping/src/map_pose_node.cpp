@@ -342,6 +342,7 @@ MapPoseNode::MapPoseNode()
   declare_parameter("startup_ready_streak_required", 3);
   declare_parameter("degraded_streak_before_warning", 3);
   declare_parameter("degraded_streak_before_fault", 6);
+  declare_parameter("post_startup_fault_grace_seconds", 3.0);
   declare_parameter("max_translation_jump_m", 0.75);
   declare_parameter("max_yaw_jump_rad", 0.35);
   declare_parameter("transform_smoothing_alpha", 0.35);
@@ -440,6 +441,10 @@ MapPoseNode::MapPoseNode()
   degraded_streak_before_fault_ = std::max(
     degraded_streak_before_warning_,
     static_cast<int>(get_parameter("degraded_streak_before_fault").as_int()));
+  publish_period_seconds_ = std::max(1.0e-3, get_parameter("publish_period_seconds").as_double());
+  post_startup_fault_grace_seconds_ = std::max(
+    0.0,
+    get_parameter("post_startup_fault_grace_seconds").as_double());
   max_translation_jump_m_ = std::max(0.0, get_parameter("max_translation_jump_m").as_double());
   max_yaw_jump_rad_ = std::max(0.0, get_parameter("max_yaw_jump_rad").as_double());
   transform_smoothing_alpha_ = std::clamp(
@@ -532,7 +537,7 @@ MapPoseNode::MapPoseNode()
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
   fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(fromll_service_name_);
   publish_timer_ = create_wall_timer(
-    std::chrono::duration<double>(get_parameter("publish_period_seconds").as_double()),
+    std::chrono::duration<double>(publish_period_seconds_),
     std::bind(&MapPoseNode::publishMapToOdomTransform, this),
     publish_callback_group_);
   global_costmap_worker_ = std::thread(&MapPoseNode::globalCostmapWorkerLoop, this);
@@ -839,6 +844,7 @@ bool MapPoseNode::shouldHoldIdentityAtStartup(const StateSnapshot & snapshot)
     if (correction_ready_streak_ >= startup_ready_streak_required_) {
       correction_startup_ready_ = true;
       startup_ready = true;
+      startup_cleared_at_ = now();
     }
 
     updated_streak = correction_ready_streak_;
@@ -878,25 +884,53 @@ void MapPoseNode::publishMapPoseStatus(const StateSnapshot & snapshot)
     if (!odometry_ready) {
       if (!startup_cleared) {
         degraded_input_streak_ = 0;
+        degraded_streak_active_ = false;
         next_state = MapPoseHealthState::BOOTSTRAP;
       } else {
         degraded_input_streak_ = std::max(degraded_input_streak_, degraded_streak_before_fault_);
+        degraded_streak_active_ = false;
         next_state = MapPoseHealthState::FAULT;
       }
     } else if (waiting_for_initial_costmap) {
       degraded_input_streak_ = 0;
+      degraded_streak_active_ = false;
       next_state = MapPoseHealthState::BOOTSTRAP;
     } else if (!startup_cleared && snapshot.latest_global_costmap_ready) {
       degraded_input_streak_ = 0;
+      degraded_streak_active_ = false;
       next_state = MapPoseHealthState::BOOTSTRAP;
     } else if (correction_ready) {
       degraded_input_streak_ = 0;
+      degraded_streak_active_ = false;
       next_state = MapPoseHealthState::HEALTHY;
     } else {
-      degraded_input_streak_ = std::min(degraded_input_streak_ + 1, degraded_streak_before_fault_);
-      if (degraded_input_streak_ >= degraded_streak_before_fault_) {
+      // Escalate on elapsed wall/sim time rather than raw callback-tick count: the publish
+      // timer can fire in bursts under load (e.g. bursty /clock delivery with use_sim_time),
+      // and a tick-count streak can then rack up "N strikes" far faster than N *
+      // publish_period_seconds_ of real degraded time actually elapsed.
+      if (!degraded_streak_active_) {
+        degraded_streak_active_ = true;
+        degraded_since_ = now();
+      }
+      const double degraded_seconds = std::max(0.0, (now() - degraded_since_).seconds());
+      const double warning_threshold_seconds =
+        degraded_streak_before_warning_ * publish_period_seconds_;
+      const double fault_threshold_seconds =
+        degraded_streak_before_fault_ * publish_period_seconds_;
+      const double since_startup_cleared_seconds =
+        startup_cleared_at_.nanoseconds() > 0 ?
+        std::max(0.0, (now() - startup_cleared_at_).seconds()) :
+        std::numeric_limits<double>::infinity();
+      const bool fault_grace_active =
+        since_startup_cleared_seconds < post_startup_fault_grace_seconds_;
+
+      degraded_input_streak_ = std::min(
+        static_cast<int>(degraded_seconds / publish_period_seconds_) + 1,
+        degraded_streak_before_fault_);
+
+      if (degraded_seconds >= fault_threshold_seconds && !fault_grace_active) {
         next_state = MapPoseHealthState::FAULT;
-      } else if (degraded_input_streak_ >= degraded_streak_before_warning_) {
+      } else if (degraded_seconds >= warning_threshold_seconds) {
         next_state = MapPoseHealthState::WARNING;
       } else {
         next_state = MapPoseHealthState::DEGRADED;

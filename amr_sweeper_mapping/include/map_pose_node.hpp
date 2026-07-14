@@ -184,6 +184,8 @@ private:
   int startup_ready_streak_required_{3};
   int degraded_streak_before_warning_{3};
   int degraded_streak_before_fault_{6};
+  double publish_period_seconds_{0.5};
+  double post_startup_fault_grace_seconds_{3.0};
   double max_translation_jump_m_{0.75};
   double max_yaw_jump_rad_{0.35};
   double transform_smoothing_alpha_{0.35};
@@ -226,6 +228,9 @@ private:
   bool shutdown_global_costmap_worker_{false};
   MapPoseHealthState health_state_{MapPoseHealthState::BOOTSTRAP};
   int degraded_input_streak_{0};
+  bool degraded_streak_active_{false};
+  rclcpp::Time degraded_since_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time startup_cleared_at_{0, 0, RCL_ROS_TIME};
   std::thread global_costmap_worker_;
   rclcpp::CallbackGroup::SharedPtr subscription_callback_group_;
   rclcpp::CallbackGroup::SharedPtr publish_callback_group_;

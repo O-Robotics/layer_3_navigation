@@ -213,6 +213,7 @@ private:
   std::string navsat_topic_;
   std::string heading_topic_;
   std::string scan_topic_;
+  std::string odometry_topic_;
   std::string seeded_map_frame_id_;
   std::string fromll_service_name_;
   std::string end_mission_service_name_;
@@ -323,6 +324,7 @@ private:
   std::vector<HeadingSample> heading_history_;
   std::vector<SynchronizedPathSample> synchronized_path_samples_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr map_pose_status_subscription_;

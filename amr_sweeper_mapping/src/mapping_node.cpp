@@ -40,6 +40,7 @@ constexpr char kScheduledMissionType[] = "vda5050_scheduled_mission";
 constexpr char kLocalScheduledMissionType[] = "vda5050_scheduled_mission_local";
 constexpr char kDefaultNavSatTopic[] = "gnss/navsat";
 constexpr char kDefaultScanTopic[] = "depth_camera/scan";
+constexpr char kDefaultOdometryTopic[] = "localization/odometry_fused";
 constexpr double kEarthRadiusMeters = 6378137.0;
 constexpr double kDegreesToRadians = M_PI / 180.0;
 constexpr double kTrinaryOccupiedThreshold = 0.65;
@@ -1142,6 +1143,7 @@ MappingNode::MappingNode()
   declare_parameter("navsat_topic", std::string(kDefaultNavSatTopic));
   declare_parameter("heading_topic", std::string("imu/data_heading"));
   declare_parameter("scan_topic", std::string(kDefaultScanTopic));
+  declare_parameter("odometry_topic", std::string(kDefaultOdometryTopic));
   declare_parameter("seeded_map_frame", std::string("map"));
   declare_parameter("fromll_service", std::string("/fromLL"));
   declare_parameter("auto_start_mission", true);
@@ -1220,6 +1222,7 @@ MappingNode::MappingNode()
   navsat_topic_ = get_parameter("navsat_topic").as_string();
   heading_topic_ = get_parameter("heading_topic").as_string();
   scan_topic_ = get_parameter("scan_topic").as_string();
+  odometry_topic_ = get_parameter("odometry_topic").as_string();
   seeded_map_frame_id_ = get_parameter("seeded_map_frame").as_string();
   fromll_service_name_ = get_parameter("fromll_service").as_string();
   end_mission_service_name_ = get_parameter("end_mission_service").as_string();
@@ -1295,6 +1298,10 @@ MappingNode::MappingNode()
     scan_topic_,
     rclcpp::SensorDataQoS(),
     std::bind(&MappingNode::handleScan, this, std::placeholders::_1));
+  odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
+    odometry_topic_,
+    rclcpp::SensorDataQoS(),
+    std::bind(&MappingNode::handleOdometry, this, std::placeholders::_1));
   navsat_subscription_ = create_subscription<sensor_msgs::msg::NavSatFix>(
     navsat_topic_,
     rclcpp::SystemDefaultsQoS(),

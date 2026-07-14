@@ -1165,9 +1165,19 @@ private:
         init_win_az_ += msg->linear_acceleration.z;
         ++init_win_n_;
 
-        // Accumulate orientation if available
+        // Accumulate orientation if available.
+        // Local patch (see amr_sweeper_localization/README.md "Local patches to
+        // vendored FusionCore"): orientation_covariance[0] == -1 means "no
+        // orientation data" per sensor_msgs/Imu convention; all-zero means "data
+        // is valid, covariance just isn't known" (this is what Gazebo's IMU
+        // plugin publishes, and it's exactly the convention
+        // fuse_imu_orientation_if_valid() already honors elsewhere in this file).
+        // The strict ">0.0" gate below treated all-zero as "no data" and silently
+        // dropped every orientation sample during the startup bias window, so the
+        // filter always seeded its initial heading as identity (yaw=0) instead of
+        // the sensor-derived heading.
         const auto& ocov = msg->orientation_covariance;
-        bool has_orient = (ocov[0] > 0.0 || ocov[4] > 0.0 || ocov[8] > 0.0);
+        bool has_orient = (ocov[0] >= 0.0);
         if (has_orient) {
           init_win_qw_ += msg->orientation.w;
           init_win_qx_ += msg->orientation.x;
