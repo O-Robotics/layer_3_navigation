@@ -35,8 +35,8 @@
     mission_output_directory:      ""                               # Leave empty until a mission execution folder is injected; stamped mapping metadata should only land inside per-run folders.
     actual_path_output_file:       ""                               # Leave empty until the stamped execution context provides the per-run actual-path destination.
     mission_static_costmap_yaml:          ""                               # Exact mission static costmap yaml from the stamped execution context when launched by layer 0.
-    saved_costmap_yaml:            ""                               # Optional georeferenced saved costmap YAML/PGM artifact to lock once into the metric map frame at startup before live scan updates continue.
-    persistent_mission_static_costmap_yaml: ""                             # Persistent mission-folder <mission_id>_static_costmap YAML that should receive the averaged post-run merge after mission completion.
+    saved_costmap_yaml:            ""                               # Runtime run-folder static costmap artifact. Georeferenced sources are projected at runtime but saved back in the source artifact frame.
+    persistent_mission_static_costmap_yaml: ""                             # Persistent mission-folder <mission_id>_static_costmap YAML that receives post-run corrections without shifting its origin.
     mission_window_start:          ""
     mission_window_end:            ""
 
@@ -44,7 +44,7 @@
     slam_backend:                  map_builder
     gaussian_mode:                 voxel_gaussians
     frame_id:                      odom                             # Route and marker frame used for mission execution. Keep this in odom because FusionCore /fromLL returns local ENU coordinates in the odom frame.
-    map_frame:                     map                              # REP-105 global metric frame consumed by Nav2 global planning; the saved georeferenced costmap is projected into this Cartesian frame during startup lock-in.
+    map_frame:                     map                              # REP-105 global metric frame consumed by Nav2 global planning; mapping_node publishes the runtime-projected static costmap in this frame.
     odom_frame:                    odom                             # REP-105 continuous local frame produced by FusionCore.
     base_frame:                    base_footprint                   # Robot body frame used by the in-package scan map builder readiness checks.
     scan_topic:                    depth_camera/scan                # Depth-camera laserscan topic relative to the robot namespace.
@@ -60,6 +60,8 @@
     fromll_service:                /fromLL                          # Coordinate-conversion service used for geographic mission routes.
     global_map_resolution_m:       0.05                             # Resolution of the in-package global occupancy-grid map builder.
     runtime_costmap_save_period_seconds: 10.0                       # Periodically write the runtime mission static costmap artifact back into the active run folder while scans refine it.
+    static_costmap_save_max_map_to_odom_translation_m: 5.0          # Refuse runtime and persistent static-costmap saves when map -> odom translation exceeds this. Set <= 0 to disable the translation gate.
+    static_costmap_save_max_map_to_odom_yaw_deg: 30.0               # Refuse runtime and persistent static-costmap saves when map -> odom yaw exceeds this. Set <= 0 to disable the yaw gate.
     static_obstacle_min_observations: 6                             # Minimum number of consistent scan observations before a seeded or live cell is allowed to change the saved runtime costmap artifact.
     static_obstacle_min_occupied_fraction: 0.75                     # Minimum occupied-observation fraction required before a cell is treated as static structure instead of a transient obstacle.
     static_obstacle_min_free_fraction: 0.75                         # Minimum free-observation fraction required before repeated scans carve a seeded or transient obstacle back to free space in the saved runtime costmap artifact.

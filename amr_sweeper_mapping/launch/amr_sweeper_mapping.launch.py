@@ -116,9 +116,9 @@ def _build_nodes(context):
         or mission_context.get("saved_costmap_yaml", "")
         or mission_static_costmap_yaml
     )
-    # Keep the runtime map artifact separate from the static localization reference map.
-    # The mapping coordinator should update the run-folder copy, while map_pose_node should
-    # correlate against the mission-folder copy so it does not localize against its own live output.
+    # Keep the runtime map artifact separate from the persistent mission artifact.
+    # mapping_node publishes the runtime-shifted static_costmap and saves corrections
+    # back into the mission artifact frame after mission completion.
     static_reference_costmap_yaml = (
         mission_context.get("source_mission_static_costmap_yaml", "")
         or mission_context.get("persistent_mission_static_costmap_yaml", "")
@@ -219,8 +219,6 @@ def _build_nodes(context):
     map_pose_runtime_parameters = {
         "use_sim_time": use_sim_time,
     }
-    if static_reference_costmap_yaml:
-        map_pose_runtime_parameters["costmap_yaml_path"] = static_reference_costmap_yaml
     if builtin_local_pattern_mode:
         map_pose_runtime_parameters["map_frame"] = "odom"
         map_pose_runtime_parameters["odom_frame"] = "odom"

@@ -95,6 +95,15 @@ struct LoadedCostmapArtifact
   std::array<double, 3> latitude_coefficients{0.0, 0.0, 0.0};
 };
 
+struct RuntimeCostmapProjection
+{
+  RawNavSatSample anchor_navsat;
+  double cos_map_yaw{1.0};
+  double sin_map_yaw{0.0};
+  double alignment_dx{0.0};
+  double alignment_dy{0.0};
+};
+
 class MappingNode : public rclcpp::Node
 {
 public:
@@ -145,6 +154,9 @@ private:
     const LoadedCostmapArtifact & artifact,
     const RawNavSatSample & anchor_navsat,
     double anchor_heading_yaw) const;
+  [[nodiscard]] nav_msgs::msg::OccupancyGrid buildStaticRuntimeCostmapArtifactInSourceFrame(
+    const LoadedCostmapArtifact & source_artifact,
+    const RuntimeCostmapProjection & projection) const;
   [[nodiscard]] bool useAuthoritativeMissionGeoreference() const;
   void tryInitializeSavedCostmapFromSensors();
   void pruneGeoreferenceSamples();
@@ -153,6 +165,7 @@ private:
   [[nodiscard]] std::optional<double> navSatHistoryMaxSpreadMeters() const;
   [[nodiscard]] std::optional<double> headingHistoryMaxDeviationRadians(double reference_yaw) const;
   [[nodiscard]] nav_msgs::msg::OccupancyGrid buildStaticRuntimeCostmapArtifact() const;
+  [[nodiscard]] bool isMapToOdomWithinStaticCostmapSaveLimits() const;
   void tryPublishBootstrapGlobalCostmap();
   void initializeGlobalMap(const geometry_msgs::msg::Point & center);
   void expandGlobalMapToFit(
@@ -212,6 +225,8 @@ private:
   double runtime_costmap_save_period_seconds_{10.0};
   double nav2_costmap_ready_timeout_seconds_{2.5};
   double startup_tf_lookup_timeout_seconds_{0.05};
+  double static_costmap_save_max_map_to_odom_translation_m_{5.0};
+  double static_costmap_save_max_map_to_odom_yaw_deg_{30.0};
   int static_obstacle_min_observations_{6};
   int startup_tf_ready_streak_required_{3};
   double static_obstacle_min_occupied_fraction_{0.75};
@@ -298,6 +313,7 @@ private:
   std::chrono::steady_clock::time_point pending_seed_deadline_{};
   std::optional<LoadedCostmapArtifact> authoritative_saved_costmap_artifact_;
   std::optional<LoadedCostmapArtifact> pending_saved_costmap_artifact_;
+  std::optional<RuntimeCostmapProjection> runtime_costmap_projection_;
   std::optional<RawNavSatSample> locked_georef_navsat_sample_;
   std::optional<double> locked_georef_heading_yaw_;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
@@ -307,7 +323,6 @@ private:
   std::vector<HeadingSample> heading_history_;
   std::vector<SynchronizedPathSample> synchronized_path_samples_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
-  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr navsat_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr heading_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr map_pose_status_subscription_;

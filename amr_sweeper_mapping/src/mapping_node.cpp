@@ -61,25 +61,6 @@ struct MapPoint
   double y{0.0};
 };
 
-struct ArtifactSeedProjection
-{
-  RawNavSatSample anchor_navsat;
-  double cos_map_yaw{1.0};
-  double sin_map_yaw{0.0};
-  double alignment_dx{0.0};
-  double alignment_dy{0.0};
-};
-
-struct AffineMapTransform
-{
-  double xx{1.0};
-  double xy{0.0};
-  double yx{0.0};
-  double yy{1.0};
-  double tx{0.0};
-  double ty{0.0};
-};
-
 std::string trim(const std::string & value)
 {
   const auto begin = value.find_first_not_of(" \t");
@@ -537,8 +518,8 @@ nlohmann::json buildSynchronizedLocalPathGeoJson(
     {"sample_count", samples.size()},
     {"sample_timestamps", sample_timestamps},
     {"point_yaws_rad", yaw_values},
-    {"position_source", "localization/odometry_fused"},
-    {"orientation_source", "localization/odometry_fused"}};
+    {"position_source", "local_trace"},
+    {"orientation_source", "local_trace"}};
   if (!geographic_companion_file.empty()) {
     properties["geographic_companion_file"] = geographic_companion_file;
   }
@@ -726,15 +707,20 @@ double navSatDistanceMeters(const RawNavSatSample & lhs, const RawNavSatSample &
   return std::hypot(east_m, north_m);
 }
 
-ArtifactSeedProjection buildArtifactSeedProjection(
+RuntimeCostmapProjection buildArtifactSeedProjection(
   const LoadedCostmapArtifact & artifact,
   const RawNavSatSample & anchor_navsat,
   const double anchor_heading_yaw)
 {
-  ArtifactSeedProjection projection;
+  (void)anchor_heading_yaw;
+  RuntimeCostmapProjection projection;
   projection.anchor_navsat = anchor_navsat;
-  projection.cos_map_yaw = std::cos(anchor_heading_yaw);
-  projection.sin_map_yaw = std::sin(anchor_heading_yaw);
+  // OccupancyGrid consumers in Nav2 treat static maps as axis-aligned grids.
+  // The artifact affine georeference already defines the map axes in WGS84, so
+  // applying startup robot yaw here would rotate only the projected origin while
+  // leaving the cell data unrotated.
+  projection.cos_map_yaw = 1.0;
+  projection.sin_map_yaw = 0.0;
 
   const geometry_msgs::msg::Point robot_artifact_point =
     mapPointFromArtifactGeoreference(artifact, anchor_navsat);
@@ -770,7 +756,7 @@ ArtifactSeedProjection buildArtifactSeedProjection(
 
 geometry_msgs::msg::Point projectArtifactPointIntoCurrentMap(
   const LoadedCostmapArtifact & artifact,
-  const ArtifactSeedProjection & projection,
+  const RuntimeCostmapProjection & projection,
   const double artifact_x,
   const double artifact_y)
 {
@@ -1164,6 +1150,8 @@ MappingNode::MappingNode()
   declare_parameter("map_alignment_publish_period_seconds", 0.5);
   declare_parameter("global_map_resolution_m", 0.05);
   declare_parameter("runtime_costmap_save_period_seconds", 10.0);
+  declare_parameter("static_costmap_save_max_map_to_odom_translation_m", 5.0);
+  declare_parameter("static_costmap_save_max_map_to_odom_yaw_deg", 30.0);
   declare_parameter("static_obstacle_min_observations", 6);
   declare_parameter("static_obstacle_min_occupied_fraction", 0.75);
   declare_parameter("static_obstacle_min_free_fraction", 0.75);
@@ -1250,6 +1238,10 @@ MappingNode::MappingNode()
   publish_seeded_map_to_odom_ = get_parameter("publish_seeded_map_to_odom").as_bool();
   global_map_resolution_m_ = get_parameter("global_map_resolution_m").as_double();
   runtime_costmap_save_period_seconds_ = get_parameter("runtime_costmap_save_period_seconds").as_double();
+  static_costmap_save_max_map_to_odom_translation_m_ =
+    get_parameter("static_costmap_save_max_map_to_odom_translation_m").as_double();
+  static_costmap_save_max_map_to_odom_yaw_deg_ =
+    get_parameter("static_costmap_save_max_map_to_odom_yaw_deg").as_double();
   startup_tf_lookup_timeout_seconds_ =
     std::max(0.01, get_parameter("startup_tf_lookup_timeout_seconds").as_double());
   startup_tf_ready_streak_required_ =
@@ -1303,10 +1295,6 @@ MappingNode::MappingNode()
     scan_topic_,
     rclcpp::SensorDataQoS(),
     std::bind(&MappingNode::handleScan, this, std::placeholders::_1));
-  odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
-    "localization/odometry_fused",
-    50,
-    std::bind(&MappingNode::handleOdometry, this, std::placeholders::_1));
   navsat_subscription_ = create_subscription<sensor_msgs::msg::NavSatFix>(
     navsat_topic_,
     rclcpp::SystemDefaultsQoS(),
@@ -1450,9 +1438,7 @@ void MappingNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
         georef_lock_fallback_timeout_seconds_);
     }
   }
-  if (latest_odometry_pose_ready_) {
-    integrateScanIntoGlobalMap(*message);
-  }
+  integrateScanIntoGlobalMap(*message);
 }
 
 void MappingNode::handleNav2LocalCostmap(const nav2_msgs::msg::Costmap::SharedPtr message)
@@ -1859,29 +1845,10 @@ void MappingNode::loadSavedCostmapIfConfigured()
       artifact.georeference_sample_count);
     if (artifact.georeference_valid) {
       authoritative_saved_costmap_artifact_ = artifact;
-      if (useAuthoritativeMissionGeoreference()) {
-        pending_saved_costmap_artifact_.reset();
-        locked_georef_navsat_sample_.reset();
-        locked_georef_heading_yaw_.reset();
-        pending_seed_deadline_armed_ = false;
-        pending_seed_timeout_logged_ = false;
-        initializeMapFromArtifact(artifact);
-        publishGlobalMaps();
-        saved_costmap_initialized_ = true;
-        georeferenced_costmap_locked_ = true;
-        RCLCPP_INFO(
-          get_logger(),
-          "Loaded authoritative mission static costmap artifact from %s directly into %s with origin=(%.3f, %.3f). Runtime GNSS/heading samples may update map->odom but will not reproject or shift this static map frame.",
-          resolved_path.c_str(),
-          map_frame_id_.c_str(),
-          artifact.origin_x,
-          artifact.origin_y);
-        return;
-      }
-
       pending_saved_costmap_artifact_ = artifact;
       locked_georef_navsat_sample_.reset();
       locked_georef_heading_yaw_.reset();
+      runtime_costmap_projection_.reset();
       pending_seed_deadline_ = std::chrono::steady_clock::now() +
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(
           std::chrono::duration<double>(georef_lock_fallback_timeout_seconds_));
@@ -1891,7 +1858,7 @@ void MappingNode::loadSavedCostmapIfConfigured()
       if (pending_saved_costmap_artifact_.has_value()) {
         RCLCPP_INFO(
           get_logger(),
-          "Loaded georeferenced saved costmap artifact from %s and waiting for a stable startup seeding window before projecting it into %s.",
+          "Loaded georeferenced saved costmap artifact from %s and waiting for a stable startup seeding window before publishing its runtime projection into %s. The source artifact origin remains unchanged for save-back.",
           resolved_path.c_str(),
           map_frame_id_.c_str());
       }
@@ -1938,91 +1905,14 @@ std::optional<LoadedCostmapArtifact> MappingNode::projectArtifactIntoCurrentMap(
     return std::nullopt;
   }
 
-  const ArtifactSeedProjection projection =
+  const RuntimeCostmapProjection projection =
     buildArtifactSeedProjection(artifact, anchor_navsat, anchor_heading_yaw);
-
-  const std::array<geometry_msgs::msg::Point, 4> corners{{
-    projectArtifactPointIntoCurrentMap(artifact, projection, artifact.origin_x, artifact.origin_y),
-    projectArtifactPointIntoCurrentMap(
-      artifact,
-      projection,
-      artifact.origin_x + artifact.resolution * static_cast<double>(artifact.width_cells),
-      artifact.origin_y),
-    projectArtifactPointIntoCurrentMap(
-      artifact,
-      projection,
-      artifact.origin_x,
-      artifact.origin_y + artifact.resolution * static_cast<double>(artifact.height_cells)),
-    projectArtifactPointIntoCurrentMap(
-      artifact,
-      projection,
-      artifact.origin_x + artifact.resolution * static_cast<double>(artifact.width_cells),
-      artifact.origin_y + artifact.resolution * static_cast<double>(artifact.height_cells))
-  }};
-
-  double min_x = std::numeric_limits<double>::infinity();
-  double min_y = std::numeric_limits<double>::infinity();
-  double max_x = -std::numeric_limits<double>::infinity();
-  double max_y = -std::numeric_limits<double>::infinity();
-  for (const auto & corner : corners) {
-    min_x = std::min(min_x, corner.x);
-    min_y = std::min(min_y, corner.y);
-    max_x = std::max(max_x, corner.x);
-    max_y = std::max(max_y, corner.y);
-  }
 
   const geometry_msgs::msg::Point projected_origin =
     projectArtifactPointIntoCurrentMap(artifact, projection, artifact.origin_x, artifact.origin_y);
-  const geometry_msgs::msg::Point projected_unit_x =
-    projectArtifactPointIntoCurrentMap(artifact, projection, artifact.origin_x + 1.0, artifact.origin_y);
-  const geometry_msgs::msg::Point projected_unit_y =
-    projectArtifactPointIntoCurrentMap(artifact, projection, artifact.origin_x, artifact.origin_y + 1.0);
-
-  const AffineMapTransform transform{
-    projected_unit_x.x - projected_origin.x,
-    projected_unit_y.x - projected_origin.x,
-    projected_unit_x.y - projected_origin.y,
-    projected_unit_y.y - projected_origin.y,
-    projected_origin.x,
-    projected_origin.y};
-  const double determinant = transform.xx * transform.yy - transform.xy * transform.yx;
-  if (std::abs(determinant) <= 1.0e-9) {
-    return std::nullopt;
-  }
-
   LoadedCostmapArtifact projected = artifact;
-  projected.origin_x = min_x;
-  projected.origin_y = min_y;
-  projected.width_cells = static_cast<unsigned int>(
-    std::max(1.0, std::ceil((max_x - min_x) / artifact.resolution)));
-  projected.height_cells = static_cast<unsigned int>(
-    std::max(1.0, std::ceil((max_y - min_y) / artifact.resolution)));
-  projected.costs.assign(
-    static_cast<std::size_t>(projected.width_cells) * projected.height_cells,
-    unknownFillValueForArtifact(artifact));
-
-  for (unsigned int row = 0U; row < projected.height_cells; ++row) {
-    for (unsigned int col = 0U; col < projected.width_cells; ++col) {
-      const double map_x =
-        projected.origin_x + (static_cast<double>(col) + 0.5) * projected.resolution;
-      const double map_y =
-        projected.origin_y + (static_cast<double>(row) + 0.5) * projected.resolution;
-      const double centered_x = map_x - transform.tx;
-      const double centered_y = map_y - transform.ty;
-      const double artifact_x =
-        (transform.yy * centered_x - transform.xy * centered_y) / determinant;
-      const double artifact_y =
-        (-transform.yx * centered_x + transform.xx * centered_y) / determinant;
-      const auto source_cost = artifactCellRawCost(artifact, artifact_x, artifact_y);
-      if (!source_cost.has_value()) {
-        continue;
-      }
-
-      const std::size_t target_index =
-        static_cast<std::size_t>(row) * projected.width_cells + static_cast<std::size_t>(col);
-      projected.costs[target_index] = *source_cost;
-    }
-  }
+  projected.origin_x = projected_origin.x;
+  projected.origin_y = projected_origin.y;
 
   return projected;
 }
@@ -2083,6 +1973,10 @@ void MappingNode::tryInitializeSavedCostmapFromSensors()
 
   locked_georef_navsat_sample_ = *stabilized_navsat;
   locked_georef_heading_yaw_ = *stabilized_heading_yaw;
+  runtime_costmap_projection_ = buildArtifactSeedProjection(
+    *pending_saved_costmap_artifact_,
+    *stabilized_navsat,
+    *stabilized_heading_yaw);
   initializeMapFromArtifact(*projected_artifact);
   publishGlobalMaps();
   saved_costmap_initialized_ = true;
@@ -2160,8 +2054,127 @@ void MappingNode::initializeMapFromArtifact(const LoadedCostmapArtifact & artifa
   live_map_ready_ = true;
 }
 
+nav_msgs::msg::OccupancyGrid MappingNode::buildStaticRuntimeCostmapArtifactInSourceFrame(
+  const LoadedCostmapArtifact & source_artifact,
+  const RuntimeCostmapProjection & projection) const
+{
+  nav_msgs::msg::OccupancyGrid artifact_map;
+  if (
+    source_artifact.width_cells == 0U || source_artifact.height_cells == 0U ||
+    source_artifact.resolution <= 0.0 || source_artifact.costs.empty())
+  {
+    return artifact_map;
+  }
+
+  artifact_map.header.frame_id = map_frame_id_;
+  artifact_map.header.stamp = now();
+  artifact_map.info.map_load_time = artifact_map.header.stamp;
+  artifact_map.info.resolution = static_cast<float>(source_artifact.resolution);
+  artifact_map.info.width = source_artifact.width_cells;
+  artifact_map.info.height = source_artifact.height_cells;
+  artifact_map.info.origin.position.x = source_artifact.origin_x;
+  artifact_map.info.origin.position.y = source_artifact.origin_y;
+  artifact_map.info.origin.position.z = 0.0;
+  artifact_map.info.origin.orientation.w = 1.0;
+  artifact_map.data.assign(
+    static_cast<std::size_t>(artifact_map.info.width) * artifact_map.info.height,
+    -1);
+
+  for (uint32_t row = 0U; row < artifact_map.info.height; ++row) {
+    for (uint32_t col = 0U; col < artifact_map.info.width; ++col) {
+      const double artifact_x = source_artifact.origin_x +
+        (static_cast<double>(col) + 0.5) * source_artifact.resolution;
+      const double artifact_y = source_artifact.origin_y +
+        (static_cast<double>(row) + 0.5) * source_artifact.resolution;
+      const auto source_cell = artifactCellOccupancy(source_artifact, artifact_x, artifact_y);
+      if (!source_cell.has_value()) {
+        continue;
+      }
+      const std::size_t index =
+        static_cast<std::size_t>(row) * artifact_map.info.width + static_cast<std::size_t>(col);
+      artifact_map.data.at(index) = *source_cell;
+    }
+  }
+
+  if (
+    latest_live_map_.data.size() != global_map_observations_.size() ||
+    latest_live_map_.data.size() != global_map_occupied_observations_.size() ||
+    latest_live_map_.data.size() != global_map_free_observations_.size())
+  {
+    return artifact_map;
+  }
+
+  for (uint32_t row = 0U; row < artifact_map.info.height; ++row) {
+    for (uint32_t col = 0U; col < artifact_map.info.width; ++col) {
+      const double artifact_x = source_artifact.origin_x +
+        (static_cast<double>(col) + 0.5) * source_artifact.resolution;
+      const double artifact_y = source_artifact.origin_y +
+        (static_cast<double>(row) + 0.5) * source_artifact.resolution;
+      const geometry_msgs::msg::Point runtime_point =
+        projectArtifactPointIntoCurrentMap(source_artifact, projection, artifact_x, artifact_y);
+
+      int live_x = 0;
+      int live_y = 0;
+      if (!worldToGrid(latest_live_map_, runtime_point.x, runtime_point.y, live_x, live_y)) {
+        continue;
+      }
+
+      const std::size_t live_index =
+        static_cast<std::size_t>(live_y) * latest_live_map_.info.width +
+        static_cast<std::size_t>(live_x);
+      const uint16_t total_observations = global_map_observations_.at(live_index);
+      if (total_observations < static_cast<uint16_t>(std::max(1, static_obstacle_min_observations_))) {
+        continue;
+      }
+
+      const auto source_raw_cost = artifactCellRawCost(source_artifact, artifact_x, artifact_y);
+      const bool source_cell_is_lethal =
+        source_raw_cost.has_value() && rawCostIsLethal(source_artifact, *source_raw_cost);
+      if (source_cell_is_lethal) {
+        continue;
+      }
+
+      const uint16_t occupied_observations = global_map_occupied_observations_.at(live_index);
+      const uint16_t free_observations = global_map_free_observations_.at(live_index);
+      const double occupied_fraction =
+        static_cast<double>(occupied_observations) / static_cast<double>(total_observations);
+      const double free_fraction =
+        static_cast<double>(free_observations) / static_cast<double>(total_observations);
+      const std::size_t artifact_index =
+        static_cast<std::size_t>(row) * artifact_map.info.width + static_cast<std::size_t>(col);
+
+      if (
+        occupied_fraction >= static_obstacle_min_occupied_fraction_ &&
+        latest_live_map_.data.at(live_index) >= 65)
+      {
+        artifact_map.data.at(artifact_index) = 100;
+        continue;
+      }
+
+      if (
+        free_fraction >= static_obstacle_min_free_fraction_ &&
+        latest_live_map_.data.at(live_index) >= 0 &&
+        latest_live_map_.data.at(live_index) <= 35)
+      {
+        artifact_map.data.at(artifact_index) = 0;
+      }
+    }
+  }
+
+  return artifact_map;
+}
+
 nav_msgs::msg::OccupancyGrid MappingNode::buildStaticRuntimeCostmapArtifact() const
 {
+  if (
+    authoritative_saved_costmap_artifact_.has_value() &&
+    runtime_costmap_projection_.has_value())
+  {
+    return buildStaticRuntimeCostmapArtifactInSourceFrame(
+      *authoritative_saved_costmap_artifact_,
+      *runtime_costmap_projection_);
+  }
+
   nav_msgs::msg::OccupancyGrid artifact_map;
   if (seeded_runtime_map_ready_) {
     artifact_map = seeded_runtime_map_;
@@ -2290,12 +2303,92 @@ nav_msgs::msg::OccupancyGrid MappingNode::buildStaticRuntimeCostmapArtifact() co
   return artifact_map;
 }
 
+bool MappingNode::isMapToOdomWithinStaticCostmapSaveLimits() const
+{
+  if (map_frame_id_ == odom_frame_id_) {
+    return true;
+  }
+
+  const bool translation_limit_enabled =
+    static_costmap_save_max_map_to_odom_translation_m_ > 0.0;
+  const bool yaw_limit_enabled =
+    static_costmap_save_max_map_to_odom_yaw_deg_ > 0.0;
+  if (!translation_limit_enabled && !yaw_limit_enabled) {
+    return true;
+  }
+
+  geometry_msgs::msg::TransformStamped map_to_odom;
+  try {
+    map_to_odom = tf_buffer_->lookupTransform(
+      map_frame_id_,
+      odom_frame_id_,
+      tf2::TimePointZero,
+      tf2::durationFromSec(0.05));
+  } catch (const tf2::TransformException & exception) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Skipping static costmap save because %s -> %s TF is unavailable: %s",
+      map_frame_id_.c_str(),
+      odom_frame_id_.c_str(),
+      exception.what());
+    return false;
+  }
+
+  const double translation_m = std::hypot(
+    map_to_odom.transform.translation.x,
+    map_to_odom.transform.translation.y);
+  tf2::Quaternion rotation;
+  tf2::fromMsg(map_to_odom.transform.rotation, rotation);
+  rotation.normalize();
+  double roll = 0.0;
+  double pitch = 0.0;
+  double yaw = 0.0;
+  tf2::Matrix3x3(rotation).getRPY(roll, pitch, yaw);
+  const double yaw_deg = std::abs(normalizeAngle(yaw)) * 180.0 / M_PI;
+
+  if (
+    translation_limit_enabled &&
+    translation_m > static_costmap_save_max_map_to_odom_translation_m_)
+  {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Skipping static costmap save because %s -> %s translation is %.3fm, above the configured %.3fm limit.",
+      map_frame_id_.c_str(),
+      odom_frame_id_.c_str(),
+      translation_m,
+      static_costmap_save_max_map_to_odom_translation_m_);
+    return false;
+  }
+
+  if (yaw_limit_enabled && yaw_deg > static_costmap_save_max_map_to_odom_yaw_deg_) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Skipping static costmap save because %s -> %s yaw is %.2f deg, above the configured %.2f deg limit.",
+      map_frame_id_.c_str(),
+      odom_frame_id_.c_str(),
+      yaw_deg,
+      static_costmap_save_max_map_to_odom_yaw_deg_);
+    return false;
+  }
+
+  return true;
+}
+
 void MappingNode::mergeCompletedRuntimeCostmapIntoMissionStaticCostmap()
 {
   if (persistent_mission_static_costmap_merged_) {
     return;
   }
   if (persistent_mission_static_costmap_yaml_.empty() || saved_costmap_yaml_.empty()) {
+    return;
+  }
+  if (!isMapToOdomWithinStaticCostmapSaveLimits()) {
     return;
   }
 
@@ -2406,6 +2499,9 @@ void MappingNode::persistRuntimeCostmapArtifact()
   if (saved_costmap_yaml_.empty()) {
     return;
   }
+  if (!isMapToOdomWithinStaticCostmapSaveLimits()) {
+    return;
+  }
 
   const nav_msgs::msg::OccupancyGrid map_to_save = buildStaticRuntimeCostmapArtifact();
   if (map_to_save.info.width == 0U || map_to_save.info.height == 0U) {
@@ -2458,8 +2554,8 @@ void MappingNode::persistRuntimeCostmapArtifact()
 
 std::string MappingNode::composeMapBuilderStatus() const
 {
-  const bool ready = have_scan_ && latest_odometry_pose_ready_;
   const bool have_global_map = latest_live_map_.info.width > 0U && latest_live_map_.info.height > 0U;
+  const bool ready = have_scan_ && have_global_map;
   bool have_scan_to_base_tf = false;
   bool have_map_to_odom_tf = false;
   bool have_base_frame = false;
@@ -2501,8 +2597,7 @@ std::string MappingNode::composeMapBuilderStatus() const
     << "; scan_frame_exists=" << (have_scan_frame ? "true" : "false")
     << "; map_tf=" << (have_map_to_odom_tf ? "true" : "false")
     << "; global_map=" << (have_global_map ? "true" : "false")
-    << "; scan_frame=" << (last_scan_frame_id_.empty() ? "<none>" : last_scan_frame_id_)
-    << "; pose_frame=" << (latest_odometry_pose_ready_ ? odom_frame_id_ : "<none>");
+    << "; scan_frame=" << (last_scan_frame_id_.empty() ? "<none>" : last_scan_frame_id_);
   if (!latest_map_pose_status_message_.empty()) {
     stream << "; map_pose_status_detail=" << latest_map_pose_status_message_;
   }
@@ -2903,7 +2998,8 @@ void MappingNode::convertMissionRoute()
     authoritative_saved_costmap_artifact_->georeference_valid;
   const bool can_use_authoritative_georeference =
     should_use_seeded_georeference &&
-    georeferenced_costmap_locked_;
+    georeferenced_costmap_locked_ &&
+    runtime_costmap_projection_.has_value();
   if (uses_base_footprint_anchor && !latest_odometry_pose_ready_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(),
@@ -2956,16 +3052,9 @@ void MappingNode::convertMissionRoute()
     mission_anchor_orientation = mission_anchor_orientation_;
   }
 
-  ArtifactSeedProjection seeded_projection;
-  if (
-    can_use_authoritative_georeference &&
-    locked_georef_navsat_sample_.has_value() &&
-    locked_georef_heading_yaw_.has_value())
-  {
-    seeded_projection = buildArtifactSeedProjection(
-      *authoritative_saved_costmap_artifact_,
-      *locked_georef_navsat_sample_,
-      *locked_georef_heading_yaw_);
+  RuntimeCostmapProjection seeded_projection;
+  if (can_use_authoritative_georeference && runtime_costmap_projection_.has_value()) {
+    seeded_projection = *runtime_costmap_projection_;
   }
 
   for (const MissionCoordinate & coordinate : coordinates) {
@@ -3002,18 +3091,13 @@ void MappingNode::convertMissionRoute()
       const geometry_msgs::msg::Point artifact_point = mapPointFromArtifactGeoreference(
         *authoritative_saved_costmap_artifact_,
         waypoint_navsat);
-      if (locked_georef_navsat_sample_.has_value() && locked_georef_heading_yaw_.has_value()) {
-        const geometry_msgs::msg::Point map_point = projectArtifactPointIntoCurrentMap(
-          *authoritative_saved_costmap_artifact_,
-          seeded_projection,
-          artifact_point.x,
-          artifact_point.y);
-        pose.pose.position.x = map_point.x;
-        pose.pose.position.y = map_point.y;
-      } else {
-        pose.pose.position.x = artifact_point.x;
-        pose.pose.position.y = artifact_point.y;
-      }
+      const geometry_msgs::msg::Point map_point = projectArtifactPointIntoCurrentMap(
+        *authoritative_saved_costmap_artifact_,
+        seeded_projection,
+        artifact_point.x,
+        artifact_point.y);
+      pose.pose.position.x = map_point.x;
+      pose.pose.position.y = map_point.y;
     } else {
       request->ll_point.longitude = coordinate.x;
       request->ll_point.latitude = coordinate.y;
