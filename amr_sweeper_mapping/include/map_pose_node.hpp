@@ -12,9 +12,7 @@
 #include <thread>
 #include <vector>
 
-#include <fusioncore_ros/srv/from_ll.hpp>
 #include <geometry_msgs/msg/point.hpp>
-#include <geographic_msgs/msg/geo_point.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -89,8 +87,6 @@ private:
   void handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void globalCostmapWorkerLoop();
   void publishMapToOdomTransform();
-  void loadCostmapGeoreference();
-  void loadReferenceCostmapFromYaml();
   [[nodiscard]] std::shared_ptr<std::vector<float>> buildGlobalCostmapScoreField(
     const nav_msgs::msg::OccupancyGrid & map) const;
   void initializeMapToOdomFilter();
@@ -116,10 +112,6 @@ private:
   [[nodiscard]] bool shouldHoldIdentityAtStartup(const StateSnapshot & snapshot);
   [[nodiscard]] bool waitingForInitialGlobalCostmap(const StateSnapshot & snapshot) const;
   [[nodiscard]] bool initialGlobalCostmapWaitTimedOut(const StateSnapshot & snapshot) const;
-  [[nodiscard]] std::optional<geometry_msgs::msg::Point> latestMapPositionFromNavSat() const;
-  [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPositionFromArtifactGeoreference() const;
-  [[nodiscard]] std::optional<geographic_msgs::msg::GeoPoint> artifactGeoPointFromMapPoint(
-    const geometry_msgs::msg::Point & map_point) const;
   [[nodiscard]] double georeferenceConsistencyConfidence(
     const StateSnapshot & snapshot,
     const tf2::Transform & candidate_map_to_base) const;
@@ -136,9 +128,6 @@ private:
   std::string scan_topic_;
   std::string global_costmap_topic_;
   std::string status_topic_;
-  std::string fromll_service_name_;
-  std::string costmap_yaml_path_;
-  bool use_reference_costmap_{false};
   bool publish_identity_when_pose_missing_{true};
   bool latest_odometry_ready_{false};
   bool latest_navsat_ready_{false};
@@ -147,7 +136,6 @@ private:
   bool latest_global_costmap_ready_{false};
   bool last_map_to_odom_ready_{false};
   bool map_to_odom_filter_ready_{false};
-  bool artifact_georeference_ready_{false};
   bool correction_startup_ready_{false};
   int correction_ready_streak_{0};
   int occupied_threshold_{65};
@@ -216,8 +204,6 @@ private:
   rclcpp::Time pending_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_scan_match_attempt_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_map_pose_stamp_{0, 0, RCL_ROS_TIME};
-  std::array<double, 3> artifact_longitude_coefficients_{0.0, 0.0, 0.0};
-  std::array<double, 3> artifact_latitude_coefficients_{0.0, 0.0, 0.0};
   std::array<double, 3> map_to_odom_filter_state_{0.0, 0.0, 0.0};
   std::array<double, 3> map_to_odom_filter_covariance_{1.0, 1.0, 0.5};
   tf2::Transform last_map_to_odom_;
@@ -244,7 +230,6 @@ private:
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-  rclcpp::Client<fusioncore_ros::srv::FromLL>::SharedPtr fromll_client_;
 };
 
 }  // namespace amr_sweeper_mapping

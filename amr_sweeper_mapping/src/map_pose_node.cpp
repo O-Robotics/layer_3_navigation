@@ -3,9 +3,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <filesystem>
-#include <fstream>
-#include <future>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -120,22 +117,6 @@ tf2::Transform blendTransforms(
     blended_yaw);
 }
 
-double geographicDistanceMeters(
-  const geographic_msgs::msg::GeoPoint & first,
-  const geographic_msgs::msg::GeoPoint & second)
-{
-  constexpr double earth_radius_m = 6378137.0;
-  constexpr double degrees_to_radians = M_PI / 180.0;
-  const double mean_latitude_rad =
-    ((first.latitude + second.latitude) * 0.5) * degrees_to_radians;
-  const double delta_latitude_m =
-    (second.latitude - first.latitude) * degrees_to_radians * earth_radius_m;
-  const double delta_longitude_m =
-    (second.longitude - first.longitude) * degrees_to_radians * earth_radius_m *
-    std::cos(mean_latitude_rad);
-  return std::hypot(delta_latitude_m, delta_longitude_m);
-}
-
 const char * healthStateToString(const MapPoseHealthState state)
 {
   switch (state) {
@@ -154,142 +135,6 @@ const char * healthStateToString(const MapPoseHealthState state)
   }
 }
 
-std::string trim(const std::string & value)
-{
-  const auto begin = value.find_first_not_of(" \t");
-  if (begin == std::string::npos) {
-    return "";
-  }
-  const auto end = value.find_last_not_of(" \t");
-  return value.substr(begin, end - begin + 1U);
-}
-
-std::string stripQuotes(const std::string & value)
-{
-  if (value.size() >= 2U) {
-    const char first = value.front();
-    const char last = value.back();
-    if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
-      return value.substr(1U, value.size() - 2U);
-    }
-  }
-  return value;
-}
-
-nav_msgs::msg::OccupancyGrid loadOccupancyGridFromYaml(
-  const std::string & yaml_path,
-  const std::string & frame_id)
-{
-  std::ifstream yaml_stream(yaml_path);
-  if (!yaml_stream.is_open()) {
-    throw std::runtime_error("Failed to open costmap YAML artifact: " + yaml_path);
-  }
-
-  std::string image_name;
-  double resolution = 0.0;
-  double origin_x = 0.0;
-  double origin_y = 0.0;
-  std::string mode = "trinary";
-  double occupied_thresh = 0.65;
-  double free_thresh = 0.196;
-  bool negate = false;
-  std::string line;
-  while (std::getline(yaml_stream, line)) {
-    const auto colon = line.find(':');
-    if (colon == std::string::npos) {
-      continue;
-    }
-    const std::string key = trim(line.substr(0, colon));
-    const std::string value = trim(line.substr(colon + 1U));
-    if (key == "image") {
-      image_name = stripQuotes(value);
-    } else if (key == "mode") {
-      mode = stripQuotes(value);
-    } else if (key == "resolution") {
-      resolution = std::stod(value);
-    } else if (key == "origin") {
-      const auto open = value.find('[');
-      const auto first_comma = value.find(',', open + 1U);
-      const auto second_comma = value.find(',', first_comma + 1U);
-      origin_x = std::stod(trim(value.substr(open + 1U, first_comma - open - 1U)));
-      origin_y = std::stod(trim(value.substr(first_comma + 1U, second_comma - first_comma - 1U)));
-    } else if (key == "occupied_thresh") {
-      occupied_thresh = std::stod(value);
-    } else if (key == "free_thresh") {
-      free_thresh = std::stod(value);
-    } else if (key == "negate") {
-      negate = std::stoi(value) != 0;
-    }
-  }
-
-  const std::filesystem::path image_path = std::filesystem::path(yaml_path).parent_path() / image_name;
-  std::ifstream image_stream(image_path, std::ios::binary);
-  if (!image_stream.is_open()) {
-    throw std::runtime_error("Failed to open costmap image artifact: " + image_path.string());
-  }
-
-  std::string magic;
-  image_stream >> magic;
-  if (magic != "P5" && magic != "P2") {
-    throw std::runtime_error("Unsupported costmap image format: " + magic);
-  }
-
-  unsigned int width = 0U;
-  unsigned int height = 0U;
-  int max_value = 0;
-  image_stream >> width >> height >> max_value;
-
-  nav_msgs::msg::OccupancyGrid map;
-  map.header.frame_id = frame_id;
-  map.info.resolution = static_cast<float>(resolution);
-  map.info.width = width;
-  map.info.height = height;
-  map.info.origin.position.x = origin_x;
-  map.info.origin.position.y = origin_y;
-  map.info.origin.orientation.w = 1.0;
-  map.data.assign(static_cast<std::size_t>(width) * height, -1);
-
-  auto to_cost = [max_value, negate, mode, occupied_thresh, free_thresh](const int pixel_value) -> int8_t {
-      const int bounded = std::clamp(pixel_value, 0, std::max(1, max_value));
-      const double normalized = static_cast<double>(bounded) / static_cast<double>(std::max(1, max_value));
-      const double occupied = negate ? normalized : (1.0 - normalized);
-      if (mode == "scale" || mode == "raw") {
-        return static_cast<int8_t>(std::lround(std::clamp(occupied, 0.0, 1.0) * 100.0));
-      }
-      if (occupied >= occupied_thresh) {
-        return 100;
-      }
-      if (occupied <= free_thresh) {
-        return 0;
-      }
-      return -1;
-    };
-
-  if (magic == "P5") {
-    image_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-    for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
-      for (unsigned int col = 0; col < width; ++col) {
-        unsigned char pixel = 0U;
-        image_stream.read(reinterpret_cast<char *>(&pixel), 1);
-        const std::size_t index = static_cast<std::size_t>(row) * width + col;
-        map.data[index] = to_cost(static_cast<int>(pixel));
-      }
-    }
-    return map;
-  }
-
-  for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
-    for (unsigned int col = 0; col < width; ++col) {
-      int pixel_value = 0;
-      image_stream >> pixel_value;
-      const std::size_t index = static_cast<std::size_t>(row) * width + col;
-      map.data[index] = to_cost(pixel_value);
-    }
-  }
-
-  return map;
-}
-
 }  // namespace
 
 MapPoseNode::MapPoseNode()
@@ -304,8 +149,6 @@ MapPoseNode::MapPoseNode()
   declare_parameter("scan_topic", std::string("depth_camera/scan"));
   declare_parameter("global_costmap_topic", std::string("mapping/static_costmap"));
   declare_parameter("status_topic", std::string("mapping/map_pose_status"));
-  declare_parameter("fromll_service", std::string("/fromLL"));
-  declare_parameter("costmap_yaml_path", std::string(""));
   declare_parameter("publish_period_seconds", 0.5);
   declare_parameter("publish_identity_when_pose_missing", true);
   declare_parameter("occupied_threshold", 65);
@@ -365,8 +208,6 @@ MapPoseNode::MapPoseNode()
   scan_topic_ = get_parameter("scan_topic").as_string();
   global_costmap_topic_ = get_parameter("global_costmap_topic").as_string();
   status_topic_ = get_parameter("status_topic").as_string();
-  fromll_service_name_ = get_parameter("fromll_service").as_string();
-  costmap_yaml_path_ = get_parameter("costmap_yaml_path").as_string();
   publish_identity_when_pose_missing_ =
     get_parameter("publish_identity_when_pose_missing").as_bool();
   occupied_threshold_ = static_cast<int>(get_parameter("occupied_threshold").as_int());
@@ -494,8 +335,6 @@ MapPoseNode::MapPoseNode()
       measurement_noise_max_values[2]};
   }
   global_costmap_wait_started_ = now();
-  loadCostmapGeoreference();
-  loadReferenceCostmapFromYaml();
 
   subscription_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   publish_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -535,7 +374,6 @@ MapPoseNode::MapPoseNode()
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-  fromll_client_ = create_client<fusioncore_ros::srv::FromLL>(fromll_service_name_);
   publish_timer_ = create_wall_timer(
     std::chrono::duration<double>(publish_period_seconds_),
     std::bind(&MapPoseNode::publishMapToOdomTransform, this),
@@ -976,89 +814,6 @@ void MapPoseNode::publishMapPoseStatus(const StateSnapshot & snapshot)
   status_publisher_->publish(status_message);
 }
 
-void MapPoseNode::loadCostmapGeoreference()
-{
-  if (costmap_yaml_path_.empty()) {
-    return;
-  }
-
-  std::ifstream yaml_stream(costmap_yaml_path_);
-  if (!yaml_stream.is_open()) {
-    RCLCPP_WARN(
-      get_logger(),
-      "Failed to open costmap YAML %s for georeference metadata.",
-      costmap_yaml_path_.c_str());
-    return;
-  }
-
-  std::string line;
-  while (std::getline(yaml_stream, line)) {
-    const auto colon = line.find(':');
-    if (colon == std::string::npos) {
-      continue;
-    }
-    const auto key = line.substr(0, colon);
-    const auto value = line.substr(colon + 1U);
-    if (key == "georeference_longitude_coefficients") {
-      const auto open = value.find('[');
-      const auto first_comma = value.find(',', open + 1U);
-      const auto second_comma = value.find(',', first_comma + 1U);
-      const auto close = value.find(']', second_comma + 1U);
-      artifact_longitude_coefficients_ = {
-        std::stod(value.substr(open + 1U, first_comma - open - 1U)),
-        std::stod(value.substr(first_comma + 1U, second_comma - first_comma - 1U)),
-        std::stod(value.substr(second_comma + 1U, close - second_comma - 1U))};
-    } else if (key == "georeference_latitude_coefficients") {
-      const auto open = value.find('[');
-      const auto first_comma = value.find(',', open + 1U);
-      const auto second_comma = value.find(',', first_comma + 1U);
-      const auto close = value.find(']', second_comma + 1U);
-      artifact_latitude_coefficients_ = {
-        std::stod(value.substr(open + 1U, first_comma - open - 1U)),
-        std::stod(value.substr(first_comma + 1U, second_comma - first_comma - 1U)),
-        std::stod(value.substr(second_comma + 1U, close - second_comma - 1U))};
-      artifact_georeference_ready_ = true;
-    }
-  }
-}
-
-void MapPoseNode::loadReferenceCostmapFromYaml()
-{
-  if (costmap_yaml_path_.empty()) {
-    return;
-  }
-
-  try {
-    nav_msgs::msg::OccupancyGrid reference_map =
-      loadOccupancyGridFromYaml(costmap_yaml_path_, map_frame_id_);
-    if (reference_map.info.width == 0U || reference_map.info.height == 0U) {
-      return;
-    }
-
-    auto reference_score_field = buildGlobalCostmapScoreField(reference_map);
-    const rclcpp::Time stamp = now();
-
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    latest_global_costmap_ = std::move(reference_map);
-    latest_global_costmap_score_field_ = std::move(reference_score_field);
-    latest_global_costmap_ready_ = true;
-    latest_global_costmap_stamp_ = stamp;
-    latest_global_costmap_processed_stamp_ = stamp;
-    use_reference_costmap_ = true;
-    global_costmap_wait_started_ = stamp;
-    RCLCPP_INFO(
-      get_logger(),
-      "Loaded stable reference costmap from %s for map_pose scan matching; live mapping/static_costmap updates will not replace it.",
-      costmap_yaml_path_.c_str());
-  } catch (const std::exception & exception) {
-    RCLCPP_WARN(
-      get_logger(),
-      "Failed to load reference costmap from %s: %s",
-      costmap_yaml_path_.c_str(),
-      exception.what());
-  }
-}
-
 std::shared_ptr<std::vector<float>> MapPoseNode::buildGlobalCostmapScoreField(
   const nav_msgs::msg::OccupancyGrid & map) const
 {
@@ -1207,13 +962,6 @@ void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::Shared
   const bool costmap_ready =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;
 
-  if (use_reference_costmap_) {
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    latest_global_costmap_stamp_ = receipt_stamp;
-    latest_global_costmap_ready_ = costmap_ready;
-    return;
-  }
-
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (
@@ -1312,157 +1060,13 @@ float MapPoseNode::scoreCostmapCell(
   return static_cast<float>(out_of_bounds_score_);
 }
 
-std::optional<geometry_msgs::msg::Point> MapPoseNode::latestMapPositionFromNavSat() const
-{
-  if (!latest_navsat_ready_) {
-    return std::nullopt;
-  }
-
-  if (const auto artifact_map_point = mapPositionFromArtifactGeoreference();
-    artifact_map_point.has_value())
-  {
-    return artifact_map_point;
-  }
-
-  if (!fromll_client_->service_is_ready()) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      5000,
-      "Waiting for %s before deriving the georeferenced map pose from %s.",
-      fromll_service_name_.c_str(),
-      navsat_topic_.c_str());
-    return std::nullopt;
-  }
-
-  auto request = std::make_shared<fusioncore_ros::srv::FromLL::Request>();
-  request->ll_point.latitude = latest_navsat_.latitude;
-  request->ll_point.longitude = latest_navsat_.longitude;
-  request->ll_point.altitude = latest_navsat_.altitude;
-
-  auto future = fromll_client_->async_send_request(request);
-  const auto future_status = future.wait_for(std::chrono::milliseconds(200));
-  if (future_status != std::future_status::ready) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(),
-      *get_clock(),
-      5000,
-      "Timed out waiting for %s while deriving the georeferenced map pose.",
-      fromll_service_name_.c_str());
-    return std::nullopt;
-  }
-
-  const auto response = future.get();
-  geometry_msgs::msg::Point map_point;
-  map_point.x = response->map_point.x;
-  map_point.y = response->map_point.y;
-  map_point.z = response->map_point.z;
-  return map_point;
-}
-
-std::optional<geometry_msgs::msg::Point> MapPoseNode::mapPositionFromArtifactGeoreference() const
-{
-  if (!artifact_georeference_ready_) {
-    return std::nullopt;
-  }
-
-  const double a = artifact_longitude_coefficients_[0];
-  const double b = artifact_longitude_coefficients_[1];
-  const double c = artifact_longitude_coefficients_[2];
-  const double d = artifact_latitude_coefficients_[0];
-  const double e = artifact_latitude_coefficients_[1];
-  const double f = artifact_latitude_coefficients_[2];
-  const double determinant = (a * e) - (b * d);
-  if (std::abs(determinant) < 1.0e-12) {
-    return std::nullopt;
-  }
-
-  const double longitude_delta = latest_navsat_.longitude - c;
-  const double latitude_delta = latest_navsat_.latitude - f;
-  geometry_msgs::msg::Point map_point;
-  map_point.x = ((e * longitude_delta) - (b * latitude_delta)) / determinant;
-  map_point.y = ((-d * longitude_delta) + (a * latitude_delta)) / determinant;
-  map_point.z = latest_navsat_.altitude;
-  return map_point;
-}
-
-std::optional<geographic_msgs::msg::GeoPoint> MapPoseNode::artifactGeoPointFromMapPoint(
-  const geometry_msgs::msg::Point & map_point) const
-{
-  if (!artifact_georeference_ready_) {
-    return std::nullopt;
-  }
-
-  geographic_msgs::msg::GeoPoint geo_point;
-  geo_point.longitude =
-    artifact_longitude_coefficients_[0] * map_point.x +
-    artifact_longitude_coefficients_[1] * map_point.y +
-    artifact_longitude_coefficients_[2];
-  geo_point.latitude =
-    artifact_latitude_coefficients_[0] * map_point.x +
-    artifact_latitude_coefficients_[1] * map_point.y +
-    artifact_latitude_coefficients_[2];
-  geo_point.altitude = map_point.z;
-  return geo_point;
-}
-
 double MapPoseNode::georeferenceConsistencyConfidence(
   const StateSnapshot & snapshot,
   const tf2::Transform & candidate_map_to_base) const
 {
-  if (!snapshot.latest_navsat_ready || !snapshot.latest_heading_ready || !artifact_georeference_ready_) {
-    return 1.0;
-  }
-
-  if (
-    snapshot.latest_navsat_stamp.nanoseconds() == 0 ||
-    snapshot.latest_heading_stamp.nanoseconds() == 0)
-  {
-    return 1.0;
-  }
-
-  if (
-    (now() - snapshot.latest_navsat_stamp).seconds() > costmap_timeout_seconds_ ||
-    (now() - snapshot.latest_heading_stamp).seconds() > costmap_timeout_seconds_)
-  {
-    return 1.0;
-  }
-
-  geometry_msgs::msg::Point mapped_pose_point;
-  mapped_pose_point.x = candidate_map_to_base.getOrigin().x();
-  mapped_pose_point.y = candidate_map_to_base.getOrigin().y();
-  mapped_pose_point.z = candidate_map_to_base.getOrigin().z();
-
-  const auto derived_geo_point = artifactGeoPointFromMapPoint(mapped_pose_point);
-  if (!derived_geo_point.has_value()) {
-    return 1.0;
-  }
-
-  geographic_msgs::msg::GeoPoint gnss_geo_point;
-  gnss_geo_point.latitude = snapshot.latest_navsat.latitude;
-  gnss_geo_point.longitude = snapshot.latest_navsat.longitude;
-  gnss_geo_point.altitude = snapshot.latest_navsat.altitude;
-
-  const double position_confidence = std::clamp(
-    1.0 - (geographicDistanceMeters(gnss_geo_point, *derived_geo_point) / georef_consistency_max_error_m_),
-    georef_consistency_min_confidence_,
-    1.0);
-
-  tf2::Quaternion heading_quaternion;
-  tf2::fromMsg(snapshot.latest_heading.orientation, heading_quaternion);
-  heading_quaternion.normalize();
-  double roll = 0.0;
-  double pitch = 0.0;
-  double heading_yaw = 0.0;
-  tf2::Matrix3x3(heading_quaternion).getRPY(roll, pitch, heading_yaw);
-  const double heading_error = std::abs(normalizeAngle(
-    yawFromTransform(candidate_map_to_base) - heading_yaw));
-  const double heading_confidence = std::clamp(
-    1.0 - (heading_error / std::max(0.1, search_yaw_window_rad_)),
-    georef_consistency_min_confidence_,
-    1.0);
-
-  return position_confidence * heading_confidence;
+  (void)snapshot;
+  (void)candidate_map_to_base;
+  return 1.0;
 }
 
 std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromPrior(
@@ -1824,7 +1428,6 @@ void MapPoseNode::publishMapToOdomTransform()
       snapshot.latest_odometry_position.y,
       snapshot.latest_odometry_position.z));
 
-  // Layer 3 starts with map and odom intentionally co-located so the correction state begins at zero.
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     predictMapToOdomFilterLocked();

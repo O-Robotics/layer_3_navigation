@@ -10,8 +10,6 @@
     scan_topic:                          depth_camera/scan                # LaserScan used to match the robot against the already locked global costmap so map -> odom can absorb drift without shifting the costmap in map.
     global_costmap_topic:                mapping/static_costmap           # Runtime static costmap that acts as the known map for scan-to-map pose correction.
     status_topic:                        mapping/map_pose_status         # Structured health/state topic for map_pose_node. BOOTSTRAP publishes immediately, HEALTHY means all correction inputs are live, and FAULT means mapping should stop integrating scans.
-    fromll_service:                      /fromLL                          # Coordinate-conversion service that projects lon/lat fixes into the metric map frame.
-    costmap_yaml_path:                   ""                               # Optional offline fallback. In normal missions this stays empty so map_pose_node consumes mapping/static_costmap from mapping_node.
 
     # -- Publish behavior -----------------------------------------------------
     publish_period_seconds:              0.1                              # Refresh period for the published map -> odom transform.
