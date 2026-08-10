@@ -232,7 +232,7 @@ velocity_smoother:
     use_sim_time: false
     smoothing_frequency: 10.0
     scale_velocities: false
-    feedback: CLOSED_LOOP
+    feedback: OPEN_LOOP
     max_velocity:
     - 0.5
     - 0.0
