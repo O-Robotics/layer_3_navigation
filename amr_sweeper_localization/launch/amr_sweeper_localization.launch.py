@@ -24,8 +24,9 @@ def _primary_topic_or_disabled(enabled: bool, topic: str, disabled_topic: str) -
 def _fusioncore_no_ntrip_overrides() -> dict:
     return {
         "gnss.min_fix_type": 1,
-        "gnss.base_noise_xy": 8.0,
-        "gnss.base_noise_z": 12.0,
+        "gnss.base_noise_xy": 50.0,
+        "gnss.base_noise_z": 75.0,
+        "gnss.track_heading_enabled": False,
     }
 
 

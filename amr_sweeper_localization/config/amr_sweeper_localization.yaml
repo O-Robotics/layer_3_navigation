@@ -47,8 +47,8 @@ fusioncore:
     # -- GNSS ------------------------------------------------------------------
     gnss.use_gps_fix:                       true                  # Consume NavSatFix-quality data from the GNSS pipeline.
     gnss.velocity_topic:                    ""                    # No standalone GNSS velocity topic is configured.
-    gnss.base_noise_xy:                     3.0                   # Slightly loosen horizontal GNSS trust at startup; replay sweeps consistently reduced XY excursions with this setting.
-    gnss.base_noise_z:                      4.0                   # Baseline vertical GNSS position sigma in meters.
+    gnss.base_noise_xy:                     6.0                   # Conservative horizontal GNSS trust; runtime no-NTRIP launches loosen this further for autonomous fixes.
+    gnss.base_noise_z:                      10.0                  # Conservative vertical GNSS trust because uncorrected GNSS altitude is noisy near walls and buildings.
     gnss.heading_noise:                     0.02                  # GNSS-derived heading sigma in radians.
     gnss.max_hdop:                          2.5                   # Reject fixes whose HDOP exceeds this threshold.
     gnss.min_satellites:                    6                     # Require at least this many satellites before accepting a fix.
