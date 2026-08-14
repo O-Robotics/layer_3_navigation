@@ -3033,8 +3033,13 @@ void MappingNode::convertMissionRoute()
   const bool uses_base_footprint_anchor =
     coordinate_frame == "base_footprint" || coordinate_frame == "local";
   const bool uses_geographic_frame = !coordinates.front().use_local_frame;
+  const bool uses_authoritative_map_frame =
+    coordinate_frame == "map" &&
+    useAuthoritativeMissionGeoreference() &&
+    authoritative_saved_costmap_artifact_.has_value() &&
+    authoritative_saved_costmap_artifact_->georeference_valid;
   const bool should_use_seeded_georeference =
-    uses_geographic_frame &&
+    (uses_geographic_frame || uses_authoritative_map_frame) &&
     useAuthoritativeMissionGeoreference() &&
     authoritative_saved_costmap_artifact_.has_value() &&
     authoritative_saved_costmap_artifact_->georeference_valid;
@@ -3113,6 +3118,18 @@ void MappingNode::convertMissionRoute()
         mission_anchor_orientation);
       pose.pose.position.x = odom_point.x;
       pose.pose.position.y = odom_point.y;
+      mission_route_.push_back(pose);
+      continue;
+    }
+
+    if (coordinate.frame_id == "map" && can_use_authoritative_georeference) {
+      const geometry_msgs::msg::Point map_point = projectArtifactPointIntoCurrentMap(
+        *authoritative_saved_costmap_artifact_,
+        seeded_projection,
+        coordinate.x,
+        coordinate.y);
+      pose.pose.position.x = map_point.x;
+      pose.pose.position.y = map_point.y;
       mission_route_.push_back(pose);
       continue;
     }
