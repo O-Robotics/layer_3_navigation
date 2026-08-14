@@ -13,7 +13,6 @@
 #include <deque>
 #include <functional>
 #include <array>
-#include <string>
 
 namespace fusioncore {
 
@@ -75,6 +74,59 @@ struct FusionCoreConfig {
   double outlier_threshold_enc   = 11.34;  // chi2(3, 0.999): 3D encoder
   double outlier_threshold_hdg   = 10.83;  // chi2(1, 0.999): 1D heading
   double outlier_threshold_vslam = 22.46;  // chi2(6, 0.999): 6D pose
+
+  // Physical plausibility gate for GNSS position.
+  // A fix cannot be farther from the filter's predicted position than the robot
+  // could physically have moved or drifted since the last accepted fix:
+  // dead-reckoning error is bounded by the distance traveled, which is bounded
+  // by max_speed * dt. This rejects an adversarial outlier cluster arriving at a
+  // GPS-blackout boundary, which a coast-relaxed chi2 gate would otherwise admit
+  // (the chi2 covariance has been inflated to re-acquire, so a far outlier slips
+  // through; chi2 alone cannot tell a 700 m outlier from a legitimate recovery
+  // fix after a long gap, but physics can). An implausible fix is rejected and
+  // does NOT count toward coast, so an outlier can never relax the gate.
+  // Set to the platform's maximum plausible speed (m/s); a few times cruise
+  // speed is safe. 0 = disabled (default, preserves prior behavior).
+  double gnss_max_speed        = 0.0;
+  // Fixed slack added to the max_speed * dt bound (m), covering prediction error
+  // that is not explained by the receiver's own noise.
+  double gnss_max_speed_margin = 5.0;
+  // Multiples of the receiver's REPORTED horizontal sigma added to the bound.
+  //
+  // Without this the whole bound is absolute metres, and a fixed margin cannot
+  // tell an impossible jump from ordinary noise unless it happens to sit well
+  // outside the receiver's spread. Measured 2026-08-03 on a u-blox M9N: the
+  // bound worked out to 7 m at 1 Hz while the receiver's own sigma was ~6 m, so
+  // the gate sat inside the noise distribution and rejected 157 of 500 perfectly
+  // good fixes, turning a 2.62 m loop closure into 7.27 m.
+  //
+  // Deliberately scaled by the RECEIVER's sigma and not by the filter's P. The
+  // entire point of this gate is to catch an outlier cluster that a coast-relaxed
+  // chi2 would admit, and chi2 is already the P-scaled test. Scaling this one by
+  // P too would just be a second chi2 and would reopen the hole it exists to plug.
+  double gnss_max_speed_sigma_k = 5.0;
+  // Multiples of the FILTER's own position sigma added to the bound.
+  //
+  // The original design assumed dead-reckoning error is bounded by distance
+  // travelled, so max_speed * gap covered both how far the robot could drive AND
+  // how far the prediction could be wrong. That is false: a filter whose heading
+  // has drifted goes sideways further than it went forward, and after a GPS
+  // blackout the prediction error is the dominant term. Measured on NCLT
+  // 2013-04-05, which has a 34 s outage at t+620 s: with the gate off the filter
+  // drifts to 98 m during the outage and is back to 4.4 m a minute later, but
+  // with the gate on at 3.0 the FIRST post-outage fix is rejected, the filter
+  // keeps drifting, and by the time the bound would admit a fix the chi2 gate
+  // refuses it. One rejection at the wrong moment locks GPS out permanently:
+  // 4.4 m becomes 358 m and climbing.
+  //
+  // Earlier revisions of this comment argued the bound must NOT scale with P,
+  // on the grounds that chi2 is already the P-scaled test and coast inflation
+  // would reopen the hole this gate plugs. That reasoning was wrong. Coast only
+  // inflates P after a genuine GPS GAP (the gap-gating in fede6e0), which is
+  // exactly the situation where a wide bound is correct. A sustained spike with
+  // no preceding gap never triggers coast, so P stays tight and the spike is
+  // still rejected. P is precisely the right quantity here.
+  double gnss_max_speed_drift_k = 3.0;
 
   // Adaptive noise covariance
   // Whether to enable adaptive R estimation for each sensor
@@ -157,6 +209,16 @@ struct FusionCoreConfig {
   // and then rejects the recovery fixes as apparent outliers.
   // 0 = disabled; typical value: 5
   int    gnss_coast_n        = 5;
+  // Rejection-triggered coast only fires when the rejection sequence began
+  // after a GPS gap of at least this many seconds (i.e. the filter plausibly
+  // drifted blind and is now rejecting the returning fix). A continuously
+  // present GPS that keeps failing the chi2 gate is a persistent outlier (e.g.
+  // a multipath spike), NOT filter drift: inflating P to admit it would let the
+  // outlier defeat the gate. Gating coast on a preceding gap keeps a sustained
+  // spike rejected for its whole duration while preserving post-outage
+  // re-acquisition. The pure-absence coast path (gnss_coast_timeout_s) is
+  // unaffected. Set to 0 to restore the old gap-agnostic behavior.
+  double gnss_coast_min_gap_s = 1.0;
   // Multiplier applied to q_position each predict step while in coast mode.
   // 20.0 = 4.5x position sigma growth per second at 100Hz IMU.
   double gnss_coast_q_factor = 20.0;
@@ -219,11 +281,14 @@ enum class GnssRejectionReason {
   NOT_PROCESSED   = 0,  // update_gnss not yet called
   ACCEPTED        = 1,
   FIX_TYPE_LOW    = 2,  // fix_type < min_fix_type
-  HDOP_HIGH       = 3,  // hdop > max_hdop
-  VDOP_HIGH       = 4,  // vdop > max_vdop
+  HDOP_HIGH       = 3,  // hdop > max_hdop (dimensionless DOP path only)
+  VDOP_HIGH       = 4,  // vdop > max_vdop (dimensionless DOP path only)
   MIN_SATS        = 5,  // satellites < min_satellites
   CHI2_FAILED     = 6,  // Mahalanobis distance > threshold
   DELAY_TOO_LARGE = 7,  // measurement older than max_measurement_delay
+  IMPLAUSIBLE_JUMP = 8, // fix farther from prediction than max_speed*dt allows
+  SIGMA_XY_HIGH   = 9,  // reported horizontal sigma in METRES > max_sigma_xy
+  SIGMA_Z_HIGH    = 10, // reported vertical sigma in METRES > max_sigma_z
 };
 
 // Per-fix observability data: populated by update_gnss() on every call.
@@ -233,6 +298,11 @@ struct GnssFixDebug {
   GnssRejectionReason reason            = GnssRejectionReason::NOT_PROCESSED;
   double             mahalanobis_sq     = -1.0;  // -1 = not computed (quality gate failed first)
   double             chi2_threshold     = 0.0;
+  // Why GPS track heading did not fuse on this fix, when it did not.
+  // Silent skipping is how the original problem stayed invisible: the user saw a
+  // zig-zag path and had no way to tell which heading source caused it.
+  bool               track_heading_skipped_stronger_source = false;
+  bool               track_heading_skipped_motion          = false;
   double             hdop               = 0.0;
   double             vdop               = 0.0;
   int                satellites         = 0;
@@ -290,6 +360,22 @@ struct FusionCoreStatus {
   // GPS coast mode state
   bool gnss_in_coast           = false;
   int  gnss_consecutive_rejects = 0;
+
+  // Reason the most recent GNSS fix was rejected (NOT_PROCESSED until the first
+  // rejection). Quality-gate rejects (HDOP/VDOP/fix-type/sats) and delay rejects
+  // do NOT increment gnss_outliers, so this is the only place they are reported.
+  GnssRejectionReason gnss_last_rejection_reason = GnssRejectionReason::NOT_PROCESSED;
+
+  // Stale-measurement rejections from inter-sensor clock skew: this sensor's
+  // stamps run more than max_measurement_delay behind the filter clock while
+  // another sensor's stamps drive it ahead (sensors not on a common time base).
+  // A climbing counter here means that sensor is NOT being fused at all and the
+  // sensor drivers' clocks need fixing. These are not outliers: the data may be
+  // perfect, it is the timestamps that disagree.
+  int imu_stale_rejects     = 0;
+  int encoder_stale_rejects = 0;
+  int mag_stale_rejects     = 0;
+  int hdg_stale_rejects     = 0;
 };
 
 class FusionCore {
@@ -373,6 +459,10 @@ public:
   );
 
   const State&       get_state()      const;
+
+  // Diagnostic passthrough: metres the last measurement update moved position.
+  // See UKF::last_position_correction().
+  double last_position_correction() const { return ukf_.last_position_correction(); }
   FusionCoreStatus   get_status()     const;
   const GnssFixDebug& get_gnss_debug() const { return gnss_debug_; }
   void               reset();
@@ -381,15 +471,6 @@ public:
   HeadingSource      heading_source()    const { return heading_source_; }
 
 private:
-  void maybe_trace_blowup(
-    const char* function_name,
-    double timestamp_seconds,
-    const State& before_state,
-    const std::string& measurement_summary);
-  bool        debug_trace_blowup_ = false;
-  int         debug_trace_count_ = 0;
-  std::string debug_trace_last_function_;
-
   FusionCoreConfig config_;
   UKF              ukf_;
   bool             initialized_       = false;
@@ -492,6 +573,31 @@ private:
   // Inertial coast mode tracking
   int  gnss_consecutive_rejects_ = 0;
   bool gnss_in_coast_            = false;
+  // Persists the reason of the last rejected GNSS fix, for status reporting.
+  GnssRejectionReason last_gnss_rejection_reason_ = GnssRejectionReason::NOT_PROCESSED;
+
+  // Inter-sensor clock-skew protection. Raw per-stream stamps (recorded whether
+  // or not the measurement was accepted, unlike last_*_time_ which only tracks
+  // fused updates) let reject_stale_from_skew() tell a sensor that lags the
+  // filter clock (its own stream still advances: skew, reject) from a genuine
+  // time-base reset (its own stream jumped backward too: fall through and let
+  // predict_to re-base). -1 = no history yet.
+  double last_imu_raw_stamp_    = -1.0;
+  double last_orient_raw_stamp_ = -1.0;
+  double last_enc_raw_stamp_    = -1.0;
+  double last_mag_raw_stamp_    = -1.0;
+  double last_hdg_raw_stamp_    = -1.0;
+  int imu_stale_rejects_     = 0;   // update_imu + update_imu_orientation combined
+  int enc_stale_rejects_     = 0;
+  int mag_stale_rejects_     = 0;
+  int hdg_stale_rejects_     = 0;
+  bool reject_stale_from_skew(double timestamp_seconds,
+                              double& last_raw_stamp,
+                              int& stale_counter);
+  // Whether the current rejection sequence began after a GPS gap. Captured at
+  // the first rejection of a sequence and used to gate rejection-triggered
+  // coast so a continuous outlier (spike) cannot inflate P to defeat the gate.
+  bool reject_after_gap_         = false;
   // Recovery mode: after a timeout-triggered coast, accept the first returning
   // GPS fix unconditionally (bypass chi2 gate). After 7+ minutes blind, dead
   // reckoning error can be hundreds of meters, far outside the chi2 gate.

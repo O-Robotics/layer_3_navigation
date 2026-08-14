@@ -23,6 +23,12 @@ string heading_source  # NONE | GPS_TRACK | IMU_ORIENTATION | DUAL_ANTENNA | MAG
 bool  gnss_in_coast
 int32 gnss_consecutive_rejects
 
+# Reason the most recent GNSS fix was rejected (empty until the first rejection):
+# FIX_TYPE_LOW | HDOP_HIGH | VDOP_HIGH | MIN_SATS | CHI2_FAILED | DELAY_TOO_LARGE |
+# IMPLAUSIBLE_JUMP. Quality-gate and delay rejects do NOT count toward
+# gnss_outlier_count, so this is the only field that reveals why a fix was dropped.
+string gnss_last_reject_reason
+
 # Distance traveled since init (meters): heading observable above 5m
 float64 distance_traveled_m
 
@@ -31,3 +37,11 @@ int32 gnss_outlier_count
 int32 imu_outlier_count
 int32 encoder_outlier_count
 int32 mag_outlier_count
+
+# Stale-measurement rejections from inter-sensor clock skew: the sensor's stamps
+# run more than max_measurement_delay behind the filter clock while another
+# sensor's stamps drive it ahead (sensors not on a common time base). A climbing
+# count means that sensor is NOT being fused at all; fix the drivers' clocks.
+# These are not outliers: the data may be perfect, the timestamps disagree.
+int32 imu_stale_reject_count
+int32 encoder_stale_reject_count

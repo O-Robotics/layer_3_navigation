@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cmath>
 #include "fusioncore/ukf.hpp"
 #include "fusioncore/state.hpp"
 #include "fusioncore/sensors/gnss.hpp"
@@ -249,6 +250,274 @@ TEST(GNSSTest, StefanConfigurationFullFusion) {
   EXPECT_EQ(status.imu_health,     SensorHealth::OK);
   EXPECT_EQ(status.encoder_health, SensorHealth::OK);
   EXPECT_GT(status.update_count,   0);
+}
+
+// ─── Rejection reason surfaces in status (field + offline observability) ─────
+// Quality-gate rejects (HDOP/VDOP/fix-type/sats) and delay rejects do NOT
+// increment gnss_outliers, so before this the only signal was a throttled log
+// line. The reason of the last rejected fix must reach get_status() so it lands
+// in filter_health for live field debugging and offline bag analysis. Grounded
+// in a real hardware session where an M9N was silently rejected on VDOP.
+TEST(GNSSTest, RejectionReasonSurfacesInStatus) {
+  FusionCoreConfig config;                 // defaults: max_hdop 4, max_vdop 6, min_sats 4
+  FusionCore fc(config);
+
+  State initial;
+  initial.x = StateVector::Zero();
+  initial.P = StateMatrix::Identity() * 0.1;
+  fc.init(initial, 0.0);
+
+  // Fresh filter: nothing rejected yet.
+  EXPECT_EQ(fc.get_status().gnss_last_rejection_reason,
+            GnssRejectionReason::NOT_PROCESSED);
+
+  // Horizontally fine, vertically poor: must report VDOP_HIGH. This is the exact
+  // case the rover's M9N hit, which used to fail silently.
+  GnssFix vbad;
+  vbad.fix_type   = GnssFixType::GPS_FIX;
+  vbad.satellites = 10;
+  vbad.hdop       = 1.0;
+  vbad.vdop       = 20.0;                  // > max_vdop 6.0
+  EXPECT_FALSE(fc.update_gnss(1.0, vbad));
+  EXPECT_EQ(fc.get_status().gnss_last_rejection_reason,
+            GnssRejectionReason::VDOP_HIGH);
+
+  // Too few satellites: must report MIN_SATS.
+  GnssFix sbad;
+  sbad.fix_type   = GnssFixType::GPS_FIX;
+  sbad.satellites = 2;                     // < min_satellites 4
+  sbad.hdop       = 1.0;
+  sbad.vdop       = 1.0;
+  EXPECT_FALSE(fc.update_gnss(2.0, sbad));
+  EXPECT_EQ(fc.get_status().gnss_last_rejection_reason,
+            GnssRejectionReason::MIN_SATS);
+}
+
+
+// ─── The issue #73 gate: metres must not be judged against DOP thresholds ────
+//
+// A NavSatFix carries no DOP. The node derives sqrt(variance) from the message
+// covariance, which is METRES, and that used to be compared against max_hdop
+// (4.0) and max_vdop (6.0). Those read like dimensionless DOP limits, so they
+// looked generous while actually meaning "reject anything worse than 4 m
+// horizontal". A working RTK setup had every fix vetoed as VDOP_HIGH and the
+// filter silently dead-reckoned. Reported by JR-pT on issue #73.
+
+TEST(GNSSTest, SigmaGateAcceptsOrdinaryStandaloneGps) {
+  GnssParams params;   // defaults: max_sigma_xy 25 m, max_sigma_z 50 m
+
+  // Exactly what a healthy standalone receiver reports, and precisely the
+  // numbers from issue #73: 2 m horizontal, 8 m vertical. Both of these
+  // exceed max_hdop 4.0 / max_vdop 6.0 if misread as DOP.
+  GnssFix fix;
+  fix.fix_type   = GnssFixType::GPS_FIX;
+  fix.satellites = 8;
+  fix.hdop       = 2.0;   // metres, kept for the noise scale factor
+  fix.vdop       = 8.0;
+  fix.sigma_xy   = 2.0;   // metres, what the gate must read
+  fix.sigma_z    = 8.0;
+
+  EXPECT_TRUE(fix.has_sigma());
+  EXPECT_TRUE(fix.is_valid(params))
+      << "a 2 m / 8 m fix is ordinary standalone GPS and must be fused";
+}
+
+TEST(GNSSTest, SigmaGateStillRejectsGarbage) {
+  GnssParams params;
+
+  GnssFix wide;
+  wide.fix_type   = GnssFixType::GPS_FIX;
+  wide.satellites = 8;
+  wide.hdop = wide.sigma_xy = 40.0;   // 40 m horizontal: not usable
+  wide.vdop = wide.sigma_z  = 10.0;
+  EXPECT_FALSE(wide.is_valid(params));
+
+  GnssFix tall;
+  tall.fix_type   = GnssFixType::GPS_FIX;
+  tall.satellites = 8;
+  tall.hdop = tall.sigma_xy = 3.0;
+  tall.vdop = tall.sigma_z  = 80.0;   // 80 m vertical
+  EXPECT_FALSE(tall.is_valid(params));
+}
+
+TEST(GNSSTest, SigmaPathIgnoresDopThresholds) {
+  GnssParams params;
+  params.max_hdop = 0.1;   // absurdly strict, must not apply
+  params.max_vdop = 0.1;
+
+  GnssFix fix;
+  fix.fix_type   = GnssFixType::GPS_FIX;
+  fix.satellites = 8;
+  fix.hdop = fix.sigma_xy = 3.0;
+  fix.vdop = fix.sigma_z  = 5.0;
+
+  EXPECT_TRUE(fix.is_valid(params))
+      << "when a covariance is present the DOP limits are the wrong units "
+         "and must be bypassed entirely";
+}
+
+TEST(GNSSTest, DopGateStillAppliesWithoutCovariance) {
+  // Regression guard: a receiver reporting genuine DOP and no covariance must
+  // keep the original behaviour, so max_hdop/max_vdop stay meaningful.
+  GnssParams params;
+
+  GnssFix fix;
+  fix.fix_type   = GnssFixType::GPS_FIX;
+  fix.satellites = 8;
+  fix.hdop       = 5.0;    // > max_hdop 4.0
+  fix.vdop       = 2.0;
+  EXPECT_FALSE(fix.has_sigma());
+  EXPECT_FALSE(fix.is_valid(params));
+}
+
+TEST(GNSSTest, SigmaRejectionNamesTheGateThatFired) {
+  FusionCoreConfig config;
+  FusionCore fc(config);
+
+  State initial;
+  initial.x = StateVector::Zero();
+  initial.P = StateMatrix::Identity() * 0.1;
+  fc.init(initial, 0.0);
+
+  // Wide horizontally: must say SIGMA_XY_HIGH, not HDOP_HIGH. Naming the wrong
+  // gate is what sent issue #73 tuning a parameter that was never involved.
+  GnssFix wide;
+  wide.fix_type   = GnssFixType::GPS_FIX;
+  wide.satellites = 8;
+  wide.hdop = wide.sigma_xy = 40.0;
+  wide.vdop = wide.sigma_z  = 5.0;
+  EXPECT_FALSE(fc.update_gnss(1.0, wide));
+  EXPECT_EQ(fc.get_status().gnss_last_rejection_reason,
+            GnssRejectionReason::SIGMA_XY_HIGH);
+
+  GnssFix tall;
+  tall.fix_type   = GnssFixType::GPS_FIX;
+  tall.satellites = 8;
+  tall.hdop = tall.sigma_xy = 2.0;
+  tall.vdop = tall.sigma_z  = 90.0;
+  EXPECT_FALSE(fc.update_gnss(2.0, tall));
+  EXPECT_EQ(fc.get_status().gnss_last_rejection_reason,
+            GnssRejectionReason::SIGMA_Z_HIGH);
+
+  // And a good one gets through, so the gate is not simply rejecting everything.
+  GnssFix ok;
+  ok.fix_type   = GnssFixType::GPS_FIX;
+  ok.satellites = 8;
+  ok.hdop = ok.sigma_xy = 2.0;
+  ok.vdop = ok.sigma_z  = 8.0;
+  EXPECT_TRUE(fc.update_gnss(3.0, ok));
+}
+
+
+// ─── GPS track heading must not fight a better heading source (issue #73) ────
+//
+// GPS track heading is course over ground. On a curved path that differs from
+// body heading by a real bias, not just noise, so fusing it corrupts the
+// estimate no matter how honest its R is. A user on a Nav2 path reported a
+// straight route without GPS turning into a zig-zag with it, on a robot whose
+// magnetometer was perfectly stable.
+
+namespace {
+// Drive east in a straight line at `speed`, feeding GPS every `gps_every_s`.
+// Returns the filter so the caller can inspect what the heading fusion did.
+// Drive at `speed` with a constant `yaw_rate`, feeding GPS at 1 Hz. The GPS
+// track follows the SAME arc the robot is driving, so a turning case stays
+// physically consistent and the fix is not rejected as an outlier.
+// with_orientation: also call update_imu_orientation, which is what a 9-axis
+// driver does and what makes heading_source_ become IMU_ORIENTATION.
+void drive_arc(FusionCore& fc, double to_s, double speed,
+               double yaw_rate, bool with_orientation) {
+  const double dt = 0.01, g = 9.80665;
+  for (int step = 1; step * dt <= to_s + 1e-9; ++step) {
+    double t   = step * dt;
+    double yaw = yaw_rate * t;
+    fc.update_imu(t, 0, 0, yaw_rate, 0, 0, g);
+    if (with_orientation) fc.update_imu_orientation(t, 0.0, 0.0, yaw);
+    if (step % 2 == 0) fc.update_encoder(t, speed, 0.0, yaw_rate);
+    if (step % 100 == 0) {
+      // Exact arc: straight line degenerates correctly as yaw_rate -> 0.
+      double x, y;
+      if (std::abs(yaw_rate) < 1e-9) { x = speed * t;               y = 0.0; }
+      else                           { x = speed / yaw_rate * std::sin(yaw);
+                                       y = speed / yaw_rate * (1.0 - std::cos(yaw)); }
+      GnssFix f;
+      f.x = x; f.y = y; f.z = 0.0;
+      f.hdop = f.sigma_xy = 2.0;
+      f.vdop = f.sigma_z  = 3.0;
+      f.satellites = 10;
+      f.fix_type = GnssFixType::GPS_FIX;
+      fc.update_gnss(t, f);
+    }
+  }
+}
+} // namespace
+
+TEST(GNSSTest, TrackHeadingSkippedWhenImuOrientationIsAbsolute) {
+  // A 9-axis IMU makes heading_source_ IMU_ORIENTATION, which outranks
+  // GPS_TRACK. Track heading must then stand down entirely.
+  FusionCoreConfig cfg;
+  cfg.imu_has_magnetometer = true;          // 9-axis: orientation IS a heading
+  cfg.motion_model = create_motion_model("DifferentialDrive");
+  FusionCore fc(cfg);
+  State s0; fc.init(s0, 0.0);
+
+  drive_arc(fc, 20.0, 1.0, 0.0, /*with_orientation=*/true);
+
+  EXPECT_EQ(fc.get_status().heading_source, HeadingSource::IMU_ORIENTATION);
+  EXPECT_TRUE(fc.get_gnss_debug().track_heading_skipped_stronger_source)
+      << "GPS track heading fused on top of an absolute IMU heading";
+}
+
+TEST(GNSSTest, TrackHeadingStillRunsWithoutAnAbsoluteSource) {
+  // Regression guard for the opposite direction: a 6-axis IMU has no absolute
+  // heading, so GPS track heading is the only thing that can supply one and
+  // must keep working exactly as before.
+  FusionCoreConfig cfg;
+  cfg.imu_has_magnetometer = false;         // 6-axis: gyro yaw drifts
+  cfg.motion_model = create_motion_model("DifferentialDrive");
+  FusionCore fc(cfg);
+  State s0; fc.init(s0, 0.0);
+
+  drive_arc(fc, 20.0, 1.0, 0.0, /*with_orientation=*/false);
+
+  EXPECT_FALSE(fc.get_gnss_debug().track_heading_skipped_stronger_source);
+  EXPECT_TRUE(fc.get_status().heading_validated)
+      << "GPS track heading failed to validate heading on a 6-axis robot";
+  EXPECT_EQ(fc.get_status().heading_source, HeadingSource::GPS_TRACK);
+}
+
+TEST(GNSSTest, TrackHeadingSkippedWhileTurningHard) {
+  // gps_track_heading_max_yaw_rate has always been documented as guarding this
+  // fusion, but it only gated the heading_validated_ flag: the fusion itself ran
+  // unguarded, so a turning robot fused its course over ground as body heading.
+  FusionCoreConfig cfg;
+  cfg.imu_has_magnetometer = false;         // no stronger source, so only the
+  cfg.motion_model = create_motion_model("DifferentialDrive");
+  cfg.gps_track_heading_max_yaw_rate = 0.3; // motion gate can be responsible
+  FusionCore fc(cfg);
+  State s0; fc.init(s0, 0.0);
+
+  // Turning at 0.8 rad/s, well above the 0.3 limit, on a consistent arc.
+  drive_arc(fc, 20.0, 1.0, 0.8, /*with_orientation=*/false);
+
+  EXPECT_TRUE(fc.get_gnss_debug().track_heading_skipped_motion)
+      << "track heading fused while the robot was turning at 0.8 rad/s";
+}
+
+TEST(GNSSTest, TrackHeadingSkippedWhenTooSlowToHaveACourse) {
+  // Below min_speed the displacement is GPS noise, not travel, so its bearing
+  // is meaningless.
+  FusionCoreConfig cfg;
+  cfg.imu_has_magnetometer = false;
+  cfg.motion_model = create_motion_model("DifferentialDrive");
+  cfg.gps_track_heading_min_speed = 0.2;
+  FusionCore fc(cfg);
+  State s0; fc.init(s0, 0.0);
+
+  drive_arc(fc, 20.0, 0.05, 0.0, /*with_orientation=*/false);  // 5 cm/s vs 0.2 limit
+
+  EXPECT_TRUE(fc.get_gnss_debug().track_heading_skipped_motion)
+      << "track heading fused a bearing derived from noise at 0.05 m/s";
 }
 
 int main(int argc, char** argv) {

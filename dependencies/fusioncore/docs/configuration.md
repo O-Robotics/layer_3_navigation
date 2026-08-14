@@ -61,6 +61,11 @@ fusioncore:
     imu2.remove_gravitational_acceleration: false
 
     # ── Wheel encoders ────────────────────────────────────────────────────────
+    # Wheel odometry topic (nav_msgs/Odometry; only the twist is fused).
+    # The default is deliberately NOT the conventional /odom: FusionCore publishes
+    # its own fused odometry, so subscribing to /odom would invite a feedback loop
+    # with its own output. Point this at your driver's topic instead.
+    encoder.topic: "/odom/wheels"   # e.g. "/odom" or "/diff_drive_controller/odom"
     encoder.vel_noise: 0.05     # m/s
     encoder.yaw_noise: 0.02     # rad/s
 
@@ -81,6 +86,11 @@ fusioncore:
     encoder2.yaw_noise: 0.02    # rad/s fallback when message covariance is zero
 
     # ── GPS ───────────────────────────────────────────────────────────────────
+    # Primary GPS fix topic. Read as sensor_msgs/NavSatFix, or gps_msgs/GPSFix
+    # when gnss.use_gps_fix is true (below). Set this to your driver's topic
+    # rather than writing a launch remap.
+    gnss.fix_topic: "/gnss/fix"  # e.g. "/fix", "/ublox/fix", "/gps/fix"
+
     gnss.base_noise_xy: 1.0     # m: baseline sigma at HDOP=1
                                 # scaled automatically by HDOP from the message
                                 # standard autonomous GPS: 1.0–2.5
@@ -88,7 +98,16 @@ fusioncore:
     gnss.base_noise_z: 2.0      # m
     gnss.heading_noise: 0.02    # rad: for dual antenna heading
 
-    gnss.max_hdop: 4.0          # reject fixes with HDOP worse than this
+    # Quality gate. Which pair applies depends on what your receiver publishes,
+    # and getting this wrong is silent: rejected fixes leave the filter dead
+    # reckoning with nothing but a throttled log line to say so.
+    gnss.max_sigma_xy: 25.0     # m of reported 1-sigma. THIS is the gate that runs
+    gnss.max_sigma_z: 50.0      # for sensor_msgs/NavSatFix, which carries no DOP.
+                                # A standalone receiver reports 2-8 m horizontal and
+                                # 10-25 m vertical in normal conditions, all usable.
+    gnss.max_hdop: 4.0          # dimensionless DOP. Only applies when the fix has no
+    gnss.max_vdop: 6.0          # covariance at all, i.e. gps_msgs/GPSFix reporting
+                                # receiver-native DOP.
     gnss.min_satellites: 4
     gnss.min_fix_type: 1        # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
                                 # NavSatFix: status=2 maps to RTK_FIXED. RTK_FLOAT (3)
@@ -96,7 +115,7 @@ fusioncore:
                                 # below if your receiver publishes gps_msgs/GPSFix.
 
     gnss.use_gps_fix: false     # Set true when your driver publishes gps_msgs/GPSFix
-                                # on /gnss/fix instead of sensor_msgs/NavSatFix.
+                                # on gnss.fix_topic instead of sensor_msgs/NavSatFix.
                                 # GPSFix unlocks RTK_FLOAT status, uses receiver-native
                                 # hdop/vdop values, satellites_used, and err_horz/err_vert
                                 # as a fallback covariance. Default false: NavSatFix works
@@ -178,6 +197,19 @@ fusioncore:
     # Corrects for elliptical distortion in the magnetic field.
     # Estimated alongside hard iron using imu_calib or magneto.
 
+    magnetometer.field_strength: 0.0
+    # Local Earth total-field magnitude, in the SAME units as the incoming reading
+    # (e.g. ~0.48 for Gauss, ~48 for microtesla). A clean reading's corrected
+    # magnitude equals this; a nearby motor or steel structure distorts it and
+    # produces a wrong heading the chi2 gate cannot reliably catch. When the
+    # magnitude deviates by more than field_tolerance the reading is rejected.
+    # Look up the total field at https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml
+    # 0.0 = disabled (no magnitude check).
+
+    magnetometer.field_tolerance: 0.2
+    # Allowed fractional deviation of the field magnitude before a reading is
+    # treated as locally disturbed. 0.2 = accept within +-20% of field_strength.
+
     # ── GPS coast mode ────────────────────────────────────────────────────────
     # During GPS blackouts, inflates process noise so P grows and the chi2 gate
     # relaxes by the time GPS resumes. Prevents the filter from rejecting its
@@ -186,6 +218,15 @@ fusioncore:
 
     gnss.coast_n: 3
     # Consecutive chi2 GPS rejections before entering coast mode. 0 = disabled.
+
+    gnss.coast_min_gap_s: 1.0
+    # Rejection-triggered coast only fires if the rejection streak began after a
+    # GPS gap of at least this many seconds (the receiver actually went silent and
+    # the filter dead-reckoned). A continuously present GPS that keeps failing the
+    # chi2 gate is a persistent outlier (e.g. a sustained multipath spike), not
+    # filter drift, so inflating P to re-admit it would let the outlier defeat the
+    # gate. Gating on a preceding gap keeps a sustained spike rejected for its full
+    # duration while preserving post-outage re-acquisition. 0 = old behavior.
 
     gnss.coast_q_factor: 10.0
     # Q_position multiplier in coast mode. Controls how fast position uncertainty
@@ -251,6 +292,19 @@ fusioncore:
     # it active during straight/gentle-curve driving where it genuinely helps.
     # Rule of thumb: lever_arm_m * sin(threshold_rad) should be < GPS noise sigma.
 
+    # ── Measurement timing ────────────────────────────────────────────────────
+    max_measurement_delay: 0.5
+    # How far behind the filter clock (seconds) a measurement can be and still be
+    # used. GPS and VSLAM within this window are retrodicted: the filter rewinds
+    # to the measurement's timestamp, fuses, and replays the buffered IMU forward.
+    # Other sensors arriving older than this are rejected as stale, because fusing
+    # them would require moving the filter clock backward.
+    # Raise it only for a sensor with a genuinely large, KNOWN latency. If the
+    # stale_reject counters in /fusion/debug/filter_health climb, the cause is
+    # almost always sensors on different clocks, not a too-small window: check
+    # that every sensor's header.stamp agrees (see the troubleshooting guide) and
+    # fix the drivers rather than widening this.
+
     # ── Outlier rejection ─────────────────────────────────────────────────────
     outlier_rejection: true
     outlier_threshold_gnss: 16.27   # chi2(3, 0.999): 3D GPS position
@@ -264,6 +318,30 @@ fusioncore:
     # this gate rejects those jumps automatically when covariance is calibrated.
     # Do NOT lower these below chi2 critical values. At 7.0 normal GPS noise
     # trips the gate and every fix gets rejected.
+
+    gnss.max_speed: 0.0
+    # Physical-plausibility gate on GPS position. Rejects any fix farther from the
+    # filter's predicted position than the robot could have moved or drifted since
+    # the last accepted fix: max_speed * gap_seconds + max_speed_margin. This is a
+    # kinematic backstop that catches an impossible GPS jump the chi2 gate may
+    # admit when its covariance has been inflated during coast recovery. Set to the
+    # platform's maximum plausible speed in m/s (a few times cruise is safe); this
+    # is a per-robot spec like wheel radius, not per-run tuning. 0.0 = disabled.
+    gnss.max_speed_margin: 5.0
+    # Fixed slack (m) added to the bound, covering prediction error that the
+    # receiver's own noise does not explain. 3-5 m is typical.
+    gnss.max_speed_sigma_k: 5.0
+    # Multiples of the receiver's REPORTED horizontal sigma also added to the
+    # bound, so the gate adapts to the receiver instead of being a fixed distance.
+    # This matters more than it looks. With sigma_k at 0 the whole bound is
+    # absolute metres: at 1 Hz with max_speed 2.0 and a 5 m margin it is 7 m,
+    # and a standalone receiver whose own sigma is ~6 m then trips it constantly.
+    # Measured on a u-blox M9N: 157 of 500 good fixes rejected, loop closure
+    # 2.62 m -> 7.27 m. The full bound is:
+    #     max_speed * gap  +  max_speed_margin  +  sigma_k * reported_sigma_xy
+    # Scaled by the RECEIVER's sigma deliberately, never by the filter's own
+    # covariance: chi2 is already the covariance-scaled test, and this gate exists
+    # precisely to catch what a coast-inflated chi2 lets through.
 
     # ── Adaptive noise ────────────────────────────────────────────────────────
     adaptive.imu: true
@@ -458,11 +536,21 @@ reference.use_first_fix: true
 
 ## GPS receiver setup: NavSatFix vs GPSFix
 
-FusionCore supports two GPS message types on `/gnss/fix`. The default is `sensor_msgs/NavSatFix` because every ROS GPS driver publishes it. Set `gnss.use_gps_fix: true` to switch to `gps_msgs/GPSFix` if your driver supports it.
+FusionCore supports two GPS message types on `gnss.fix_topic` (default `/gnss/fix`). The default is `sensor_msgs/NavSatFix` because every ROS GPS driver publishes it. Set `gnss.use_gps_fix: true` to switch to `gps_msgs/GPSFix` if your driver supports it.
+
+!!! note "`nmea_navsat_driver` does NOT publish `gps_msgs/GPSFix`"
+
+    An earlier version of this table listed it as a `GPSFix` source. That was
+    wrong, reported by a user on issue #73. Checked against the driver source:
+    it publishes `sensor_msgs/NavSatFix` on `fix`, `geometry_msgs/TwistStamped`
+    on `vel`, `geometry_msgs/QuaternionStamped` on `heading`, and
+    `sensor_msgs/TimeReference`. If you are on `nmea_navsat_driver`, leave
+    `gnss.use_gps_fix` at `false`. To get `GPSFix` from an NMEA receiver, run
+    `fix_translator` from `gps_umd`, which converts `NavSatFix` to `GPSFix`.
 
 | | `sensor_msgs/NavSatFix` | `gps_msgs/GPSFix` |
 |---|---|---|
-| Driver support | Universal | nmea_navsat_driver, ublox_dgnss, others |
+| Driver support | Universal | gpsd_client (gps_umd), septentrio_gnss_driver, swiftnav-ros2, KumarRobotics/ublox |
 | RTK_FLOAT status | Not expressible | Yes (status 20) |
 | Separate HDOP / VDOP | No | Yes |
 | Satellites used | No | Yes |

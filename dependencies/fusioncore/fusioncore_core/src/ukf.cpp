@@ -37,6 +37,17 @@ void UKF::compute_weights() {
   int n_sigma = 2 * n_aug_ + 1;
   Wm_.resize(n_sigma);
   Wc_.resize(n_sigma);
+  // WARNING: with 23 states and the default alpha=0.1 this gives Wm[0] = -99 and
+  // Wi = +2.17, so every mean is reconstructed as a difference of huge nearly
+  // cancelling numbers and any floating-point asymmetry is amplified about 100x.
+  // The generate_sigma_points() comment below records this already causing
+  // orientation drift once. Measured 2026-08-03 on a real field bag: raising
+  // alpha to 0.5 (Wm[0] = -3.0) cut spurious position motion by 23 percent.
+  //
+  // It is NOT the whole story: alpha=1.0, which gives a perfectly conditioned
+  // Wm[0] = 0, is worse again, so this is a U-curve rather than a cancellation
+  // collapse. Raising alpha is still worth doing, but it changes every filter
+  // output and must go through tools/check_benchmark_regression.py first.
   Wm_[0] = lambda_ / (n_aug_ + lambda_);
   Wc_[0] = Wm_[0] + (1.0 - params_.alpha * params_.alpha + params_.beta);
   double w = 0.5 / (n_aug_ + lambda_);
@@ -67,9 +78,9 @@ Eigen::MatrixXd UKF::generate_sigma_points() {
   state_.P = (state_.P + state_.P.transpose()) * 0.5;
 
   // Without gyro measurements, P(WX/WY/WZ) grows unboundedly via q_angular_vel
-  // each predict step. The kinematic WZ?QZ coupling then makes P near-singular,
+  // each predict step. The kinematic WZ→QZ coupling then makes P near-singular,
   // triggering the identity-shift Cholesky repair which introduces asymmetry that
-  // Wm[0]?-99 amplifies into QZ drift. Cap at a physically large but finite bound.
+  // Wm[0]≈-99 amplifies into QZ drift. Cap at a physically large but finite bound.
   constexpr double kMaxAngVelVar = 1.0;
   state_.P(WX,WX) = std::min(state_.P(WX,WX), kMaxAngVelVar);
   state_.P(WY,WY) = std::min(state_.P(WY,WY), kMaxAngVelVar);
@@ -83,7 +94,7 @@ Eigen::MatrixXd UKF::generate_sigma_points() {
     // P has developed negative eigenvalues (common under sustained high-rate IMU
     // updates where the K*S*K^T subtraction overshoots in the bias dimensions).
     // Fix: identity shift: add eps*I to raise all eigenvalues by |min_eigenvalue|.
-    // Unlike the V*max(?,?)*V^T clamp, a shift preserves the eigenvectors and keeps
+    // Unlike the V*max(λ,ε)*V^T clamp, a shift preserves the eigenvectors and keeps
     // large position/velocity eigenvalues intact.  The clamp approach destroys them
     // because P's eigenvectors mix position and bias components after cross-coupling,
     // so clamping bias eigenvalues to 1e-9 also collapses position uncertainty when
@@ -93,8 +104,28 @@ Eigen::MatrixXd UKF::generate_sigma_points() {
     state_.P += StateMatrix::Identity() * (-min_eigen + 1e-9);
     P_reg = (n_aug_ + lambda_) * state_.P + StateMatrix::Identity() * 1e-6;
     llt.compute(P_reg);
-    if (llt.info() != Eigen::Success)
-      throw std::runtime_error("FusionCore: Cholesky decomposition failed after P repair");
+    if (llt.info() != Eigen::Success) {
+      // Last resort: rebuild P from its eigendecomposition with all eigenvalues
+      // floored to a small positive value. This always yields a PSD matrix, so
+      // the filter degrades gracefully and re-converges when good measurements
+      // return, instead of aborting the whole process. Flooring can shrink some
+      // uncertainty dimensions (the identity shift above is tried first precisely
+      // to avoid that), but a briefly over-confident filter is recoverable; a
+      // crash is not. Reaching here means the state was already badly corrupted
+      // (e.g. by replay clock chaos), which the predict_to re-sync guards upstream.
+      Eigen::SelfAdjointEigenSolver<StateMatrix> es_full(state_.P);
+      Eigen::Matrix<double, STATE_DIM, 1> ev = es_full.eigenvalues().cwiseMax(1e-9);
+      state_.P = es_full.eigenvectors() * ev.asDiagonal() * es_full.eigenvectors().transpose();
+      state_.P = (state_.P + state_.P.transpose()) * 0.5;
+      P_reg = (n_aug_ + lambda_) * state_.P + StateMatrix::Identity() * 1e-6;
+      llt.compute(P_reg);
+      if (llt.info() != Eigen::Success) {
+        // Absolute last resort: reset to a safe diagonal covariance. Never throw.
+        state_.P = StateMatrix::Identity();
+        P_reg = (n_aug_ + lambda_) * state_.P + StateMatrix::Identity() * 1e-6;
+        llt.compute(P_reg);
+      }
+    }
   }
   StateMatrix L = llt.matrixL();
   sigma.col(0) = state_.x;
@@ -208,7 +239,9 @@ Eigen::Matrix<double, z_dim, 1> UKF::update(
   // when S is near-singular. K = Pxz * S^{-1} = (S^{-1} * Pxz^T)^T.
   auto S_ldlt = S.ldlt();
   PxzMatrix K = S_ldlt.solve(Pxz.transpose()).transpose();
-  state_.x = normalize_state(state_.x + K * innovation);
+  const StateVector correction = K * innovation;
+  last_pos_correction_ = std::hypot(correction[X], correction[Y]);
+  state_.x = normalize_state(state_.x + correction);
   state_.P -= K * S * K.transpose();
   // Symmetrize after each update to prevent floating-point asymmetry from
   // accumulating across the ~100 Hz IMU + 1 Hz GPS update stream.

@@ -11,7 +11,33 @@ namespace fusioncore {
 // UKF tuning parameters
 struct UKFParams {
   // Sigma point spread: standard defaults, rarely need changing
-  double alpha = 0.1;    // spread of sigma points around mean (1e-4 to 1.0)
+  // Sigma-point spread. MUST stay at 1.0 unless you have re-measured; this is
+  // not a free tuning knob at 23 states.
+  //
+  // The UKF mean is sum(W_i * sigma_i) with W[0] = lambda/(n+lambda) and
+  // lambda = alpha^2*(n+kappa) - n. With kappa = 0 and n = 23, ANY alpha below 1
+  // makes the CENTRE weight negative, and it gets extreme fast: alpha = 0.1, the
+  // previous default, gives Wm[0] = -99.0 with the other 46 weights at +2.17.
+  //
+  // That is formally correct only for a tight sigma-point cluster. Yaw is
+  // structurally unobservable without an absolute heading source, so the
+  // quaternion sigma points spread wide, their forward displacements cancel each
+  // other, and what survives is the centre point (the one pointing correctly
+  // forward) multiplied by -99. The filter then drives BACKWARDS while reporting
+  // a perfect velocity and a perfect heading.
+  //
+  // Measured with a perfect encoder at 1 m/s over 60 s (tools/repro/dr.cpp),
+  // truth x = 60.00 m:
+  //     alpha 0.1  Wm[0] -99.00   x = -114.06   <- previous default
+  //     alpha 0.5  Wm[0]  -3.00   x =    8.83
+  //     alpha 1.0  Wm[0]   0.00   x =   48.43
+  // And on NCLT 2013-04-05 at 1x playback: 5268.80 m -> 131.85 m ATE, a 97.5%
+  // reduction, with robot_localization unchanged at ~230 m as the control.
+  //
+  // alpha = 1.0 gives lambda = 0 and all 47 weights non-negative: the standard
+  // unscaled UKF. Lowering alpha to "tighten" the sigma points does the opposite
+  // of what it does in a low-dimensional filter.
+  double alpha = 1.0;
   double beta  = 2.0;    // prior knowledge of distribution (2.0 = Gaussian)
   double kappa = 0.0;    // secondary scaling (0.0 is standard)
 
@@ -76,6 +102,17 @@ public:
   // Scale applied to position diagonal of Q during inertial coast mode.
   // 1.0 = normal operation; > 1.0 = inflated position uncertainty.
   void set_position_noise_scale(double s) { pos_noise_scale_ = s; }
+
+  // Diagnostic: how far the LAST measurement update moved the position estimate,
+  // in metres, i.e. the norm of the X/Y rows of K * innovation.
+  //
+  // Position should only move by integrating velocity. Anything an update adds
+  // is the P position/velocity cross-covariance dragging it sideways. On the
+  // 2026-08-03 field bag those corrections summed to more than the robot actually
+  // travelled (161 m of correction against 127 m of real motion) while the
+  // integrated velocity was accurate to 0.4 percent. Exposing it per update is
+  // what makes that attributable to a specific sensor instead of guessable.
+  double last_position_correction() const { return last_pos_correction_; }
   double position_noise_scale() const     { return pos_noise_scale_; }
 
   // Scale applied to gyro bias diagonal of Q during GPS coast mode.
@@ -100,6 +137,7 @@ public:
 
 private:
   UKFParams params_;
+  double last_pos_correction_ = 0.0;
   State state_;
   bool   initialized_           = false;
   double pos_noise_scale_       = 1.0;

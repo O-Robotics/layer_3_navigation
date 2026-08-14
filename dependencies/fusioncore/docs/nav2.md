@@ -1,6 +1,6 @@
 # Nav2 Integration
 
-FusionCore is a drop-in odometry source for Nav2. It publishes everything Nav2 needs out of the box.
+FusionCore is a drop-in odometry source for Nav2.
 
 | FusionCore output | Nav2 uses it for |
 |---|---|
@@ -8,6 +8,11 @@ FusionCore is a drop-in odometry source for Nav2. It publishes everything Nav2 n
 | `odom → base_link` TF | Costmaps and planners read this directly |
 | `/fusion/pose` | AMCL initial pose, slam_toolbox pose input |
 | `/diagnostics` | Nav2-compatible format |
+
+Two things it does **not** publish, so you know where the boundary is:
+
+- **No `map → odom` TF.** FusionCore is an odometry source, not a global localizer. The bundled `nav2_params.yaml` therefore runs every costmap and planner with `global_frame: odom`, which is the correct setup for GPS navigation with no prior map. If you set `global_frame: map` you need something else publishing `map → odom`: AMCL against a static map, slam_toolbox, or a static identity transform.
+- **No map.** There is no static map and no AMCL in the GPS path. Planning happens on the local rolling costmap with `allow_unknown: true`.
 
 ---
 
@@ -42,12 +47,53 @@ ros2 launch fusioncore_ros fusioncore_nav2.launch.py \
 
 ## GPS waypoint navigation
 
-Once FusionCore has a GPS fix, the `fromLL` service converts lat/lon to the local map frame for Nav2:
+FusionCore advertises `/fromLL`, which converts lat/lon/alt into the local map frame. This is the service `nav2_waypoint_follower` calls when you send a `FollowGPSWaypoints` goal, so GPS waypoint navigation works against FusionCore with no bridge node and no robot_localization instance running.
+
+Convert a single point by hand:
 
 ```bash
-ros2 service call /fromLL fusioncore_ros/srv/FromLL \
+ros2 service call /fromLL robot_localization/srv/FromLL \
   "{ll_point: {latitude: 43.2557, longitude: -79.8711, altitude: 0.0}}"
 ```
+
+The service returns the point in the local ENU frame anchored at the first GPS fix (or at `reference.x/y/z` if you set an explicit origin). Until a fix arrives the reference is unset, so it returns zeros and logs a warning: wait for `/fusion/odom` before sending waypoints.
+
+!!! note "The service type is `robot_localization/srv/FromLL`, deliberately"
+
+    `nav2_waypoint_follower` has that type compiled into its header, and ROS 2 matches services on name **and** type. A service with identical fields under a different type name is invisible to Nav2's client, which then waits forever without ever reporting an error.
+
+    So FusionCore advertises the type Nav2 expects. Only the interface definition is shared; no robot_localization code is linked or executed, and you do not run a robot_localization node. This is what makes FusionCore a drop-in replacement here rather than a migration that quietly breaks your waypoint following.
+
+    **Versions before 0.3.5** advertised `/fromLL` as `fusioncore_ros/srv/FromLL`. Manual `ros2 service call` worked (you supply the type yourself) but `followGpsWaypoints` hung on `waiting for service to appear`. If you are on 0.3.4 or earlier, upgrade. `fusioncore_ros/srv/FromLL` still exists so old builds compile, but nothing serves it.
+
+Only the single-point `FromLL` service is provided. `FromLLArray`, `ToLL` (map frame back to lat/lon) and `SetDatum` are not. Nav2's GPS waypoint follower uses `FromLL` only, so this covers that path; see the [migration guide](migration_from_robot_localization.md) for the full service comparison.
+
+!!! warning "Humble: Nav2 has no GPS waypoint following at all"
+
+    `FollowGPSWaypoints` does not exist in Humble's Nav2. It was added in Jazzy, and Humble's `nav2_waypoint_follower` neither depends on robot_localization nor calls `/fromLL`. So on Humble this section does not apply: FusionCore still advertises `/fromLL` and you can call it from your own code, but there is no Nav2 GPS waypoint action to plug it into.
+
+    FusionCore itself builds and runs normally on Humble. `robot_localization` is released there (3.5.4-1) with an identical `FromLL.srv`, so the dependency resolves.
+
+---
+
+## Collision monitor
+
+Worth knowing what the bundled `nav2_params.yaml` does here, because it is deliberate and it is not what it looks like.
+
+nav2_bringup's `navigation_launch.py` starts `collision_monitor` unconditionally (Jazzy has no launch argument to turn it off) and lifecycle-manages it, and that node refuses to configure without an `observation_sources` parameter:
+
+```
+[ERROR] [collision_monitor]: Error while getting parameters:
+        parameter 'observation_sources' is not initialized
+```
+
+That is not a cosmetic failure. The collision monitor sits **in the command path**: it subscribes to `cmd_vel_smoothed` and republishes `cmd_vel`, which is the topic your base controller listens to. If it never activates, planning and control run fine, produce velocities, and nothing reaches the wheels. This is what a user hit in [issue #73](https://github.com/manankharwar/fusioncore/issues/73), and before 0.3.5 the bundled config had no `collision_monitor` section at all.
+
+The config now ships one, but read what it actually is:
+
+**It is a pass-through and it provides no obstacle protection.** `observation_sources` and `polygons` are both mandatory and an empty list is rejected by the parameter parser, so there is no way to declare "no sources". Instead one polygon and one source are declared and then disabled, which lets the node activate and hand velocity through untouched. Verified: 0.42 m/s published on `cmd_vel_smoothed` comes out of `cmd_vel` unchanged.
+
+That matches the rest of the bundled config, which targets GPS navigation with no map and no lidar. But do not mistake a running `collision_monitor` for a working one. **If you have a laser**, set both `enabled: True` in the `collision_monitor` section, point `scan.topic` at your real scan topic, and size the polygon radius to your robot. nav2_bringup's own `nav2_params.yaml` has a fuller example using a footprint-approach polygon.
 
 ---
 

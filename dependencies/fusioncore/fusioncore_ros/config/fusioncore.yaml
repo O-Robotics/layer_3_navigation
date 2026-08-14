@@ -54,6 +54,11 @@ fusioncore:
 
     # ── Wheel encoder ─────────────────────────────────────────────────────────
 
+    # Primary wheel odometry topic (nav_msgs/Odometry; the twist is what gets fused).
+    # The default is intentionally not /odom: FusionCore publishes its own fused
+    # odometry, so subscribing to /odom would invite a loop with its own output.
+    # Point this at your driver's topic (/odom, /diff_drive_controller/odom, ...).
+    encoder.topic: "/odom/wheels"
     encoder.vel_noise: 0.05    # m/s: 1-sigma forward velocity noise
     encoder.yaw_noise: 0.02    # rad/s: 1-sigma angular velocity noise
 
@@ -75,10 +80,31 @@ fusioncore:
 
     # ── GNSS position ─────────────────────────────────────────────────────────
 
+    # Primary GNSS fix topic. Read as sensor_msgs/NavSatFix, or gps_msgs/GPSFix
+    # when gnss.use_gps_fix is true. Set this to your driver's topic
+    # (/fix, /ublox/fix, /gps/fix, ...) instead of writing a launch remap.
+    gnss.fix_topic: "/gnss/fix"
+
     gnss.base_noise_xy: 1.0    # meters: base position noise sigma, scaled by HDOP
     gnss.base_noise_z: 2.0     # meters: altitude noise sigma, scaled by VDOP
     gnss.heading_noise: 0.02   # radians: dual-antenna heading noise sigma
-    gnss.max_hdop: 4.0         # fixes with hdop above this are dropped before chi2
+    # Quality gate. TWO pairs, and only one of them applies to your receiver.
+    #
+    # sensor_msgs/NavSatFix carries no DOP, so FusionCore reads the reported
+    # position covariance and gates on METRES of one sigma. That is the usual
+    # case, and max_hdop/max_vdop below never fire at all.
+    gnss.max_sigma_xy: 25.0    # m of horizontal 1-sigma. A standalone receiver
+    gnss.max_sigma_z: 50.0     # reports 2-8 m horizontal and 10-25 m vertical in
+                               # normal conditions, so these are deliberately loose:
+                               # the chi2 test is the real outlier defence, and a
+                               # gate in absolute metres cannot tell a broken fix
+                               # from ordinary noise. Values that merely look strict
+                               # silently veto working GPS.
+    #
+    # These two are dimensionless DOP and apply ONLY when the fix carries no
+    # covariance, i.e. gps_msgs/GPSFix reporting receiver-native DOP.
+    gnss.max_hdop: 4.0
+    gnss.max_vdop: 6.0
     gnss.min_satellites: 4     # minimum satellites required
     # 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
     # Note: sensor_msgs/NavSatFix cannot express RTK_FLOAT (status 2 = RTK_FIXED).

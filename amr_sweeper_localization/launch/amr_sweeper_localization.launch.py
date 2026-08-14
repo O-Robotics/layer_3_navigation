@@ -27,6 +27,31 @@ def _fusioncore_no_ntrip_overrides() -> dict:
         "gnss.base_noise_xy": 50.0,
         "gnss.base_noise_z": 75.0,
         "gnss.track_heading_enabled": False,
+        # Without RTK, a bare autonomous fix (fix_type=1) is the best GNSS
+        # ever gets, and base_noise_xy above is deliberately loosened to
+        # reflect that. But the chi2 gate judges a fix purely against that
+        # noise, so a bigger R makes the SAME threshold tolerate a
+        # proportionally bigger raw error -- ordinary multipath scatter on a
+        # parked or slow-moving robot can then walk the fused position
+        # several meters while looking perfectly "statistically consistent".
+        # gnss.max_speed (fusioncore >=0.3.5's physical-plausibility jump
+        # gate) rejects a fix outright, before chi2 runs, if the offset from
+        # the filter's own prediction implies a speed above this value.
+        # amr_sweeper_drive_controller caps commanded speed at 1.0 m/s
+        # (max_linear_velocity); 3.0 m/s leaves headroom for real motion
+        # while still catching outright teleports. Margin/sigma_k/drift_k
+        # are left at fusioncore's own measured defaults (5.0/5.0/3.0) --
+        # drift_k in particular exists so a legitimate fix isn't rejected
+        # right after a real GPS blackout, and widens with the filter's own
+        # position uncertainty, so it will not reliably catch a few-meter
+        # drift during normal (non-blackout) operation on its own. The
+        # actual fix for that failure mode is fusioncore_core's ukf.alpha
+        # default (now 1.0 as of 0.3.7): the previous 0.1 gave a -99 center
+        # sigma-point weight at this filter's state dimension, which is what
+        # let a modest GNSS-driven position nudge blow up into a runaway
+        # heading estimate. This gate is defense-in-depth on top of that,
+        # not a substitute for it.
+        "gnss.max_speed": 3.0,
     }
 
 
