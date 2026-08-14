@@ -82,6 +82,15 @@ std::string to_lower(std::string value)
   return value;
 }
 
+bool isLocalRouteFrame(const std::string & frame_id)
+{
+  return
+    frame_id == "map" ||
+    frame_id == "odom" ||
+    frame_id == "local" ||
+    frame_id == "base_footprint";
+}
+
 std::string stripQuotes(const std::string & value)
 {
   if (value.size() >= 2U) {
@@ -401,6 +410,29 @@ std::vector<geometry_msgs::msg::PoseStamped> densifyRoute(
   }
 
   return densified;
+}
+
+std::size_t estimateDensifiedRouteSize(
+  const std::vector<geometry_msgs::msg::PoseStamped> & route,
+  const double max_spacing_m)
+{
+  if (route.size() < 2U || max_spacing_m <= 0.0) {
+    return route.size();
+  }
+
+  std::size_t point_count = 1U;
+  for (std::size_t index = 1U; index < route.size(); ++index) {
+    const auto & previous = route.at(index - 1U);
+    const auto & current = route.at(index);
+    const double dx = current.pose.position.x - previous.pose.position.x;
+    const double dy = current.pose.position.y - previous.pose.position.y;
+    const double segment_length = std::hypot(dx, dy);
+    const int subdivisions = std::max(
+      1,
+      static_cast<int>(std::ceil(segment_length / max_spacing_m)));
+    point_count += static_cast<std::size_t>(subdivisions);
+  }
+  return point_count;
 }
 
 std::vector<geometry_msgs::msg::PoseStamped> orientRoute(
@@ -1164,6 +1196,7 @@ MappingNode::MappingNode()
   declare_parameter("georef_lock_max_heading_deviation_deg", 12.0);
   declare_parameter("max_segments_per_goal", 1);
   declare_parameter("max_waypoint_spacing_m", 0.5);
+  declare_parameter("max_mission_route_points", 5000);
   declare_parameter("advance_past_blocked_waypoints", true);
   declare_parameter("max_blocked_waypoint_advances", 20);
   declare_parameter("pad_live_map_to_minimum_size", true);
@@ -1264,6 +1297,8 @@ MappingNode::MappingNode()
   georef_lock_min_samples_ = std::max(1, static_cast<int>(get_parameter("georef_lock_min_samples").as_int()));
   max_segments_per_goal_ = static_cast<int>(get_parameter("max_segments_per_goal").as_int());
   max_waypoint_spacing_m_ = get_parameter("max_waypoint_spacing_m").as_double();
+  max_mission_route_points_ =
+    std::max(2, static_cast<int>(get_parameter("max_mission_route_points").as_int()));
   advance_past_blocked_waypoints_ = get_parameter("advance_past_blocked_waypoints").as_bool();
   max_blocked_waypoint_advances_ =
     std::max(0, static_cast<int>(get_parameter("max_blocked_waypoint_advances").as_int()));
@@ -2998,8 +3033,13 @@ void MappingNode::convertMissionRoute()
   const bool uses_base_footprint_anchor =
     coordinate_frame == "base_footprint" || coordinate_frame == "local";
   const bool uses_geographic_frame = !coordinates.front().use_local_frame;
+  const bool uses_authoritative_map_frame =
+    coordinate_frame == "map" &&
+    useAuthoritativeMissionGeoreference() &&
+    authoritative_saved_costmap_artifact_.has_value() &&
+    authoritative_saved_costmap_artifact_->georeference_valid;
   const bool should_use_seeded_georeference =
-    uses_geographic_frame &&
+    (uses_geographic_frame || uses_authoritative_map_frame) &&
     useAuthoritativeMissionGeoreference() &&
     authoritative_saved_costmap_artifact_.has_value() &&
     authoritative_saved_costmap_artifact_->georeference_valid;
@@ -3082,6 +3122,18 @@ void MappingNode::convertMissionRoute()
       continue;
     }
 
+    if (coordinate.frame_id == "map" && can_use_authoritative_georeference) {
+      const geometry_msgs::msg::Point map_point = projectArtifactPointIntoCurrentMap(
+        *authoritative_saved_costmap_artifact_,
+        seeded_projection,
+        coordinate.x,
+        coordinate.y);
+      pose.pose.position.x = map_point.x;
+      pose.pose.position.y = map_point.y;
+      mission_route_.push_back(pose);
+      continue;
+    }
+
     if (coordinate.use_local_frame) {
       pose.pose.position.x = coordinate.x;
       pose.pose.position.y = coordinate.y;
@@ -3126,6 +3178,19 @@ void MappingNode::convertMissionRoute()
   mission_route_ = buildPoseSequence(coordinates);
   const bool is_builtin_mission = mission_type_.rfind("builtin_", 0) == 0;
   if (!is_builtin_mission) {
+    const std::size_t densified_route_size =
+      estimateDensifiedRouteSize(mission_route_, max_waypoint_spacing_m_);
+    if (densified_route_size > static_cast<std::size_t>(max_mission_route_points_)) {
+      const std::string reason =
+        "mission route rejected before densification because it would expand from " +
+        std::to_string(mission_route_.size()) + " to " +
+        std::to_string(densified_route_size) + " waypoint(s); check route coordinate_frame and units";
+      RCLCPP_ERROR(get_logger(), "%s", reason.c_str());
+      mission_active_ = false;
+      mission_completed_ = true;
+      markMissionTerminal("aborted", reason);
+      return;
+    }
     mission_route_ = densifyRoute(mission_route_, max_waypoint_spacing_m_);
   }
   mission_route_ = orientRoute(std::move(mission_route_));
@@ -3716,10 +3781,7 @@ std::vector<MissionCoordinate> MappingNode::loadRouteCoordinates(const std::stri
       const auto & properties = feature.at("properties");
       if (properties.contains("coordinate_frame") && properties.at("coordinate_frame").is_string()) {
         coordinate_frame = to_lower(properties.at("coordinate_frame").get<std::string>());
-        use_local_frame =
-          coordinate_frame == "odom" ||
-          coordinate_frame == "local" ||
-          coordinate_frame == "base_footprint";
+        use_local_frame = isLocalRouteFrame(coordinate_frame);
       }
     }
 
