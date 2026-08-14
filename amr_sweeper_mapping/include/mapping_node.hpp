@@ -249,6 +249,7 @@ private:
   bool advance_past_blocked_waypoints_{true};
   std::size_t active_chunk_index_{0U};
   int max_segments_per_goal_{1};
+  int max_mission_route_points_{5000};
   int max_blocked_waypoint_advances_{20};
   int consecutive_blocked_waypoint_advances_{0};
   double global_map_resolution_m_{0.05};
