@@ -295,7 +295,10 @@ MapPoseNode::MapPoseNode()
   declare_parameter("scan_translation_update_weight", 0.7);
   declare_parameter("scan_yaw_update_weight", 0.15);
   declare_parameter("heading_yaw_update_weight", 0.85);
-  declare_parameter("gnss_translation_update_weight", 0.8);
+  declare_parameter("gnss_translation_update_weight", 0.2);
+  declare_parameter("gnss_translation_deadband_m", 0.25);
+  declare_parameter("gnss_max_translation_step_m", 0.05);
+  declare_parameter("gnss_translation_update_period_seconds", 1.0);
   declare_parameter("heading_timeout_seconds", 1.0);
   declare_parameter("navsat_timeout_seconds", 2.0);
   declare_parameter("process_noise_diagonal", std::vector<double>{0.01, 0.01, 0.005});
@@ -437,6 +440,15 @@ MapPoseNode::MapPoseNode()
     get_parameter("gnss_translation_update_weight").as_double(),
     0.0,
     1.0);
+  gnss_translation_deadband_m_ = std::max(
+    0.0,
+    get_parameter("gnss_translation_deadband_m").as_double());
+  gnss_max_translation_step_m_ = std::max(
+    0.0,
+    get_parameter("gnss_max_translation_step_m").as_double());
+  gnss_translation_update_period_seconds_ = std::max(
+    0.0,
+    get_parameter("gnss_translation_update_period_seconds").as_double());
   heading_timeout_seconds_ = std::max(
     0.05,
     get_parameter("heading_timeout_seconds").as_double());
@@ -688,15 +700,6 @@ bool MapPoseNode::loadReferenceCostmapFromYaml(const std::string & yaml_path)
 
   reference_georeference_ = georeference;
   reference_georeference_ready_ = georeference.valid;
-  if (georeference.valid) {
-    pending_reference_costmap_ = std::move(reference_map);
-    reference_costmap_ready_ = false;
-    latest_global_costmap_ready_ = false;
-    reference_costmap_projected_ = false;
-    reference_source_ = "immutable_yaml_waiting_for_gnss_anchor";
-    projectReferenceCostmapFromNavSatLocked();
-    return true;
-  }
 
   auto score_field = buildGlobalCostmapScoreField(reference_map);
   if (!score_field) {
@@ -709,65 +712,9 @@ bool MapPoseNode::loadReferenceCostmapFromYaml(const std::string & yaml_path)
   latest_global_costmap_processed_stamp_ = latest_global_costmap_stamp_;
   latest_global_costmap_score_field_ = std::move(score_field);
   reference_costmap_ready_ = true;
-  reference_costmap_projected_ = true;
-  reference_source_ = "immutable_yaml";
+  reference_costmap_projected_ = false;
+  reference_source_ = georeference.valid ? "immutable_yaml_georeferenced" : "immutable_yaml";
   return true;
-}
-
-void MapPoseNode::projectReferenceCostmapFromNavSatLocked()
-{
-  if (
-    reference_costmap_projected_ ||
-    !reference_georeference_ready_ ||
-    !reference_georeference_.valid ||
-    !navsat_reference_ready_ ||
-    !navSatUsable(navsat_reference_) ||
-    pending_reference_costmap_.info.width == 0U ||
-    pending_reference_costmap_.info.height == 0U)
-  {
-    return;
-  }
-
-  const auto & geo = reference_georeference_;
-  const double artifact_origin_x = pending_reference_costmap_.info.origin.position.x;
-  const double artifact_origin_y = pending_reference_costmap_.info.origin.position.y;
-  sensor_msgs::msg::NavSatFix origin_fix = navsat_reference_;
-  origin_fix.longitude =
-    (geo.longitude_coefficients[0] * artifact_origin_x) +
-    (geo.longitude_coefficients[1] * artifact_origin_y) +
-    geo.longitude_coefficients[2];
-  origin_fix.latitude =
-    (geo.latitude_coefficients[0] * artifact_origin_x) +
-    (geo.latitude_coefficients[1] * artifact_origin_y) +
-    geo.latitude_coefficients[2];
-
-  auto projected_map = pending_reference_costmap_;
-  const auto [origin_x, origin_y] = localEastNorthMeters(navsat_reference_, origin_fix);
-  projected_map.info.origin.position.x = origin_x;
-  projected_map.info.origin.position.y = origin_y;
-  projected_map.header.stamp = now();
-  projected_map.info.map_load_time = projected_map.header.stamp;
-
-  auto score_field = buildGlobalCostmapScoreField(projected_map);
-  if (!score_field) {
-    RCLCPP_WARN(
-      get_logger(),
-      "Failed to build likelihood field while projecting immutable reference costmap.");
-    return;
-  }
-
-  latest_global_costmap_ = std::move(projected_map);
-  latest_global_costmap_stamp_ = now();
-  latest_global_costmap_ready_ = true;
-  latest_global_costmap_processed_stamp_ = latest_global_costmap_stamp_;
-  latest_global_costmap_score_field_ = std::move(score_field);
-  reference_costmap_ready_ = true;
-  reference_costmap_projected_ = true;
-  reference_source_ = "immutable_yaml_projected";
-  RCLCPP_INFO(
-    get_logger(),
-    "Projected immutable map pose reference costmap into %s using first usable GNSS anchor.",
-    map_frame_id_.c_str());
 }
 
 void MapPoseNode::initializeMapToOdomFilter()
@@ -1342,7 +1289,6 @@ void MapPoseNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
   if (!navsat_reference_ready_ && navSatUsable(*message)) {
     navsat_reference_ = *message;
     navsat_reference_ready_ = true;
-    projectReferenceCostmapFromNavSatLocked();
   }
 }
 
@@ -1558,19 +1504,35 @@ std::optional<geometry_msgs::msg::Point> MapPoseNode::mapPointFromNavSat(
   if (
     !snapshot.reference_georeference_ready ||
     !snapshot.reference_georeference.valid ||
-    !snapshot.navsat_reference_ready ||
     !snapshot.latest_navsat_ready ||
     !navsatInputFresh(snapshot) ||
-    !navSatUsable(snapshot.navsat_reference) ||
     !navSatUsable(navsat))
   {
     return std::nullopt;
   }
 
-  const auto [east_m, north_m] = localEastNorthMeters(snapshot.navsat_reference, navsat);
+  const auto & geo = snapshot.reference_georeference;
+  const double a = geo.longitude_coefficients[0];
+  const double b = geo.longitude_coefficients[1];
+  const double c = geo.longitude_coefficients[2];
+  const double d = geo.latitude_coefficients[0];
+  const double e = geo.latitude_coefficients[1];
+  const double f = geo.latitude_coefficients[2];
+  const double determinant = (a * e) - (b * d);
+  if (std::abs(determinant) < 1.0e-18) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Reference-map georeference is singular; GNSS cannot be converted into map coordinates.");
+    return std::nullopt;
+  }
+
+  const double longitude_delta = navsat.longitude - c;
+  const double latitude_delta = navsat.latitude - f;
   geometry_msgs::msg::Point map_point;
-  map_point.x = east_m;
-  map_point.y = north_m;
+  map_point.x = ((longitude_delta * e) - (b * latitude_delta)) / determinant;
+  map_point.y = ((a * latitude_delta) - (d * longitude_delta)) / determinant;
   map_point.z = navsat.altitude;
   return map_point;
 }
@@ -2103,21 +2065,44 @@ void MapPoseNode::publishMapToOdomTransform()
       expected_gnss_map_point->x - ((cos_yaw * odom_x) - (sin_yaw * odom_y));
     const double measured_y =
       expected_gnss_map_point->y - ((sin_yaw * odom_x) + (cos_yaw * odom_y));
-    const tf2::Transform gnss_measurement = transformFromXYYaw(
-      measured_x,
-      measured_y,
-      map_to_odom.getOrigin().z(),
-      map_to_odom_yaw);
-    const double gnss_confidence =
-      gnss_translation_update_weight_ * std::max(0.15, gnss_gate_confidence);
-    {
+    const tf2::Vector3 current_origin = map_to_odom.getOrigin();
+    double correction_x = measured_x - current_origin.x();
+    double correction_y = measured_y - current_origin.y();
+    const double correction_norm = std::hypot(correction_x, correction_y);
+    const bool gnss_update_due =
+      last_gnss_translation_update_stamp_.nanoseconds() == 0 ||
+      gnss_translation_update_period_seconds_ <= 0.0 ||
+      (now() - last_gnss_translation_update_stamp_).seconds() >=
+      gnss_translation_update_period_seconds_;
+    if (!gnss_update_due || correction_norm < gnss_translation_deadband_m_) {
       std::lock_guard<std::mutex> lock(state_mutex_);
-      last_gnss_confidence_ = gnss_confidence;
-      updateMapToOdomFilterLocked(
-        gnss_measurement,
-        gnss_confidence,
-        true,
-        false);
+      last_gnss_confidence_ = 0.0;
+    } else {
+      if (gnss_max_translation_step_m_ > 0.0 && correction_norm > gnss_max_translation_step_m_) {
+        const double scale = gnss_max_translation_step_m_ / correction_norm;
+        correction_x *= scale;
+        correction_y *= scale;
+      }
+
+      const double target_x = current_origin.x() + correction_x;
+      const double target_y = current_origin.y() + correction_y;
+      const tf2::Transform gnss_measurement = transformFromXYYaw(
+        target_x,
+        target_y,
+        map_to_odom.getOrigin().z(),
+        map_to_odom_yaw);
+      const double gnss_confidence =
+        gnss_translation_update_weight_ * gnss_gate_confidence;
+      {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        last_gnss_confidence_ = gnss_confidence;
+        last_gnss_translation_update_stamp_ = now();
+        updateMapToOdomFilterLocked(
+          gnss_measurement,
+          gnss_confidence,
+          true,
+          false);
+      }
     }
   } else {
     if (prediction_snapshot.reference_georeference_ready) {
