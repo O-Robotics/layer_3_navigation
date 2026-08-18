@@ -4,12 +4,14 @@
     map_frame:                           map                              # Global metric planning frame used by the global costmap and Nav2; georeferenced mission data is locked into this Cartesian frame during startup.
     odom_frame:                          odom                             # Smooth local metric frame from FusionCore that anchors short-term motion and the local costmap.
     base_frame:                          base_footprint                   # Robot body frame that closes the map -> odom -> base_footprint TF chain and anchors scan matching.
+    reference_costmap_yaml:              ""                               # Immutable known static map YAML used for scan-to-map microcorrections; mission launch injects this for scheduled known-map runs.
     odometry_topic:                      localization/odometry_fused      # FusionCore pose in odom used as the local half of the map -> odom -> base_footprint chain.
     navsat_topic:                        gnss/navsat                      # Georeferenced GNSS fix used as an ongoing consistency input for the runtime map -> odom pose estimator.
     heading_topic:                       imu/data_heading                 # IMU heading used as an ongoing consistency input for the runtime map -> odom pose estimator.
     scan_topic:                          depth_camera/scan                # LaserScan used to match the robot against the already locked global costmap so map -> odom can absorb drift without shifting the costmap in map.
     global_costmap_topic:                mapping/static_costmap           # Runtime static costmap that acts as the known map for scan-to-map pose correction.
     status_topic:                        mapping/map_pose_status         # Structured health/state topic for map_pose_node. BOOTSTRAP publishes immediately, HEALTHY means all correction inputs are live, and FAULT means mapping should stop integrating scans.
+    allow_live_costmap_reference:        false                            # Use mapping/static_costmap as the matcher reference only for explicit legacy/manual fallback; known-map missions should use reference_costmap_yaml.
 
     # -- Publish behavior -----------------------------------------------------
     publish_period_seconds:              0.1                              # Refresh period for the published map -> odom transform.
@@ -63,6 +65,15 @@
     # -- Georeference consistency --------------------------------------------
     georef_consistency_max_error_m:      5.0                              # Maximum acceptable difference in meters between the candidate map-matched pose and the GNSS/heading georeference prior before confidence collapses.
     georef_consistency_min_confidence:   0.0                              # Let GNSS/georeference disagreement fully reject scan matches beyond the configured limit instead of allowing slow global-frame walk.
+    gnss_position_gate_m:                2.0                              # GNSS/reference-map position disagreement at which scan-match confidence collapses and GNSS recovery becomes low confidence.
+    heading_yaw_gate_rad:                0.2617993878                     # Reject scan yaw candidates farther than this from fresh IMU/magnetometer heading, here roughly 15 degrees.
+    max_scan_yaw_correction_rad:         0.0872664626                     # Treat scan matching as yaw microcorrection only, here limiting one accepted scan yaw search to roughly 5 degrees around the absolute heading-constrained prior.
+    scan_translation_update_weight:      0.7                              # Scan matching may strongly refine wall-relative X/Y when it agrees with the reference map.
+    scan_yaw_update_weight:              0.15                             # Scan yaw has deliberately low authority so static-map ambiguities cannot permanently rotate map -> odom.
+    heading_yaw_update_weight:           0.85                             # Fresh IMU/magnetometer heading is the primary absolute yaw recovery signal for map -> odom.
+    gnss_translation_update_weight:      0.8                              # Fresh GNSS projected through the reference-map georeference is the primary absolute X/Y recovery signal for map -> odom.
+    heading_timeout_seconds:             1.0                              # Heading must be this fresh before it gates or corrects map -> odom yaw.
+    navsat_timeout_seconds:              2.0                              # GNSS must be this fresh before it gates or corrects map -> odom translation.
 
     # -- EKF tuning -----------------------------------------------------------
     process_noise_diagonal:              [0.01, 0.01, 0.005]             # Random-walk process noise for the runtime map -> odom EKF state [x, y, yaw].

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -92,6 +94,72 @@ bool navSatUsable(const sensor_msgs::msg::NavSatFix & message)
     message.status.status != sensor_msgs::msg::NavSatStatus::STATUS_NO_FIX;
 }
 
+bool quaternionUsable(const geometry_msgs::msg::Quaternion & quaternion)
+{
+  return
+    std::isfinite(quaternion.x) &&
+    std::isfinite(quaternion.y) &&
+    std::isfinite(quaternion.z) &&
+    std::isfinite(quaternion.w) &&
+    ((quaternion.x * quaternion.x) +
+    (quaternion.y * quaternion.y) +
+    (quaternion.z * quaternion.z) +
+    (quaternion.w * quaternion.w)) > 1.0e-12;
+}
+
+std::string trim(const std::string & value)
+{
+  const auto begin = value.find_first_not_of(" \t");
+  if (begin == std::string::npos) {
+    return "";
+  }
+  const auto end = value.find_last_not_of(" \t");
+  return value.substr(begin, end - begin + 1U);
+}
+
+std::string stripQuotes(const std::string & value)
+{
+  if (value.size() >= 2U) {
+    const char first = value.front();
+    const char last = value.back();
+    if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+      return value.substr(1U, value.size() - 2U);
+    }
+  }
+  return value;
+}
+
+std::array<double, 3> parseTriple(const std::string & value)
+{
+  const auto open = value.find('[');
+  const auto first_comma = value.find(',', open + 1U);
+  const auto second_comma = value.find(',', first_comma + 1U);
+  const auto close = value.find(']', second_comma + 1U);
+  if (
+    open == std::string::npos || first_comma == std::string::npos ||
+    second_comma == std::string::npos || close == std::string::npos)
+  {
+    throw std::runtime_error("Expected a three-value YAML array");
+  }
+  return {
+    std::stod(trim(value.substr(open + 1U, first_comma - open - 1U))),
+    std::stod(trim(value.substr(first_comma + 1U, second_comma - first_comma - 1U))),
+    std::stod(trim(value.substr(second_comma + 1U, close - second_comma - 1U)))};
+}
+
+std::string readPgmToken(std::istream & stream)
+{
+  std::string token;
+  while (stream >> token) {
+    if (!token.empty() && token.front() == '#') {
+      stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+      continue;
+    }
+    return token;
+  }
+  throw std::runtime_error("Unexpected end of PGM file");
+}
+
 std::pair<double, double> localEastNorthMeters(
   const sensor_msgs::msg::NavSatFix & reference,
   const sensor_msgs::msg::NavSatFix & sample)
@@ -167,12 +235,14 @@ MapPoseNode::MapPoseNode()
   declare_parameter("map_frame", std::string("map"));
   declare_parameter("odom_frame", std::string("odom"));
   declare_parameter("base_frame", std::string("base_footprint"));
+  declare_parameter("reference_costmap_yaml", std::string(""));
   declare_parameter("odometry_topic", std::string("localization/odometry_fused"));
   declare_parameter("navsat_topic", std::string("gnss/navsat"));
   declare_parameter("heading_topic", std::string("imu/data_heading"));
   declare_parameter("scan_topic", std::string("depth_camera/scan"));
   declare_parameter("global_costmap_topic", std::string("mapping/static_costmap"));
   declare_parameter("status_topic", std::string("mapping/map_pose_status"));
+  declare_parameter("allow_live_costmap_reference", false);
   declare_parameter("publish_period_seconds", 0.5);
   declare_parameter("publish_identity_when_pose_missing", true);
   declare_parameter("occupied_threshold", 65);
@@ -219,6 +289,15 @@ MapPoseNode::MapPoseNode()
   declare_parameter("low_confidence_identity_pull_alpha", 0.15);
   declare_parameter("georef_consistency_max_error_m", 5.0);
   declare_parameter("georef_consistency_min_confidence", 0.2);
+  declare_parameter("max_scan_yaw_correction_rad", 0.0872664626);
+  declare_parameter("heading_yaw_gate_rad", 0.2617993878);
+  declare_parameter("gnss_position_gate_m", 2.0);
+  declare_parameter("scan_translation_update_weight", 0.7);
+  declare_parameter("scan_yaw_update_weight", 0.15);
+  declare_parameter("heading_yaw_update_weight", 0.85);
+  declare_parameter("gnss_translation_update_weight", 0.8);
+  declare_parameter("heading_timeout_seconds", 1.0);
+  declare_parameter("navsat_timeout_seconds", 2.0);
   declare_parameter("process_noise_diagonal", std::vector<double>{0.01, 0.01, 0.005});
   declare_parameter("measurement_noise_diagonal_min", std::vector<double>{0.05, 0.05, 0.02});
   declare_parameter("measurement_noise_diagonal_max", std::vector<double>{0.6, 0.6, 0.3});
@@ -226,12 +305,14 @@ MapPoseNode::MapPoseNode()
   map_frame_id_ = get_parameter("map_frame").as_string();
   odom_frame_id_ = get_parameter("odom_frame").as_string();
   base_frame_id_ = get_parameter("base_frame").as_string();
+  reference_costmap_yaml_ = get_parameter("reference_costmap_yaml").as_string();
   odometry_topic_ = get_parameter("odometry_topic").as_string();
   navsat_topic_ = get_parameter("navsat_topic").as_string();
   heading_topic_ = get_parameter("heading_topic").as_string();
   scan_topic_ = get_parameter("scan_topic").as_string();
   global_costmap_topic_ = get_parameter("global_costmap_topic").as_string();
   status_topic_ = get_parameter("status_topic").as_string();
+  allow_live_costmap_reference_ = get_parameter("allow_live_costmap_reference").as_bool();
   publish_identity_when_pose_missing_ =
     get_parameter("publish_identity_when_pose_missing").as_bool();
   occupied_threshold_ = static_cast<int>(get_parameter("occupied_threshold").as_int());
@@ -335,6 +416,33 @@ MapPoseNode::MapPoseNode()
     get_parameter("georef_consistency_min_confidence").as_double(),
     0.0,
     1.0);
+  max_scan_yaw_correction_rad_ = std::max(
+    0.0,
+    get_parameter("max_scan_yaw_correction_rad").as_double());
+  heading_yaw_gate_rad_ = std::max(0.0, get_parameter("heading_yaw_gate_rad").as_double());
+  gnss_position_gate_m_ = std::max(0.1, get_parameter("gnss_position_gate_m").as_double());
+  scan_translation_update_weight_ = std::clamp(
+    get_parameter("scan_translation_update_weight").as_double(),
+    0.0,
+    1.0);
+  scan_yaw_update_weight_ = std::clamp(
+    get_parameter("scan_yaw_update_weight").as_double(),
+    0.0,
+    1.0);
+  heading_yaw_update_weight_ = std::clamp(
+    get_parameter("heading_yaw_update_weight").as_double(),
+    0.0,
+    1.0);
+  gnss_translation_update_weight_ = std::clamp(
+    get_parameter("gnss_translation_update_weight").as_double(),
+    0.0,
+    1.0);
+  heading_timeout_seconds_ = std::max(
+    0.05,
+    get_parameter("heading_timeout_seconds").as_double());
+  navsat_timeout_seconds_ = std::max(
+    0.05,
+    get_parameter("navsat_timeout_seconds").as_double());
   const auto process_noise_values = get_parameter("process_noise_diagonal").as_double_array();
   const auto measurement_noise_min_values =
     get_parameter("measurement_noise_diagonal_min").as_double_array();
@@ -359,6 +467,7 @@ MapPoseNode::MapPoseNode()
       measurement_noise_max_values[2]};
   }
   global_costmap_wait_started_ = now();
+  loadReferenceCostmapIfConfigured();
 
   subscription_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   publish_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -387,11 +496,17 @@ MapPoseNode::MapPoseNode()
     scan_qos,
     std::bind(&MapPoseNode::handleScan, this, std::placeholders::_1),
     subscription_options);
-  global_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
-    global_costmap_topic_,
-    rclcpp::SystemDefaultsQoS(),
-    std::bind(&MapPoseNode::handleGlobalCostmap, this, std::placeholders::_1),
-    subscription_options);
+  if (allow_live_costmap_reference_) {
+    global_costmap_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      global_costmap_topic_,
+      rclcpp::SystemDefaultsQoS(),
+      std::bind(&MapPoseNode::handleGlobalCostmap, this, std::placeholders::_1),
+      subscription_options);
+  } else if (!reference_costmap_ready_) {
+    RCLCPP_WARN(
+      get_logger(),
+      "No immutable reference_costmap_yaml loaded and allow_live_costmap_reference is false; map pose scan corrections will wait for a reference map.");
+  }
   status_publisher_ = create_publisher<std_msgs::msg::String>(
     status_topic_,
     rclcpp::QoS(1).reliable().transient_local());
@@ -415,6 +530,244 @@ MapPoseNode::~MapPoseNode()
   if (global_costmap_worker_.joinable()) {
     global_costmap_worker_.join();
   }
+}
+
+void MapPoseNode::loadReferenceCostmapIfConfigured()
+{
+  if (reference_costmap_yaml_.empty()) {
+    reference_source_ = allow_live_costmap_reference_ ? "live_costmap_waiting" : "none";
+    return;
+  }
+
+  try {
+    if (loadReferenceCostmapFromYaml(reference_costmap_yaml_)) {
+      RCLCPP_INFO(
+        get_logger(),
+        "Loaded immutable map pose reference costmap from %s.",
+        reference_costmap_yaml_.c_str());
+    }
+  } catch (const std::exception & exception) {
+    reference_source_ = "reference_load_failed";
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to load immutable map pose reference costmap from %s: %s",
+      reference_costmap_yaml_.c_str(),
+      exception.what());
+  }
+}
+
+bool MapPoseNode::loadReferenceCostmapFromYaml(const std::string & yaml_path)
+{
+  std::ifstream yaml_stream(yaml_path);
+  if (!yaml_stream.is_open()) {
+    throw std::runtime_error("failed to open YAML file");
+  }
+
+  std::string image_name;
+  std::string mode{"trinary"};
+  double resolution = 0.0;
+  double origin_x = 0.0;
+  double origin_y = 0.0;
+  double occupied_thresh = 0.65;
+  double free_thresh = 0.196;
+  bool negate = false;
+  ReferenceGeoreference georeference;
+  std::string line;
+  while (std::getline(yaml_stream, line)) {
+    const auto comment = line.find('#');
+    if (comment != std::string::npos) {
+      line = line.substr(0, comment);
+    }
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) {
+      continue;
+    }
+    const std::string key = trim(line.substr(0, colon));
+    const std::string value = trim(line.substr(colon + 1U));
+    if (key == "image") {
+      image_name = stripQuotes(value);
+    } else if (key == "mode") {
+      mode = stripQuotes(value);
+    } else if (key == "resolution") {
+      resolution = std::stod(value);
+    } else if (key == "origin") {
+      const auto origin = parseTriple(value);
+      origin_x = origin[0];
+      origin_y = origin[1];
+    } else if (key == "occupied_thresh") {
+      occupied_thresh = std::stod(value);
+    } else if (key == "free_thresh") {
+      free_thresh = std::stod(value);
+    } else if (key == "negate") {
+      negate = std::stoi(value) != 0;
+    } else if (key == "georeference_longitude_coefficients") {
+      georeference.longitude_coefficients = parseTriple(value);
+      georeference.valid = true;
+    } else if (key == "georeference_latitude_coefficients") {
+      georeference.latitude_coefficients = parseTriple(value);
+      georeference.valid = true;
+    }
+  }
+
+  if (image_name.empty()) {
+    throw std::runtime_error("missing image field");
+  }
+  if (resolution <= 0.0) {
+    throw std::runtime_error("invalid or missing resolution");
+  }
+
+  const std::filesystem::path image_path =
+    std::filesystem::path(yaml_path).parent_path() / image_name;
+  std::ifstream image_stream(image_path, std::ios::binary);
+  if (!image_stream.is_open()) {
+    throw std::runtime_error("failed to open PGM image file");
+  }
+
+  const std::string magic = readPgmToken(image_stream);
+  if (magic != "P5" && magic != "P2") {
+    throw std::runtime_error("unsupported PGM format");
+  }
+  const unsigned int width = static_cast<unsigned int>(std::stoul(readPgmToken(image_stream)));
+  const unsigned int height = static_cast<unsigned int>(std::stoul(readPgmToken(image_stream)));
+  const int max_value = std::max(1, std::stoi(readPgmToken(image_stream)));
+  if (width == 0U || height == 0U) {
+    throw std::runtime_error("empty PGM image");
+  }
+
+  auto pixelToOccupancy = [&](const int pixel_value) -> int8_t {
+      const int bounded = std::clamp(pixel_value, 0, max_value);
+      const double normalized = static_cast<double>(bounded) / static_cast<double>(max_value);
+      const double occupied = negate ? normalized : (1.0 - normalized);
+      if (mode == "scale") {
+        return static_cast<int8_t>(std::lround(std::clamp(occupied, 0.0, 1.0) * 100.0));
+      }
+      if (occupied >= occupied_thresh) {
+        return 100;
+      }
+      if (occupied <= free_thresh) {
+        return 0;
+      }
+      return -1;
+    };
+
+  nav_msgs::msg::OccupancyGrid reference_map;
+  reference_map.header.stamp = now();
+  reference_map.header.frame_id = map_frame_id_;
+  reference_map.info.map_load_time = reference_map.header.stamp;
+  reference_map.info.resolution = static_cast<float>(resolution);
+  reference_map.info.width = width;
+  reference_map.info.height = height;
+  reference_map.info.origin.position.x = origin_x;
+  reference_map.info.origin.position.y = origin_y;
+  reference_map.info.origin.position.z = 0.0;
+  reference_map.info.origin.orientation.w = 1.0;
+  reference_map.data.assign(static_cast<std::size_t>(width) * height, -1);
+
+  if (magic == "P5") {
+    image_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
+      for (unsigned int col = 0; col < width; ++col) {
+        unsigned char pixel = 0U;
+        image_stream.read(reinterpret_cast<char *>(&pixel), 1);
+        if (!image_stream) {
+          throw std::runtime_error("truncated binary PGM image");
+        }
+        const std::size_t index = static_cast<std::size_t>(row) * width + col;
+        reference_map.data.at(index) = pixelToOccupancy(static_cast<int>(pixel));
+      }
+    }
+  } else {
+    for (int row = static_cast<int>(height) - 1; row >= 0; --row) {
+      for (unsigned int col = 0; col < width; ++col) {
+        const int pixel = std::stoi(readPgmToken(image_stream));
+        const std::size_t index = static_cast<std::size_t>(row) * width + col;
+        reference_map.data.at(index) = pixelToOccupancy(pixel);
+      }
+    }
+  }
+
+  reference_georeference_ = georeference;
+  reference_georeference_ready_ = georeference.valid;
+  if (georeference.valid) {
+    pending_reference_costmap_ = std::move(reference_map);
+    reference_costmap_ready_ = false;
+    latest_global_costmap_ready_ = false;
+    reference_costmap_projected_ = false;
+    reference_source_ = "immutable_yaml_waiting_for_gnss_anchor";
+    projectReferenceCostmapFromNavSatLocked();
+    return true;
+  }
+
+  auto score_field = buildGlobalCostmapScoreField(reference_map);
+  if (!score_field) {
+    throw std::runtime_error("failed to build reference likelihood field");
+  }
+
+  latest_global_costmap_ = std::move(reference_map);
+  latest_global_costmap_stamp_ = now();
+  latest_global_costmap_ready_ = true;
+  latest_global_costmap_processed_stamp_ = latest_global_costmap_stamp_;
+  latest_global_costmap_score_field_ = std::move(score_field);
+  reference_costmap_ready_ = true;
+  reference_costmap_projected_ = true;
+  reference_source_ = "immutable_yaml";
+  return true;
+}
+
+void MapPoseNode::projectReferenceCostmapFromNavSatLocked()
+{
+  if (
+    reference_costmap_projected_ ||
+    !reference_georeference_ready_ ||
+    !reference_georeference_.valid ||
+    !navsat_reference_ready_ ||
+    !navSatUsable(navsat_reference_) ||
+    pending_reference_costmap_.info.width == 0U ||
+    pending_reference_costmap_.info.height == 0U)
+  {
+    return;
+  }
+
+  const auto & geo = reference_georeference_;
+  const double artifact_origin_x = pending_reference_costmap_.info.origin.position.x;
+  const double artifact_origin_y = pending_reference_costmap_.info.origin.position.y;
+  sensor_msgs::msg::NavSatFix origin_fix = navsat_reference_;
+  origin_fix.longitude =
+    (geo.longitude_coefficients[0] * artifact_origin_x) +
+    (geo.longitude_coefficients[1] * artifact_origin_y) +
+    geo.longitude_coefficients[2];
+  origin_fix.latitude =
+    (geo.latitude_coefficients[0] * artifact_origin_x) +
+    (geo.latitude_coefficients[1] * artifact_origin_y) +
+    geo.latitude_coefficients[2];
+
+  auto projected_map = pending_reference_costmap_;
+  const auto [origin_x, origin_y] = localEastNorthMeters(navsat_reference_, origin_fix);
+  projected_map.info.origin.position.x = origin_x;
+  projected_map.info.origin.position.y = origin_y;
+  projected_map.header.stamp = now();
+  projected_map.info.map_load_time = projected_map.header.stamp;
+
+  auto score_field = buildGlobalCostmapScoreField(projected_map);
+  if (!score_field) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Failed to build likelihood field while projecting immutable reference costmap.");
+    return;
+  }
+
+  latest_global_costmap_ = std::move(projected_map);
+  latest_global_costmap_stamp_ = now();
+  latest_global_costmap_ready_ = true;
+  latest_global_costmap_processed_stamp_ = latest_global_costmap_stamp_;
+  latest_global_costmap_score_field_ = std::move(score_field);
+  reference_costmap_ready_ = true;
+  reference_costmap_projected_ = true;
+  reference_source_ = "immutable_yaml_projected";
+  RCLCPP_INFO(
+    get_logger(),
+    "Projected immutable map pose reference costmap into %s using first usable GNSS anchor.",
+    map_frame_id_.c_str());
 }
 
 void MapPoseNode::initializeMapToOdomFilter()
@@ -462,6 +815,15 @@ void MapPoseNode::updateMapToOdomFilterLocked(
   const tf2::Transform & measurement,
   const double confidence)
 {
+  updateMapToOdomFilterLocked(measurement, confidence, true, true);
+}
+
+void MapPoseNode::updateMapToOdomFilterLocked(
+  const tf2::Transform & measurement,
+  const double confidence,
+  const bool update_translation,
+  const bool update_yaw)
+{
   if (!map_to_odom_filter_ready_) {
     initializeMapToOdomFilterLocked();
   }
@@ -473,6 +835,10 @@ void MapPoseNode::updateMapToOdomFilterLocked(
     yawFromTransform(measurement)};
 
   for (std::size_t index = 0U; index < 3U; ++index) {
+    if ((index < 2U && !update_translation) || (index == 2U && !update_yaw)) {
+      continue;
+    }
+
     const double measurement_noise =
       measurement_noise_diagonal_max_[index] -
       (measurement_noise_diagonal_max_[index] - measurement_noise_diagonal_min_[index]) *
@@ -544,6 +910,8 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.navsat_reference_ready = navsat_reference_ready_;
   snapshot.latest_scan_ready = latest_scan_ready_;
   snapshot.latest_global_costmap_ready = latest_global_costmap_ready_;
+  snapshot.reference_costmap_ready = reference_costmap_ready_;
+  snapshot.reference_georeference_ready = reference_georeference_ready_;
   snapshot.last_map_to_odom_ready = last_map_to_odom_ready_;
   snapshot.map_to_odom_filter_ready = map_to_odom_filter_ready_;
   snapshot.correction_startup_ready = correction_startup_ready_;
@@ -555,6 +923,7 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.latest_heading = latest_heading_;
   snapshot.latest_scan = latest_scan_;
   snapshot.latest_global_costmap = latest_global_costmap_;
+  snapshot.reference_georeference = reference_georeference_;
   snapshot.latest_global_costmap_score_field = latest_global_costmap_score_field_;
   snapshot.latest_odometry_stamp = latest_odometry_stamp_;
   snapshot.latest_navsat_stamp = latest_navsat_stamp_;
@@ -565,6 +934,12 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.map_to_odom_filter_state = map_to_odom_filter_state_;
   snapshot.map_to_odom_filter_covariance = map_to_odom_filter_covariance_;
   snapshot.last_map_to_odom = last_map_to_odom_;
+  snapshot.reference_source = reference_source_;
+  snapshot.last_scan_match_decision = last_scan_match_decision_;
+  snapshot.last_scan_match_score = last_scan_match_score_;
+  snapshot.last_scan_match_confidence = last_scan_match_confidence_;
+  snapshot.last_gnss_confidence = last_gnss_confidence_;
+  snapshot.last_heading_confidence = last_heading_confidence_;
   return snapshot;
 }
 
@@ -583,7 +958,9 @@ bool MapPoseNode::odometryInputReady(const StateSnapshot & snapshot) const
 
 bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
 {
-  if (!odometryInputReady(snapshot) || !snapshot.latest_scan_ready || !snapshot.latest_global_costmap_ready) {
+  if (!odometryInputReady(snapshot) || !snapshot.latest_scan_ready ||
+    !snapshot.latest_global_costmap_ready)
+  {
     return false;
   }
 
@@ -817,7 +1194,19 @@ void MapPoseNode::publishMapPoseStatus(const StateSnapshot & snapshot)
          << "/" << degraded_streak_before_fault_
          << "; odometry_ready=" << (odometry_ready ? "true" : "false")
          << "; scan_ready=" << (snapshot.latest_scan_ready ? "true" : "false")
-         << "; global_costmap_ready=" << (snapshot.latest_global_costmap_ready ? "true" : "false");
+         << "; global_costmap_ready=" << (snapshot.latest_global_costmap_ready ? "true" : "false")
+         << "; reference_source=" << snapshot.reference_source
+         << "; reference_costmap_ready=" << (snapshot.reference_costmap_ready ? "true" : "false")
+         << "; reference_georeference_ready=" <<
+    (snapshot.reference_georeference_ready ? "true" : "false")
+         << "; scan_match_decision=" << snapshot.last_scan_match_decision
+         << "; scan_score=" << snapshot.last_scan_match_score
+         << "; scan_confidence=" << snapshot.last_scan_match_confidence
+         << "; gnss_confidence=" << snapshot.last_gnss_confidence
+         << "; heading_confidence=" << snapshot.last_heading_confidence
+         << "; map_to_odom_x=" << snapshot.map_to_odom_filter_state[0]
+         << "; map_to_odom_y=" << snapshot.map_to_odom_filter_state[1]
+         << "; map_to_odom_yaw_deg=" << snapshot.map_to_odom_filter_state[2] * 180.0 / M_PI;
   if (snapshot.latest_odometry_stamp.nanoseconds() > 0) {
     stream << "; odometry_age_s=" << (now() - snapshot.latest_odometry_stamp).seconds();
   }
@@ -953,6 +1342,7 @@ void MapPoseNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
   if (!navsat_reference_ready_ && navSatUsable(*message)) {
     navsat_reference_ = *message;
     navsat_reference_ready_ = true;
+    projectReferenceCostmapFromNavSatLocked();
   }
 }
 
@@ -981,6 +1371,18 @@ void MapPoseNode::handleScan(const sensor_msgs::msg::LaserScan::SharedPtr messag
 
 void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message)
 {
+  if (!allow_live_costmap_reference_ || reference_costmap_ready_) {
+    if (!allow_live_costmap_reference_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        10000,
+        "Ignoring live %s for map pose scan matching because allow_live_costmap_reference is false.",
+        global_costmap_topic_.c_str());
+    }
+    return;
+  }
+
   const rclcpp::Time receipt_stamp = now();
   const bool costmap_ready =
     message->info.width > 0U && message->info.height > 0U && message->info.resolution > 0.0F;
@@ -997,6 +1399,7 @@ void MapPoseNode::handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::Shared
     pending_global_costmap_stamp_ = receipt_stamp;
     pending_global_costmap_ready_ = costmap_ready;
     pending_global_costmap_dirty_ = true;
+    reference_source_ = "live_costmap";
   }
   global_costmap_worker_cv_.notify_one();
 }
@@ -1011,8 +1414,8 @@ void MapPoseNode::globalCostmapWorkerLoop()
     {
       std::unique_lock<std::mutex> lock(state_mutex_);
       global_costmap_worker_cv_.wait(lock, [this]() {
-        return shutdown_global_costmap_worker_ || pending_global_costmap_dirty_;
-      });
+          return shutdown_global_costmap_worker_ || pending_global_costmap_dirty_;
+        });
       if (shutdown_global_costmap_worker_) {
         return;
       }
@@ -1087,6 +1490,32 @@ double MapPoseNode::georeferenceConsistencyConfidence(
   const StateSnapshot & snapshot,
   const tf2::Transform & candidate_map_to_base) const
 {
+  const auto expected_map_point = mapPointFromNavSat(snapshot, snapshot.latest_navsat);
+  if (expected_map_point.has_value()) {
+    const tf2::Vector3 candidate_origin = candidate_map_to_base.getOrigin();
+    const double error_m = std::hypot(
+      candidate_origin.x() - expected_map_point->x,
+      candidate_origin.y() - expected_map_point->y);
+    const double error_ratio = std::clamp(
+      error_m / std::max(1.0e-6, gnss_position_gate_m_),
+      0.0,
+      1.0);
+    const double confidence =
+      1.0 - ((1.0 - georef_consistency_min_confidence_) * error_ratio);
+
+    if (error_m > gnss_position_gate_m_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Rejecting most scan-match confidence because candidate map pose differs from reference-map GNSS pose by %.3fm (limit %.3fm).",
+        error_m,
+        gnss_position_gate_m_);
+    }
+
+    return confidence;
+  }
+
   if (
     !snapshot.latest_navsat_ready ||
     !snapshot.navsat_reference_ready ||
@@ -1120,6 +1549,66 @@ double MapPoseNode::georeferenceConsistencyConfidence(
   }
 
   return confidence;
+}
+
+std::optional<geometry_msgs::msg::Point> MapPoseNode::mapPointFromNavSat(
+  const StateSnapshot & snapshot,
+  const sensor_msgs::msg::NavSatFix & navsat) const
+{
+  if (
+    !snapshot.reference_georeference_ready ||
+    !snapshot.reference_georeference.valid ||
+    !snapshot.navsat_reference_ready ||
+    !snapshot.latest_navsat_ready ||
+    !navsatInputFresh(snapshot) ||
+    !navSatUsable(snapshot.navsat_reference) ||
+    !navSatUsable(navsat))
+  {
+    return std::nullopt;
+  }
+
+  const auto [east_m, north_m] = localEastNorthMeters(snapshot.navsat_reference, navsat);
+  geometry_msgs::msg::Point map_point;
+  map_point.x = east_m;
+  map_point.y = north_m;
+  map_point.z = navsat.altitude;
+  return map_point;
+}
+
+std::optional<double> MapPoseNode::headingYaw(const StateSnapshot & snapshot) const
+{
+  if (
+    !snapshot.latest_heading_ready ||
+    !headingInputFresh(snapshot) ||
+    !quaternionUsable(snapshot.latest_heading.orientation))
+  {
+    return std::nullopt;
+  }
+
+  tf2::Quaternion quaternion;
+  tf2::fromMsg(snapshot.latest_heading.orientation, quaternion);
+  quaternion.normalize();
+  double roll = 0.0;
+  double pitch = 0.0;
+  double yaw = 0.0;
+  tf2::Matrix3x3(quaternion).getRPY(roll, pitch, yaw);
+  return normalizeAngle(yaw);
+}
+
+bool MapPoseNode::navsatInputFresh(const StateSnapshot & snapshot) const
+{
+  if (!snapshot.latest_navsat_ready || snapshot.latest_navsat_stamp.nanoseconds() == 0) {
+    return false;
+  }
+  return (now() - snapshot.latest_navsat_stamp).seconds() <= navsat_timeout_seconds_;
+}
+
+bool MapPoseNode::headingInputFresh(const StateSnapshot & snapshot) const
+{
+  if (!snapshot.latest_heading_ready || snapshot.latest_heading_stamp.nanoseconds() == 0) {
+    return false;
+  }
+  return (now() - snapshot.latest_heading_stamp).seconds() <= heading_timeout_seconds_;
 }
 
 std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromPrior(
@@ -1178,7 +1667,9 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
   const double effective_max_range = std::min(
     scan.range_max > 0.0 ? scan.range_max : std::numeric_limits<double>::infinity(),
     max_scan_match_range_m_);
-  for (std::size_t index = 0U; index < scan.ranges.size(); index += static_cast<std::size_t>(scan_subsample_step_)) {
+  for (std::size_t index = 0U; index < scan.ranges.size();
+    index += static_cast<std::size_t>(scan_subsample_step_))
+  {
     const double range = static_cast<double>(scan.ranges.at(index));
     if (!std::isfinite(range) || range < scan.range_min || range > effective_max_range) {
       continue;
@@ -1190,8 +1681,8 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       range * std::sin(angle),
       0.0);
     endpoints.push_back({
-      endpoint_in_base.x(),
-      endpoint_in_base.y()});
+        endpoint_in_base.x(),
+        endpoint_in_base.y()});
   }
 
   if (static_cast<int>(endpoints.size()) < min_valid_scan_points_) {
@@ -1239,9 +1730,13 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
   bool search_timed_out = false;
   const tf2::Transform search_center = map_to_base_prior;
   const double search_center_yaw = yawFromTransform(search_center);
+  const std::optional<double> expected_heading_yaw = headingYaw(snapshot);
 
-  auto scoreCandidate = [&](const std::vector<ScanEndpoint> & candidate_endpoints,
-      const double candidate_x, const double candidate_y, const double candidate_yaw) {
+  auto scoreCandidate = [&](
+    const std::vector<ScanEndpoint> & candidate_endpoints,
+    const double candidate_x,
+    const double candidate_y,
+    const double candidate_yaw) {
       const double cos_yaw = std::cos(candidate_yaw);
       const double sin_yaw = std::sin(candidate_yaw);
       double endpoint_score_sum = 0.0;
@@ -1250,6 +1745,19 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       const double center_dx = candidate_x - search_center.getOrigin().x();
       const double center_dy = candidate_y - search_center.getOrigin().y();
       const double yaw_delta = normalizeAngle(candidate_yaw - search_center_yaw);
+      if (
+        max_scan_yaw_correction_rad_ > 0.0 &&
+        std::abs(yaw_delta) > max_scan_yaw_correction_rad_)
+      {
+        return -std::numeric_limits<double>::infinity();
+      }
+      if (
+        expected_heading_yaw.has_value() &&
+        heading_yaw_gate_rad_ > 0.0 &&
+        std::abs(normalizeAngle(candidate_yaw - *expected_heading_yaw)) > heading_yaw_gate_rad_)
+      {
+        return -std::numeric_limits<double>::infinity();
+      }
       const double candidate_penalty =
         (translation_penalty_per_meter_ * std::hypot(center_dx, center_dy)) +
         (yaw_penalty_per_rad_ * std::abs(yaw_delta));
@@ -1295,6 +1803,10 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
       snapshot.map_to_odom_filter_covariance[1]));
   const double yaw_sigma = std::sqrt(
     std::max(1.0e-6, snapshot.map_to_odom_filter_covariance[2]));
+  const double yaw_window_upper =
+    max_scan_yaw_correction_rad_ > 0.0 ?
+    std::max(0.01, std::min(search_yaw_window_rad_, max_scan_yaw_correction_rad_)) :
+    search_yaw_window_rad_;
   const double translation_window = std::clamp(
     min_search_translation_window_m_ +
     (search_window_translation_covariance_scale_ * translation_sigma),
@@ -1303,14 +1815,23 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
   const double yaw_window = std::clamp(
     min_search_yaw_window_rad_ +
     (search_window_yaw_covariance_scale_ * yaw_sigma),
-    min_search_yaw_window_rad_,
-    search_yaw_window_rad_);
-  const auto runSearch = [&](const std::vector<ScanEndpoint> & candidate_endpoints,
-      const double translation_window, const double translation_step,
-      const double yaw_window, const double yaw_step) {
-      for (double dx = -translation_window; dx <= translation_window + 1.0e-6; dx += translation_step) {
-        for (double dy = -translation_window; dy <= translation_window + 1.0e-6; dy += translation_step) {
-          for (double yaw_delta = -yaw_window; yaw_delta <= yaw_window + 1.0e-6; yaw_delta += yaw_step) {
+    std::min(min_search_yaw_window_rad_, yaw_window_upper),
+    yaw_window_upper);
+  const auto runSearch = [&](
+    const std::vector<ScanEndpoint> & candidate_endpoints,
+    const double translation_window,
+    const double translation_step,
+    const double yaw_window,
+    const double yaw_step) {
+      for (double dx = -translation_window; dx <= translation_window + 1.0e-6;
+        dx += translation_step)
+      {
+        for (double dy = -translation_window; dy <= translation_window + 1.0e-6;
+          dy += translation_step)
+        {
+          for (double yaw_delta = -yaw_window; yaw_delta <= yaw_window + 1.0e-6;
+            yaw_delta += yaw_step)
+          {
             const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::steady_clock::now() - match_start).count();
             if (elapsed_ms >= max_match_compute_time_ms_) {
@@ -1371,9 +1892,15 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     const double fine_yaw_window = std::max(search_yaw_step_rad_, search_yaw_step_rad_ * 2.0);
     const double fine_yaw_step = std::max(0.01, search_yaw_step_rad_ * 0.5);
 
-    for (double dx = -fine_translation_window; dx <= fine_translation_window + 1.0e-6; dx += fine_translation_step) {
-      for (double dy = -fine_translation_window; dy <= fine_translation_window + 1.0e-6; dy += fine_translation_step) {
-        for (double yaw_delta = -fine_yaw_window; yaw_delta <= fine_yaw_window + 1.0e-6; yaw_delta += fine_yaw_step) {
+    for (double dx = -fine_translation_window; dx <= fine_translation_window + 1.0e-6;
+      dx += fine_translation_step)
+    {
+      for (double dy = -fine_translation_window; dy <= fine_translation_window + 1.0e-6;
+        dy += fine_translation_step)
+      {
+        for (double yaw_delta = -fine_yaw_window; yaw_delta <= fine_yaw_window + 1.0e-6;
+          yaw_delta += fine_yaw_step)
+        {
           const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - match_start).count();
           if (elapsed_ms >= max_match_compute_time_ms_) {
@@ -1428,10 +1955,34 @@ std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromP
     0.0,
     1.0);
   const double georef_confidence = georeferenceConsistencyConfidence(snapshot, best_transform);
+  double heading_confidence = 1.0;
+  std::string decision = "accepted";
+  if (expected_heading_yaw.has_value() && heading_yaw_gate_rad_ > 0.0) {
+    const double heading_error = std::abs(
+      normalizeAngle(yawFromTransform(best_transform) - *expected_heading_yaw));
+    heading_confidence = std::clamp(
+      1.0 - (heading_error / std::max(1.0e-6, heading_yaw_gate_rad_)),
+      0.0,
+      1.0);
+    if (heading_error > heading_yaw_gate_rad_) {
+      decision = "rejected_heading_yaw";
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        3000,
+        "Rejecting scan-match yaw %.2f deg because it differs from heading by %.2f deg (gate %.2f deg).",
+        yawFromTransform(best_transform) * 180.0 / M_PI,
+        heading_error * 180.0 / M_PI,
+        heading_yaw_gate_rad_ * 180.0 / M_PI);
+    }
+  }
   return MapMatchEstimate{
     best_transform,
     best_score,
-    normalized_confidence * georef_confidence};
+    normalized_confidence * georef_confidence * heading_confidence,
+    georef_confidence,
+    heading_confidence,
+    decision};
 }
 
 void MapPoseNode::publishMapToOdomTransform()
@@ -1486,8 +2037,103 @@ void MapPoseNode::publishMapToOdomTransform()
     predictMapToOdomFilterLocked();
   }
   StateSnapshot prediction_snapshot = snapshotState();
-  tf2::Transform map_to_odom = filteredMapToOdomTransform(prediction_snapshot.map_to_odom_filter_state);
+  tf2::Transform map_to_odom =
+    filteredMapToOdomTransform(prediction_snapshot.map_to_odom_filter_state);
   tf2::Transform map_to_base_prior = map_to_odom * odom_to_base;
+  const double odom_base_yaw = yawFromTransform(odom_to_base);
+
+  const auto heading_yaw = headingYaw(prediction_snapshot);
+  if (heading_yaw.has_value()) {
+    const tf2::Vector3 origin = map_to_odom.getOrigin();
+    const tf2::Transform heading_measurement = transformFromXYYaw(
+      origin.x(),
+      origin.y(),
+      origin.z(),
+      normalizeAngle(*heading_yaw - odom_base_yaw));
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      last_heading_confidence_ = heading_yaw_update_weight_;
+      updateMapToOdomFilterLocked(
+        heading_measurement,
+        heading_yaw_update_weight_,
+        false,
+        true);
+    }
+  } else {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "IMU heading is missing or stale; map pose yaw recovery is relying on odometry and scan microcorrections.");
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    last_heading_confidence_ = 0.0;
+  }
+
+  prediction_snapshot = snapshotState();
+  map_to_odom = filteredMapToOdomTransform(prediction_snapshot.map_to_odom_filter_state);
+  map_to_base_prior = map_to_odom * odom_to_base;
+
+  const auto expected_gnss_map_point =
+    mapPointFromNavSat(prediction_snapshot, prediction_snapshot.latest_navsat);
+  if (expected_gnss_map_point.has_value()) {
+    const tf2::Vector3 predicted_base = map_to_base_prior.getOrigin();
+    const double gnss_error = std::hypot(
+      predicted_base.x() - expected_gnss_map_point->x,
+      predicted_base.y() - expected_gnss_map_point->y);
+    const double gnss_gate_confidence = std::clamp(
+      1.0 - (gnss_error / std::max(1.0e-6, gnss_position_gate_m_)),
+      0.0,
+      1.0);
+    if (gnss_error > gnss_position_gate_m_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "GNSS/reference-map pose differs from current map pose by %.3fm (gate %.3fm); applying only a low-confidence translation recovery update.",
+        gnss_error,
+        gnss_position_gate_m_);
+    }
+
+    const double map_to_odom_yaw = yawFromTransform(map_to_odom);
+    const double cos_yaw = std::cos(map_to_odom_yaw);
+    const double sin_yaw = std::sin(map_to_odom_yaw);
+    const double odom_x = snapshot.latest_odometry_position.x;
+    const double odom_y = snapshot.latest_odometry_position.y;
+    const double measured_x =
+      expected_gnss_map_point->x - ((cos_yaw * odom_x) - (sin_yaw * odom_y));
+    const double measured_y =
+      expected_gnss_map_point->y - ((sin_yaw * odom_x) + (cos_yaw * odom_y));
+    const tf2::Transform gnss_measurement = transformFromXYYaw(
+      measured_x,
+      measured_y,
+      map_to_odom.getOrigin().z(),
+      map_to_odom_yaw);
+    const double gnss_confidence =
+      gnss_translation_update_weight_ * std::max(0.15, gnss_gate_confidence);
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      last_gnss_confidence_ = gnss_confidence;
+      updateMapToOdomFilterLocked(
+        gnss_measurement,
+        gnss_confidence,
+        true,
+        false);
+    }
+  } else {
+    if (prediction_snapshot.reference_georeference_ready) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "GNSS is missing or stale; map pose translation recovery is relying on odometry and scan microcorrections.");
+    }
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    last_gnss_confidence_ = 0.0;
+  }
+
+  prediction_snapshot = snapshotState();
+  map_to_odom = filteredMapToOdomTransform(prediction_snapshot.map_to_odom_filter_state);
+  map_to_base_prior = map_to_odom * odom_to_base;
 
   bool attempted_scan_match = false;
   std::optional<MapMatchEstimate> map_match;
@@ -1527,9 +2173,13 @@ void MapPoseNode::publishMapToOdomTransform()
       const double previous_yaw = yawFromTransform(prediction_snapshot.last_map_to_odom);
       const double candidate_yaw = yawFromTransform(measured_map_to_odom);
       const double yaw_delta = normalizeAngle(candidate_yaw - previous_yaw);
+      const double yaw_jump_limit =
+        max_scan_yaw_correction_rad_ > 0.0 ?
+        std::min(max_yaw_jump_rad_, max_scan_yaw_correction_rad_) :
+        max_yaw_jump_rad_;
       const double clamped_yaw_delta =
-        max_yaw_jump_rad_ > 0.0 ?
-        std::clamp(yaw_delta, -max_yaw_jump_rad_, max_yaw_jump_rad_) :
+        yaw_jump_limit > 0.0 ?
+        std::clamp(yaw_delta, -yaw_jump_limit, yaw_jump_limit) :
         yaw_delta;
 
       measured_map_to_odom = transformFromXYYaw(
@@ -1540,10 +2190,37 @@ void MapPoseNode::publishMapToOdomTransform()
     }
 
     std::lock_guard<std::mutex> lock(state_mutex_);
-    updateMapToOdomFilterLocked(measured_map_to_odom, map_match->confidence);
+    last_scan_match_decision_ = map_match->decision;
+    last_scan_match_score_ = map_match->score;
+    last_scan_match_confidence_ = map_match->confidence;
+    last_gnss_confidence_ = map_match->gnss_confidence;
+    last_heading_confidence_ = map_match->heading_confidence;
+    updateMapToOdomFilterLocked(
+      measured_map_to_odom,
+      map_match->confidence * scan_translation_update_weight_,
+      true,
+      false);
+    updateMapToOdomFilterLocked(
+      measured_map_to_odom,
+      map_match->confidence * scan_yaw_update_weight_,
+      false,
+      true);
   } else if (attempted_scan_match) {
     // Keep the last corrected map -> odom estimate when scan matching is stale
     // or low confidence instead of drifting the global alignment back to identity.
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (map_match.has_value()) {
+      last_scan_match_decision_ =
+        map_match->decision == "accepted" ? "rejected_low_confidence" : map_match->decision;
+      last_scan_match_score_ = map_match->score;
+      last_scan_match_confidence_ = map_match->confidence;
+      last_gnss_confidence_ = map_match->gnss_confidence;
+      last_heading_confidence_ = map_match->heading_confidence;
+    } else {
+      last_scan_match_decision_ = "no_match";
+      last_scan_match_score_ = 0.0;
+      last_scan_match_confidence_ = 0.0;
+    }
   }
 
   StateSnapshot final_snapshot = snapshotState();

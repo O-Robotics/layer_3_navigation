@@ -49,6 +49,16 @@ private:
     tf2::Transform map_to_base;
     double score{0.0};
     double confidence{0.0};
+    double gnss_confidence{1.0};
+    double heading_confidence{1.0};
+    std::string decision{"not_attempted"};
+  };
+
+  struct ReferenceGeoreference
+  {
+    bool valid{false};
+    std::array<double, 3> longitude_coefficients{0.0, 0.0, 0.0};
+    std::array<double, 3> latitude_coefficients{0.0, 0.0, 0.0};
   };
 
   struct StateSnapshot
@@ -59,6 +69,8 @@ private:
     bool navsat_reference_ready{false};
     bool latest_scan_ready{false};
     bool latest_global_costmap_ready{false};
+    bool reference_costmap_ready{false};
+    bool reference_georeference_ready{false};
     bool last_map_to_odom_ready{false};
     bool map_to_odom_filter_ready{false};
     bool correction_startup_ready{false};
@@ -70,6 +82,7 @@ private:
     sensor_msgs::msg::Imu latest_heading;
     sensor_msgs::msg::LaserScan latest_scan;
     nav_msgs::msg::OccupancyGrid latest_global_costmap;
+    ReferenceGeoreference reference_georeference;
     std::shared_ptr<const std::vector<float>> latest_global_costmap_score_field;
     rclcpp::Time latest_odometry_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time latest_navsat_stamp{0, 0, RCL_ROS_TIME};
@@ -80,6 +93,12 @@ private:
     std::array<double, 3> map_to_odom_filter_state{0.0, 0.0, 0.0};
     std::array<double, 3> map_to_odom_filter_covariance{1.0, 1.0, 0.5};
     tf2::Transform last_map_to_odom;
+    std::string reference_source;
+    std::string last_scan_match_decision;
+    double last_scan_match_score{0.0};
+    double last_scan_match_confidence{0.0};
+    double last_gnss_confidence{0.0};
+    double last_heading_confidence{0.0};
   };
 
   void handleOdometry(const nav_msgs::msg::Odometry::SharedPtr message);
@@ -89,6 +108,9 @@ private:
   void handleGlobalCostmap(const nav_msgs::msg::OccupancyGrid::SharedPtr message);
   void globalCostmapWorkerLoop();
   void publishMapToOdomTransform();
+  void loadReferenceCostmapIfConfigured();
+  [[nodiscard]] bool loadReferenceCostmapFromYaml(const std::string & yaml_path);
+  void projectReferenceCostmapFromNavSatLocked();
   [[nodiscard]] std::shared_ptr<std::vector<float>> buildGlobalCostmapScoreField(
     const nav_msgs::msg::OccupancyGrid & map) const;
   void initializeMapToOdomFilter();
@@ -97,6 +119,11 @@ private:
   void predictMapToOdomFilterLocked();
   void updateMapToOdomFilter(const tf2::Transform & measurement, double confidence);
   void updateMapToOdomFilterLocked(const tf2::Transform & measurement, double confidence);
+  void updateMapToOdomFilterLocked(
+    const tf2::Transform & measurement,
+    double confidence,
+    bool update_translation,
+    bool update_yaw);
   void decayMapToOdomFilterTowardsIdentity();
   void decayMapToOdomFilterTowardsIdentityLocked();
   [[nodiscard]] tf2::Transform filteredMapToOdomTransform() const;
@@ -117,6 +144,13 @@ private:
   [[nodiscard]] double georeferenceConsistencyConfidence(
     const StateSnapshot & snapshot,
     const tf2::Transform & candidate_map_to_base) const;
+  [[nodiscard]] std::optional<geometry_msgs::msg::Point> mapPointFromNavSat(
+    const StateSnapshot & snapshot,
+    const sensor_msgs::msg::NavSatFix & navsat) const;
+  [[nodiscard]] std::optional<double> headingYaw(
+    const StateSnapshot & snapshot) const;
+  [[nodiscard]] bool navsatInputFresh(const StateSnapshot & snapshot) const;
+  [[nodiscard]] bool headingInputFresh(const StateSnapshot & snapshot) const;
   [[nodiscard]] std::optional<MapMatchEstimate> estimateMapToBaseFromPrior(
     const StateSnapshot & snapshot,
     const tf2::Transform & map_to_base_prior) const;
@@ -124,6 +158,7 @@ private:
   std::string map_frame_id_;
   std::string odom_frame_id_;
   std::string base_frame_id_;
+  std::string reference_costmap_yaml_;
   std::string odometry_topic_;
   std::string navsat_topic_;
   std::string heading_topic_;
@@ -131,12 +166,16 @@ private:
   std::string global_costmap_topic_;
   std::string status_topic_;
   bool publish_identity_when_pose_missing_{true};
+  bool allow_live_costmap_reference_{false};
   bool latest_odometry_ready_{false};
   bool latest_navsat_ready_{false};
   bool latest_heading_ready_{false};
   bool navsat_reference_ready_{false};
   bool latest_scan_ready_{false};
   bool latest_global_costmap_ready_{false};
+  bool reference_costmap_ready_{false};
+  bool reference_georeference_ready_{false};
+  bool reference_costmap_projected_{false};
   bool last_map_to_odom_ready_{false};
   bool map_to_odom_filter_ready_{false};
   bool correction_startup_ready_{false};
@@ -186,6 +225,15 @@ private:
   double low_confidence_identity_pull_alpha_{0.15};
   double georef_consistency_max_error_m_{5.0};
   double georef_consistency_min_confidence_{0.2};
+  double max_scan_yaw_correction_rad_{0.0872664626};
+  double heading_yaw_gate_rad_{0.2617993878};
+  double gnss_position_gate_m_{2.0};
+  double scan_translation_update_weight_{0.7};
+  double scan_yaw_update_weight_{0.15};
+  double heading_yaw_update_weight_{0.85};
+  double gnss_translation_update_weight_{0.8};
+  double heading_timeout_seconds_{1.0};
+  double navsat_timeout_seconds_{2.0};
   std::array<double, 3> process_noise_diagonal_{0.01, 0.01, 0.005};
   std::array<double, 3> measurement_noise_diagonal_min_{0.05, 0.05, 0.02};
   std::array<double, 3> measurement_noise_diagonal_max_{0.6, 0.6, 0.3};
@@ -196,6 +244,8 @@ private:
   sensor_msgs::msg::Imu latest_heading_;
   sensor_msgs::msg::LaserScan latest_scan_;
   nav_msgs::msg::OccupancyGrid latest_global_costmap_;
+  nav_msgs::msg::OccupancyGrid pending_reference_costmap_;
+  ReferenceGeoreference reference_georeference_;
   nav_msgs::msg::OccupancyGrid pending_global_costmap_;
   std::shared_ptr<std::vector<float>> latest_global_costmap_score_field_;
   rclcpp::Time latest_odometry_stamp_{0, 0, RCL_ROS_TIME};
@@ -211,6 +261,12 @@ private:
   std::array<double, 3> map_to_odom_filter_state_{0.0, 0.0, 0.0};
   std::array<double, 3> map_to_odom_filter_covariance_{1.0, 1.0, 0.5};
   tf2::Transform last_map_to_odom_;
+  std::string reference_source_{"none"};
+  std::string last_scan_match_decision_{"not_attempted"};
+  double last_scan_match_score_{0.0};
+  double last_scan_match_confidence_{0.0};
+  double last_gnss_confidence_{0.0};
+  double last_heading_confidence_{0.0};
   mutable std::mutex state_mutex_;
   std::condition_variable global_costmap_worker_cv_;
   bool pending_global_costmap_ready_{false};

@@ -222,6 +222,9 @@ def _build_nodes(context):
     map_pose_runtime_parameters = {
         "use_sim_time": use_sim_time,
     }
+    if static_reference_costmap_yaml and not builtin_local_pattern_mode:
+        map_pose_runtime_parameters["reference_costmap_yaml"] = static_reference_costmap_yaml
+        map_pose_runtime_parameters["allow_live_costmap_reference"] = False
     if builtin_local_pattern_mode:
         map_pose_runtime_parameters["map_frame"] = "odom"
         map_pose_runtime_parameters["odom_frame"] = "odom"
