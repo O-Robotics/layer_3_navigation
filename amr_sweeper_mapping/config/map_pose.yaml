@@ -71,10 +71,7 @@
     scan_translation_update_weight:      0.7                              # Scan matching may strongly refine wall-relative X/Y when it agrees with the reference map.
     scan_yaw_update_weight:              0.15                             # Scan yaw has deliberately low authority so static-map ambiguities cannot permanently rotate map -> odom.
     heading_yaw_update_weight:           0.85                             # Fresh IMU/magnetometer heading is the primary absolute yaw recovery signal for map -> odom.
-    gnss_translation_update_weight:      0.2                              # Fresh GNSS converted through the reference-map georeference is a slow absolute X/Y recovery signal, not a high-rate pose driver.
-    gnss_translation_deadband_m:         0.25                             # Ignore GNSS translation residuals smaller than this so simulated/site noise does not shake map -> odom.
-    gnss_max_translation_step_m:         0.05                             # Maximum GNSS-only map -> odom translation step per update after the deadband.
-    gnss_translation_update_period_seconds: 1.0                           # Minimum period between GNSS-only translation recovery updates.
+    gnss_translation_update_weight:      0.8                              # Fresh GNSS projected through the reference-map georeference is the primary absolute X/Y recovery signal for map -> odom.
     heading_timeout_seconds:             1.0                              # Heading must be this fresh before it gates or corrects map -> odom yaw.
     navsat_timeout_seconds:              2.0                              # GNSS must be this fresh before it gates or corrects map -> odom translation.
 

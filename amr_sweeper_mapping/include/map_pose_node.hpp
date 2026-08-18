@@ -110,6 +110,7 @@ private:
   void publishMapToOdomTransform();
   void loadReferenceCostmapIfConfigured();
   [[nodiscard]] bool loadReferenceCostmapFromYaml(const std::string & yaml_path);
+  void projectReferenceCostmapFromNavSatLocked();
   [[nodiscard]] std::shared_ptr<std::vector<float>> buildGlobalCostmapScoreField(
     const nav_msgs::msg::OccupancyGrid & map) const;
   void initializeMapToOdomFilter();
@@ -230,10 +231,7 @@ private:
   double scan_translation_update_weight_{0.7};
   double scan_yaw_update_weight_{0.15};
   double heading_yaw_update_weight_{0.85};
-  double gnss_translation_update_weight_{0.2};
-  double gnss_translation_deadband_m_{0.25};
-  double gnss_max_translation_step_m_{0.05};
-  double gnss_translation_update_period_seconds_{1.0};
+  double gnss_translation_update_weight_{0.8};
   double heading_timeout_seconds_{1.0};
   double navsat_timeout_seconds_{2.0};
   std::array<double, 3> process_noise_diagonal_{0.01, 0.01, 0.005};
@@ -246,6 +244,7 @@ private:
   sensor_msgs::msg::Imu latest_heading_;
   sensor_msgs::msg::LaserScan latest_scan_;
   nav_msgs::msg::OccupancyGrid latest_global_costmap_;
+  nav_msgs::msg::OccupancyGrid pending_reference_costmap_;
   ReferenceGeoreference reference_georeference_;
   nav_msgs::msg::OccupancyGrid pending_global_costmap_;
   std::shared_ptr<std::vector<float>> latest_global_costmap_score_field_;
@@ -258,7 +257,6 @@ private:
   rclcpp::Time latest_global_costmap_processed_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time pending_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_scan_match_attempt_stamp_{0, 0, RCL_ROS_TIME};
-  rclcpp::Time last_gnss_translation_update_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_map_pose_stamp_{0, 0, RCL_ROS_TIME};
   std::array<double, 3> map_to_odom_filter_state_{0.0, 0.0, 0.0};
   std::array<double, 3> map_to_odom_filter_covariance_{1.0, 1.0, 0.5};
