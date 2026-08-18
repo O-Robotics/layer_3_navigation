@@ -130,10 +130,20 @@ private:
   void integrateScanIntoGlobalMap(const sensor_msgs::msg::LaserScan & message);
   void ensureMissionLoaded();
   void convertMissionRoute();
+  [[nodiscard]] std::vector<geometry_msgs::msg::PoseStamped> applyMissionStartMode(
+    const std::vector<geometry_msgs::msg::PoseStamped> & route) const;
   void startNextMissionChunk();
   [[nodiscard]] bool isNavigatorActive();
+  [[nodiscard]] bool updateNavigationTfReadiness();
+  void updateActiveGoalDivergenceWatchdog();
+  [[nodiscard]] bool hasActiveGoalRouteProgress() const;
+  [[nodiscard]] bool hasActiveGoalOdometryProgress() const;
+  [[nodiscard]] bool isTransientNavigationTfFailure() const;
   void handleGoalResponse(
     rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::SharedPtr goal_handle);
+  void handleGoalFeedback(
+    rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::SharedPtr goal_handle,
+    const std::shared_ptr<const nav2_msgs::action::NavigateThroughPoses::Feedback> feedback);
   void handleGoalResult(
     const rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::WrappedResult & result);
   [[nodiscard]] bool advancePastBlockedMissionWaypoint(const std::string & failure_reason);
@@ -223,9 +233,12 @@ private:
   std::string nav2_global_costmap_topic_;
   std::string nav2_global_costmap_updates_topic_;
   std::string map_pose_status_topic_;
+  std::string mission_start_mode_{"start_over"};
   double runtime_costmap_save_period_seconds_{10.0};
   double nav2_costmap_ready_timeout_seconds_{2.5};
   double startup_tf_lookup_timeout_seconds_{0.05};
+  int navigation_tf_ready_streak_required_{3};
+  int max_no_progress_nav2_retries_{60};
   double static_costmap_save_max_map_to_odom_translation_m_{5.0};
   double static_costmap_save_max_map_to_odom_yaw_deg_{30.0};
   int static_obstacle_min_observations_{6};
@@ -247,11 +260,25 @@ private:
   bool mission_end_pending_{false};
   bool persistent_mission_static_costmap_merged_{false};
   bool advance_past_blocked_waypoints_{true};
+  bool reorder_route_start_to_nearest_pose_{false};
   std::size_t active_chunk_index_{0U};
-  int max_segments_per_goal_{1};
+  int max_segments_per_goal_{24};
   int max_mission_route_points_{5000};
   int max_blocked_waypoint_advances_{20};
   int consecutive_blocked_waypoint_advances_{0};
+  int navigation_tf_ready_streak_{0};
+  double active_goal_min_odometry_progress_m_{0.5};
+  double active_goal_divergence_timeout_seconds_{120.0};
+  double active_goal_required_closing_progress_m_{0.5};
+  double active_goal_allowed_distance_regression_m_{3.0};
+  double route_start_reorder_min_improvement_m_{1.0};
+  double route_start_entry_min_distance_m_{2.0};
+  double blocked_recovery_reentry_min_improvement_m_{2.0};
+  std::size_t active_goal_route_start_index_{0U};
+  std::size_t active_goal_pose_count_{0U};
+  bool latest_goal_feedback_ready_{false};
+  int latest_goal_poses_remaining_{0};
+  int consecutive_no_progress_nav2_failures_{0};
   double global_map_resolution_m_{0.05};
   double max_waypoint_spacing_m_{0.5};
   double georef_lock_window_seconds_{3.0};
@@ -279,12 +306,22 @@ private:
   bool latest_heading_ready_{false};
   bool georeferenced_costmap_locked_{false};
   bool mission_anchor_pose_ready_{false};
+  bool active_goal_start_odometry_pose_ready_{false};
+  bool active_goal_odometry_progress_ready_{false};
+  bool active_goal_target_pose_ready_{false};
+  bool active_goal_distance_ready_{false};
+  bool active_goal_cancel_requested_{false};
   bool padded_live_map_bounds_ready_{false};
   bool startup_tf_ready_{false};
   bool have_scan_{false};
   sensor_msgs::msg::LaserScan latest_scan_;
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
+  geometry_msgs::msg::Point active_goal_start_odometry_position_;
+  geometry_msgs::msg::PoseStamped active_goal_target_pose_;
+  double active_goal_best_distance_to_target_m_{0.0};
+  rclcpp::Time active_goal_dispatch_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time active_goal_last_closing_progress_time_{0, 0, RCL_ROS_TIME};
   sensor_msgs::msg::Imu latest_heading_;
   rclcpp::Time latest_nav2_local_costmap_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time latest_nav2_global_costmap_stamp_{0, 0, RCL_ROS_TIME};
@@ -347,6 +384,8 @@ private:
   rclcpp::Client<amr_sweeper_mission_executor::srv::EndMission>::SharedPtr end_mission_client_;
   rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr navigator_state_client_;
   rclcpp_action::Client<nav2_msgs::action::NavigateThroughPoses>::SharedPtr navigate_through_poses_client_;
+  rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::SharedPtr
+    active_goal_handle_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 };

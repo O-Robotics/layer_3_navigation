@@ -43,7 +43,7 @@
     occupied_penalty:                    0.3                              # Penalty applied when a beam endpoint lands in a place that does not agree with the map.
     prior_blend_weight:                  0.7                              # Reserved compatibility knob from the earlier prior-based matcher; the runtime filter now starts identity and tracks scan corrections.
     scan_timeout_seconds:                2.5                              # Ignore stale scans so the matcher does not back-calculate map -> odom from old sensor data.
-    costmap_timeout_seconds:             2.0                              # Wait at most this long for the first valid mission global costmap; once received, the cached map stays valid for runtime scan correlation.
+    costmap_timeout_seconds:             2.0                              # Wait at most this long for the first valid mission global costmap; once received, the cached static map remains valid for runtime scan correlation even if the publisher is quiet.
     odometry_timeout_seconds:            1.0                              # Treat odometry as failed if FusionCore stops updating for this long; without odom the map -> odom chain cannot be trusted.
     scan_match_period_seconds:           0.5                              # Run the expensive scan-to-map correction at a bounded cadence while still publishing map -> odom at publish_period_seconds.
     global_costmap_min_update_period_seconds: 0.5                         # Rebuild the likelihood field from mapping/static_costmap at most at this cadence; freshness timestamps still update on every map message.
@@ -62,7 +62,7 @@
 
     # -- Georeference consistency --------------------------------------------
     georef_consistency_max_error_m:      5.0                              # Maximum acceptable difference in meters between the candidate map-matched pose and the GNSS/heading georeference prior before confidence collapses.
-    georef_consistency_min_confidence:   0.2                              # Lower bound applied to the GNSS-and-heading consistency multiplier so it influences the runtime pose estimate without fully overriding scan matching.
+    georef_consistency_min_confidence:   0.0                              # Let GNSS/georeference disagreement fully reject scan matches beyond the configured limit instead of allowing slow global-frame walk.
 
     # -- EKF tuning -----------------------------------------------------------
     process_noise_diagonal:              [0.01, 0.01, 0.005]             # Random-walk process noise for the runtime map -> odom EKF state [x, y, yaw].

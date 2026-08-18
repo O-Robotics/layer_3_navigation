@@ -52,6 +52,12 @@
     map_pose_status_topic:         mapping/map_pose_status          # map_pose_node health topic. BOOTSTRAP, DEGRADED, HEALTHY, and WARNING all allow scan integration; FAULT blocks it.
     startup_tf_lookup_timeout_seconds: 0.05                        # Wait this long per scan while the local tf listener warms up and ingests the full map -> sensor chain before startup scan integration begins.
     startup_tf_ready_streak_required: 3                            # Require this many consecutive successful map -> scan transform checks before the first scan is allowed into the runtime map builder.
+    navigation_tf_ready_streak_required: 3                         # Require this many consecutive map -> base_footprint checks before sending a Nav2 mission chunk so transient localization gaps do not consume blocked-waypoint recovery.
+    max_no_progress_nav2_retries: 60                               # Retry a Nav2 chunk this many times when it fails before reporting waypoint progress; these failures are treated as readiness/localization issues, not blocked route waypoints.
+    active_goal_min_odometry_progress_m: 0.5                       # Treat an active Nav2 goal as having made route progress once odometry has moved this far from the chunk dispatch pose, which keeps single-waypoint chunks from masking real controller motion.
+    active_goal_divergence_timeout_seconds: 120.0                  # Cancel an active Nav2 chunk if the robot has moved but has not meaningfully closed on its target for this long, allowing blocked-waypoint recovery instead of an endless chase.
+    active_goal_required_closing_progress_m: 0.5                   # Minimum distance-to-target improvement that refreshes the active-goal divergence watchdog timer.
+    active_goal_allowed_distance_regression_m: 3.0                 # Require this much regression from the best observed distance before the divergence watchdog cancels the active Nav2 goal.
     georef_lock_window_seconds:    3.0                              # Startup seeding window used to collect GNSS and IMU heading samples before the saved georeferenced costmap is projected into the metric map frame.
     georef_lock_fallback_timeout_seconds: 6.0                       # Hold scan integration (no from-scratch map) until the georeferenced seed locks or this much time has passed since it started loading, whichever comes first. Clamped to be >= georef_lock_window_seconds.
     georef_lock_min_samples:       10                               # Minimum samples required inside the seeding window before the one-time startup costmap projection is accepted.
@@ -73,10 +79,15 @@
     # -- Mission execution policy ---------------------------------------------
     auto_start_mission:            false
     repeat_mission:                false
-    max_segments_per_goal:                 100
-    max_waypoint_spacing_m:        5.0                             # Densify long route segments so Nav2 plans to nearer intermediate targets while SLAM is still expanding the live map.
+    max_segments_per_goal:         24                               # Send a rolling mission horizon to Nav2 so it replans ahead of the robot instead of stopping at every short route segment; feedback still lets blocked-waypoint recovery identify the failed pose inside the active horizon.
+    max_waypoint_spacing_m:        2.0                              # Densify long route segments so Nav2 plans to nearer intermediate targets while SLAM is still expanding the live map.
     max_mission_route_points:      5000                             # Reject route conversion if densification would exceed this, which catches frame/unit mismatches before Nav2 sees invalid goals.
     advance_past_blocked_waypoints: true                           # When Nav2 cannot reach a chunk target, skip that blocked waypoint and continue toward the next route waypoint.
     max_blocked_waypoint_advances: 20                              # Abort after this many consecutive blocked-waypoint skips to avoid endless coverage loss.
+    mission_start_mode:           start_over                       # Fresh missions navigate to the authored first waypoint. Use resume_last only when continuing a halted mission from saved progress/actual robot pose.
+    reorder_route_start_to_nearest_pose: false                     # Deprecated compatibility flag. When true, behaves like mission_start_mode=resume_last and trims already-covered earlier waypoints instead of wrapping them to the end.
+    route_start_reorder_min_improvement_m: 1.0                     # Keep the authored first waypoint when the nearest waypoint is not at least this much closer to the robot.
+    route_start_entry_min_distance_m: 2.0                          # In resume_last mode, if the nearest waypoint is under this distance from the robot, enter at the next forward route waypoint far enough away for Nav2/controller tracking.
+    blocked_recovery_reentry_min_improvement_m: 2.0                # After a failed goal moved the robot, resume from the remaining route waypoint nearest the actual robot pose when it is meaningfully closer than the authored next waypoint.
     status_period_seconds:         2.0
     mission_tick_period_seconds:   1.0

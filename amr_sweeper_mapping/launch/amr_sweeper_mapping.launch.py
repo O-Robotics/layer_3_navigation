@@ -84,6 +84,7 @@ def _build_nodes(context):
         "mission_static_costmap_yaml"
     ).perform(context)
     auto_start_mission = LaunchConfiguration("auto_start_mission").perform(context).lower() == "true"
+    mission_start_mode = LaunchConfiguration("mission_start_mode").perform(context).strip()
     use_gaussian = LaunchConfiguration("use_gaussian").perform(context).lower() == "true"
     use_ntrip_client = LaunchConfiguration("use_ntrip_client").perform(context).lower() == "true"
     bootstrap_empty_global_costmap = (
@@ -179,6 +180,8 @@ def _build_nodes(context):
         "end_mission_service": "end_mission",
         "auto_start_mission": auto_start_mission,
     }
+    if mission_start_mode:
+        common_runtime_parameters["mission_start_mode"] = mission_start_mode
     if builtin_local_pattern_mode:
         common_runtime_parameters["map_frame"] = "odom"
         common_runtime_parameters["pad_live_map_to_minimum_size"] = False
@@ -350,6 +353,14 @@ def generate_launch_description():
                 description=(
                     "When true, the mapping node will dispatch Nav2 goals after receiving a valid "
                     "mission execution context. RUNNING profiles should enable this explicitly."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "mission_start_mode",
+                default_value="start_over",
+                description=(
+                    "Mission route entry policy. start_over navigates to the authored first waypoint; "
+                    "resume_last trims already-covered waypoints and resumes near the current pose."
                 ),
             ),
             DeclareLaunchArgument(

@@ -46,7 +46,7 @@ def _fusioncore_no_ntrip_overrides() -> dict:
         "gnss.min_fix_type": 1,
         "gnss.base_noise_xy": 50.0,
         "gnss.base_noise_z": 75.0,
-        "gnss.track_heading_enabled": False,
+        "gnss.max_speed": 3.0,
     }
 
 
@@ -235,6 +235,7 @@ def _build_launches(context):
     mission_type = LaunchConfiguration('mission_type').perform(context)
     mission_static_costmap_yaml = LaunchConfiguration('mission_static_costmap_yaml').perform(context)
     auto_start_mission = LaunchConfiguration('auto_start_mission').perform(context)
+    mission_start_mode = LaunchConfiguration('mission_start_mode').perform(context)
     use_gaussian = LaunchConfiguration('use_gaussian').perform(context)
     use_test = LaunchConfiguration('use_test').perform(context).lower() == 'true'
     test_output_directory = LaunchConfiguration('test_output_directory').perform(context)
@@ -359,6 +360,7 @@ def _build_launches(context):
             'bootstrap_empty_global_costmap': 'true' if run_layer_3_system_check else 'false',
             'use_gaussian': use_gaussian,
             'auto_start_mission': auto_start_mission,
+            'mission_start_mode': mission_start_mode,
             'use_test': 'true' if use_test else 'false',
             'test_output_directory': test_output_directory,
         }.items(),
@@ -403,7 +405,7 @@ def _build_launches(context):
                 use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
             "publish.tf": False,
         }
-        if use_gnss and not use_ntrip_client and not use_simulation_bool:
+        if use_gnss and not use_ntrip_client:
             fusion_overrides.update(_fusioncore_no_ntrip_overrides())
         if use_simulation_bool:
             # Simulation brings wheel odometry online later than hardware. Keep FusionCore
@@ -416,9 +418,7 @@ def _build_launches(context):
                 # NavSatFix while still preserving RTK-fixed gating through STATUS_GBAS_FIX.
                 "gnss.use_gps_fix": False,
                 "gnss.min_satellites": 4,
-                # Sim GNSS positions are useful, but GPS track-heading from short-baseline
-                # synthetic fixes can overconstrain the UKF during startup and early turns.
-                "gnss.track_heading_enabled": False,
+                "gnss.track_heading_enabled": use_gnss,
             })
         odometry_projection_node = Node(
             package="amr_sweeper_localization",
@@ -566,6 +566,7 @@ def generate_launch_description():
         DeclareLaunchArgument('mission_static_costmap_yaml', default_value=''),
         DeclareLaunchArgument('use_gaussian', default_value='true'),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
+        DeclareLaunchArgument('mission_start_mode', default_value='start_over'),
         DeclareLaunchArgument('use_test', default_value='false'),
         DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
         DeclareLaunchArgument('run_layer_3_system_check', default_value='false'),

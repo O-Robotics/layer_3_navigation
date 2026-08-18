@@ -2556,6 +2556,8 @@ private:
     msg.position_sigma_y = d.position_sigma_y;
     msg.lever_arm_used   = d.lever_arm_used;
     msg.heading_sigma_deg = d.heading_sigma_deg;
+    msg.track_heading_skipped_stronger_source = d.track_heading_skipped_stronger_source;
+    msg.track_heading_skipped_motion = d.track_heading_skipped_motion;
 
     gnss_status_pub_->publish(msg);
   }

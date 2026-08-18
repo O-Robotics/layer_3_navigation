@@ -184,7 +184,7 @@ planner_server:
     - GridBased
     GridBased:
       plugin: nav2_navfn_planner::NavfnPlanner
-      tolerance: 0.25
+      tolerance: 0.75
       use_astar: false
       allow_unknown: true
 smoother_server:

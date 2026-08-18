@@ -26,7 +26,6 @@ def _fusioncore_no_ntrip_overrides() -> dict:
         "gnss.min_fix_type": 1,
         "gnss.base_noise_xy": 50.0,
         "gnss.base_noise_z": 75.0,
-        "gnss.track_heading_enabled": False,
         # Without RTK, a bare autonomous fix (fix_type=1) is the best GNSS
         # ever gets, and base_noise_xy above is deliberately loosened to
         # reflect that. But the chi2 gate judges a fix purely against that

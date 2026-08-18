@@ -38,6 +38,8 @@ constexpr char kNavigateThroughPosesExecutionMode[] = "navigate_through_poses";
 constexpr char kManualMappingExecutionMode[] = "manual_mapping";
 constexpr char kScheduledMissionType[] = "vda5050_scheduled_mission";
 constexpr char kLocalScheduledMissionType[] = "vda5050_scheduled_mission_local";
+constexpr char kMissionStartModeStartOver[] = "start_over";
+constexpr char kMissionStartModeResumeLast[] = "resume_last";
 constexpr char kDefaultNavSatTopic[] = "gnss/navsat";
 constexpr char kDefaultScanTopic[] = "depth_camera/scan";
 constexpr char kDefaultOdometryTopic[] = "localization/odometry_fused";
@@ -1194,11 +1196,16 @@ MappingNode::MappingNode()
   declare_parameter("georef_lock_min_samples", 10);
   declare_parameter("georef_lock_max_navsat_spread_m", 2.0);
   declare_parameter("georef_lock_max_heading_deviation_deg", 12.0);
-  declare_parameter("max_segments_per_goal", 1);
+  declare_parameter("max_segments_per_goal", 24);
   declare_parameter("max_waypoint_spacing_m", 0.5);
   declare_parameter("max_mission_route_points", 5000);
   declare_parameter("advance_past_blocked_waypoints", true);
   declare_parameter("max_blocked_waypoint_advances", 20);
+  declare_parameter("mission_start_mode", std::string(kMissionStartModeStartOver));
+  declare_parameter("reorder_route_start_to_nearest_pose", false);
+  declare_parameter("route_start_reorder_min_improvement_m", 1.0);
+  declare_parameter("route_start_entry_min_distance_m", 2.0);
+  declare_parameter("blocked_recovery_reentry_min_improvement_m", 2.0);
   declare_parameter("pad_live_map_to_minimum_size", true);
   declare_parameter("min_global_map_size_m", 10.0);
   declare_parameter("status_period_seconds", 2.0);
@@ -1217,6 +1224,12 @@ MappingNode::MappingNode()
   declare_parameter("nav2_costmap_ready_timeout_seconds", 2.5);
   declare_parameter("startup_tf_lookup_timeout_seconds", 0.05);
   declare_parameter("startup_tf_ready_streak_required", 3);
+  declare_parameter("navigation_tf_ready_streak_required", 3);
+  declare_parameter("max_no_progress_nav2_retries", 60);
+  declare_parameter("active_goal_min_odometry_progress_m", 0.5);
+  declare_parameter("active_goal_divergence_timeout_seconds", 120.0);
+  declare_parameter("active_goal_required_closing_progress_m", 0.5);
+  declare_parameter("active_goal_allowed_distance_regression_m", 3.0);
   declare_parameter("bootstrap_empty_global_costmap", false);
   declare_parameter("end_mission_service", std::string("end_mission"));
 
@@ -1282,6 +1295,18 @@ MappingNode::MappingNode()
     std::max(0.01, get_parameter("startup_tf_lookup_timeout_seconds").as_double());
   startup_tf_ready_streak_required_ =
     std::max(1, static_cast<int>(get_parameter("startup_tf_ready_streak_required").as_int()));
+  navigation_tf_ready_streak_required_ =
+    std::max(1, static_cast<int>(get_parameter("navigation_tf_ready_streak_required").as_int()));
+  max_no_progress_nav2_retries_ =
+    std::max(0, static_cast<int>(get_parameter("max_no_progress_nav2_retries").as_int()));
+  active_goal_min_odometry_progress_m_ =
+    std::max(0.0, get_parameter("active_goal_min_odometry_progress_m").as_double());
+  active_goal_divergence_timeout_seconds_ =
+    std::max(0.0, get_parameter("active_goal_divergence_timeout_seconds").as_double());
+  active_goal_required_closing_progress_m_ =
+    std::max(0.0, get_parameter("active_goal_required_closing_progress_m").as_double());
+  active_goal_allowed_distance_regression_m_ =
+    std::max(0.0, get_parameter("active_goal_allowed_distance_regression_m").as_double());
   static_obstacle_min_observations_ =
     static_cast<int>(get_parameter("static_obstacle_min_observations").as_int());
   static_obstacle_min_occupied_fraction_ =
@@ -1302,6 +1327,18 @@ MappingNode::MappingNode()
   advance_past_blocked_waypoints_ = get_parameter("advance_past_blocked_waypoints").as_bool();
   max_blocked_waypoint_advances_ =
     std::max(0, static_cast<int>(get_parameter("max_blocked_waypoint_advances").as_int()));
+  mission_start_mode_ = to_lower(trim(get_parameter("mission_start_mode").as_string()));
+  if (mission_start_mode_.empty()) {
+    mission_start_mode_ = kMissionStartModeStartOver;
+  }
+  reorder_route_start_to_nearest_pose_ =
+    get_parameter("reorder_route_start_to_nearest_pose").as_bool();
+  route_start_reorder_min_improvement_m_ =
+    std::max(0.0, get_parameter("route_start_reorder_min_improvement_m").as_double());
+  route_start_entry_min_distance_m_ =
+    std::max(0.0, get_parameter("route_start_entry_min_distance_m").as_double());
+  blocked_recovery_reentry_min_improvement_m_ =
+    std::max(0.0, get_parameter("blocked_recovery_reentry_min_improvement_m").as_double());
   pad_live_map_to_minimum_size_ = get_parameter("pad_live_map_to_minimum_size").as_bool();
   min_global_map_size_m_ = get_parameter("min_global_map_size_m").as_double();
   nav2_costmap_ready_timeout_seconds_ = std::max(
@@ -1552,6 +1589,22 @@ void MappingNode::handleOdometry(const nav_msgs::msg::Odometry::SharedPtr messag
   latest_odometry_position_ = message->pose.pose.position;
   latest_odometry_orientation_ = message->pose.pose.orientation;
   latest_odometry_pose_ready_ = true;
+  if (
+    mission_active_ &&
+    active_goal_start_odometry_pose_ready_ &&
+    !active_goal_odometry_progress_ready_)
+  {
+    const double dx = latest_odometry_position_.x - active_goal_start_odometry_position_.x;
+    const double dy = latest_odometry_position_.y - active_goal_start_odometry_position_.y;
+    if (std::hypot(dx, dy) >= active_goal_min_odometry_progress_m_) {
+      active_goal_odometry_progress_ready_ = true;
+      consecutive_no_progress_nav2_failures_ = 0;
+      RCLCPP_INFO(
+        get_logger(),
+        "Active Nav2 goal has moved %.2fm from its dispatch pose; treating this as route progress for blocked-waypoint recovery.",
+        std::hypot(dx, dy));
+    }
+  }
   tryPublishBootstrapGlobalCostmap();
 
   const auto & position = message->pose.pose.position;
@@ -2949,7 +3002,12 @@ void MappingNode::writeAnchoredMissionRouteArtifact(const std::string & source_c
 
 void MappingNode::tickMissionExecution()
 {
-  if (!auto_start_mission_ || waiting_for_goal_result_) {
+  if (!auto_start_mission_) {
+    return;
+  }
+
+  if (waiting_for_goal_result_) {
+    updateActiveGoalDivergenceWatchdog();
     return;
   }
 
@@ -3194,6 +3252,7 @@ void MappingNode::convertMissionRoute()
     mission_route_ = densifyRoute(mission_route_, max_waypoint_spacing_m_);
   }
   mission_route_ = orientRoute(std::move(mission_route_));
+  mission_route_ = applyMissionStartMode(mission_route_);
   if (uses_base_footprint_anchor) {
     writeAnchoredMissionRouteArtifact(coordinate_frame);
   }
@@ -3227,6 +3286,120 @@ void MappingNode::convertMissionRoute()
     mission_route_frame_id_.c_str(),
     mission_chunks_.size(),
     is_builtin_mission ? " without densification for builtin mission" : "");
+}
+
+std::vector<geometry_msgs::msg::PoseStamped> MappingNode::applyMissionStartMode(
+  const std::vector<geometry_msgs::msg::PoseStamped> & route) const
+{
+  const bool resume_last =
+    mission_start_mode_ == kMissionStartModeResumeLast ||
+    mission_start_mode_ == "resume_from_robot_pose" ||
+    mission_start_mode_ == "resume_nearest" ||
+    mission_start_mode_ == "resume" ||
+    reorder_route_start_to_nearest_pose_;
+
+  if (!resume_last) {
+    if (mission_start_mode_ != kMissionStartModeStartOver) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Unknown mission_start_mode '%s'; using start_over so the mission navigates to the authored first waypoint.",
+        mission_start_mode_.c_str());
+    }
+    return route;
+  }
+
+  if (route.size() < 3U || !latest_odometry_pose_ready_) {
+    return route;
+  }
+
+  const std::string route_frame = route.front().header.frame_id.empty() ?
+    mission_route_frame_id_ : route.front().header.frame_id;
+
+  geometry_msgs::msg::PointStamped odom_point;
+  odom_point.header.frame_id = odom_frame_id_;
+  odom_point.header.stamp = rclcpp::Time(0, 0, get_clock()->get_clock_type());
+  odom_point.point = latest_odometry_position_;
+
+  geometry_msgs::msg::PointStamped route_frame_point;
+  try {
+    if (route_frame == odom_frame_id_) {
+      route_frame_point = odom_point;
+    } else {
+      const auto route_from_odom = tf_buffer_->lookupTransform(
+        route_frame,
+        odom_frame_id_,
+        tf2::TimePointZero);
+      tf2::doTransform(odom_point, route_frame_point, route_from_odom);
+    }
+  } catch (const tf2::TransformException & exception) {
+    RCLCPP_WARN(
+      get_logger(),
+      "Cannot resume mission from robot pose because the robot pose could not be transformed from %s into %s; starting from the authored first waypoint instead: %s",
+      odom_frame_id_.c_str(),
+      route_frame.c_str(),
+      exception.what());
+    return route;
+  }
+
+  std::size_t nearest_index = 0U;
+  double nearest_distance = std::numeric_limits<double>::infinity();
+  for (std::size_t index = 0U; index < route.size(); ++index) {
+    const auto & pose = route.at(index);
+    const double dx = pose.pose.position.x - route_frame_point.point.x;
+    const double dy = pose.pose.position.y - route_frame_point.point.y;
+    const double distance = std::hypot(dx, dy);
+    if (distance < nearest_distance) {
+      nearest_distance = distance;
+      nearest_index = index;
+    }
+  }
+
+  const auto & first_pose = route.front();
+  const double first_dx = first_pose.pose.position.x - route_frame_point.point.x;
+  const double first_dy = first_pose.pose.position.y - route_frame_point.point.y;
+  const double first_distance = std::hypot(first_dx, first_dy);
+
+  std::size_t entry_index = nearest_index;
+  double entry_distance = nearest_distance;
+  if (route_start_entry_min_distance_m_ > 0.0 && nearest_distance < route_start_entry_min_distance_m_) {
+    for (std::size_t candidate_index = nearest_index + 1U; candidate_index < route.size();
+      ++candidate_index)
+    {
+      const auto & candidate = route.at(candidate_index);
+      const double dx = candidate.pose.position.x - route_frame_point.point.x;
+      const double dy = candidate.pose.position.y - route_frame_point.point.y;
+      const double candidate_distance = std::hypot(dx, dy);
+      if (candidate_distance >= route_start_entry_min_distance_m_) {
+        entry_index = candidate_index;
+        entry_distance = candidate_distance;
+        break;
+      }
+    }
+  }
+
+  if (entry_index == 0U && first_distance - nearest_distance < route_start_reorder_min_improvement_m_) {
+    return route;
+  }
+
+  std::vector<geometry_msgs::msg::PoseStamped> remaining_route;
+  remaining_route.reserve(route.size() - entry_index);
+  remaining_route.insert(
+    remaining_route.end(),
+    route.begin() + static_cast<long>(entry_index),
+    route.end());
+  remaining_route = orientRoute(std::move(remaining_route));
+
+  RCLCPP_INFO(
+    get_logger(),
+    "Resuming mission route from waypoint %zu/%zu based on current robot pose in %s (first distance %.2fm, nearest waypoint %zu distance %.2fm, entry distance %.2fm). Earlier waypoints are treated as already handled by the previous mission attempt and are not wrapped to the end.",
+    entry_index + 1U,
+    route.size(),
+    route_frame.c_str(),
+    first_distance,
+    nearest_index + 1U,
+    nearest_distance,
+    entry_distance);
+  return remaining_route;
 }
 
 void MappingNode::startNextMissionChunk()
@@ -3266,6 +3439,10 @@ void MappingNode::startNextMissionChunk()
   }
 
   if (!areMissionStaticCostmapsReadyForMissionStart()) {
+    return;
+  }
+
+  if (!updateNavigationTfReadiness()) {
     return;
   }
 
@@ -3398,9 +3575,34 @@ void MappingNode::startNextMissionChunk()
   rclcpp_action::Client<nav2_msgs::action::NavigateThroughPoses>::SendGoalOptions options;
   options.goal_response_callback =
     [this](const auto & goal_handle) {handleGoalResponse(goal_handle);};
+  options.feedback_callback =
+    [this](const auto & goal_handle, const auto feedback) {
+      handleGoalFeedback(goal_handle, feedback);
+    };
   options.result_callback =
     [this](const auto & result) {handleGoalResult(result);};
 
+  const std::size_t chunk_start_route_index =
+    active_chunk_index_ < mission_chunk_start_indices_.size() ?
+    mission_chunk_start_indices_.at(active_chunk_index_) : active_chunk_index_;
+  active_goal_route_start_index_ = chunk_start_route_index;
+  active_goal_pose_count_ = goal.poses.size();
+  latest_goal_feedback_ready_ = false;
+  latest_goal_poses_remaining_ = static_cast<int>(goal.poses.size());
+  active_goal_start_odometry_pose_ready_ = latest_odometry_pose_ready_;
+  active_goal_odometry_progress_ready_ = false;
+  if (active_goal_start_odometry_pose_ready_) {
+    active_goal_start_odometry_position_ = latest_odometry_position_;
+  }
+  active_goal_target_pose_ready_ = !goal.poses.empty();
+  active_goal_distance_ready_ = false;
+  active_goal_cancel_requested_ = false;
+  active_goal_handle_.reset();
+  active_goal_dispatch_time_ = now();
+  active_goal_last_closing_progress_time_ = active_goal_dispatch_time_;
+  if (active_goal_target_pose_ready_) {
+    active_goal_target_pose_ = goal.poses.back();
+  }
   mission_active_ = true;
   waiting_for_goal_result_ = true;
   navigate_through_poses_client_->async_send_goal(goal, options);
@@ -3508,12 +3710,180 @@ bool MappingNode::isNavigatorActive()
   return true;
 }
 
+bool MappingNode::updateNavigationTfReadiness()
+{
+  if (map_frame_id_ == odom_frame_id_) {
+    navigation_tf_ready_streak_ = navigation_tf_ready_streak_required_;
+    return true;
+  }
+
+  std::string tf_error;
+  const bool ready = tf_buffer_->canTransform(
+    map_frame_id_,
+    base_frame_,
+    tf2::TimePointZero,
+    tf2::durationFromSec(startup_tf_lookup_timeout_seconds_),
+    &tf_error);
+
+  if (ready) {
+    navigation_tf_ready_streak_ = std::min(
+      navigation_tf_ready_streak_ + 1,
+      navigation_tf_ready_streak_required_);
+  } else {
+    navigation_tf_ready_streak_ = 0;
+    RCLCPP_INFO_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      2000,
+      "Waiting for stable %s -> %s TF before dispatching Nav2 mission chunks: %s",
+      map_frame_id_.c_str(),
+      base_frame_.c_str(),
+      tf_error.c_str());
+  }
+
+  return navigation_tf_ready_streak_ >= navigation_tf_ready_streak_required_;
+}
+
+void MappingNode::updateActiveGoalDivergenceWatchdog()
+{
+  if (
+    active_goal_divergence_timeout_seconds_ <= 0.0 ||
+    !mission_active_ ||
+    !active_goal_handle_ ||
+    active_goal_cancel_requested_ ||
+    !active_goal_target_pose_ready_ ||
+    !latest_odometry_pose_ready_)
+  {
+    return;
+  }
+
+  const std::string target_frame = active_goal_target_pose_.header.frame_id.empty() ?
+    map_frame_id_ : active_goal_target_pose_.header.frame_id;
+
+  geometry_msgs::msg::PointStamped odom_point;
+  odom_point.header.frame_id = odom_frame_id_;
+  odom_point.header.stamp = rclcpp::Time(0, 0, get_clock()->get_clock_type());
+  odom_point.point = latest_odometry_position_;
+
+  geometry_msgs::msg::PointStamped target_frame_point;
+  try {
+    if (target_frame == odom_frame_id_) {
+      target_frame_point = odom_point;
+    } else {
+      const auto target_from_odom = tf_buffer_->lookupTransform(
+        target_frame,
+        odom_frame_id_,
+        tf2::TimePointZero);
+      tf2::doTransform(odom_point, target_frame_point, target_from_odom);
+    }
+  } catch (const tf2::TransformException & exception) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Unable to evaluate active-goal divergence watchdog from %s into %s: %s",
+      odom_frame_id_.c_str(),
+      target_frame.c_str(),
+      exception.what());
+    return;
+  }
+
+  const double dx =
+    target_frame_point.point.x - active_goal_target_pose_.pose.position.x;
+  const double dy =
+    target_frame_point.point.y - active_goal_target_pose_.pose.position.y;
+  const double distance_to_target_m = std::hypot(dx, dy);
+  const rclcpp::Time current_time = now();
+
+  if (!active_goal_distance_ready_) {
+    active_goal_best_distance_to_target_m_ = distance_to_target_m;
+    active_goal_last_closing_progress_time_ = current_time;
+    active_goal_distance_ready_ = true;
+    return;
+  }
+
+  if (
+    distance_to_target_m + active_goal_required_closing_progress_m_ <
+    active_goal_best_distance_to_target_m_)
+  {
+    active_goal_best_distance_to_target_m_ = distance_to_target_m;
+    active_goal_last_closing_progress_time_ = current_time;
+    return;
+  }
+
+  const double seconds_without_closing =
+    (current_time - active_goal_last_closing_progress_time_).seconds();
+  const double distance_regression_m =
+    distance_to_target_m - active_goal_best_distance_to_target_m_;
+  if (
+    seconds_without_closing < active_goal_divergence_timeout_seconds_ ||
+    distance_regression_m < active_goal_allowed_distance_regression_m_)
+  {
+    return;
+  }
+
+  active_goal_cancel_requested_ = true;
+  navigate_through_poses_client_->async_cancel_goal(active_goal_handle_);
+  RCLCPP_WARN(
+    get_logger(),
+    "Canceling active Nav2 goal because the robot has not closed on target x=%.3f y=%.3f in %s for %.1fs and is %.2fm farther than the best observed distance (current %.2fm, best %.2fm). The normal blocked-waypoint recovery path will handle the canceled result.",
+    active_goal_target_pose_.pose.position.x,
+    active_goal_target_pose_.pose.position.y,
+    target_frame.c_str(),
+    seconds_without_closing,
+    distance_regression_m,
+    distance_to_target_m,
+    active_goal_best_distance_to_target_m_);
+}
+
+bool MappingNode::hasActiveGoalRouteProgress() const
+{
+  if (hasActiveGoalOdometryProgress()) {
+    return true;
+  }
+
+  if (latest_goal_feedback_ready_) {
+    return latest_goal_poses_remaining_ < static_cast<int>(active_goal_pose_count_);
+  }
+
+  return false;
+}
+
+bool MappingNode::hasActiveGoalOdometryProgress() const
+{
+  if (active_goal_odometry_progress_ready_) {
+    return true;
+  }
+
+  if (!active_goal_start_odometry_pose_ready_ || !latest_odometry_pose_ready_) {
+    return false;
+  }
+
+  const double dx = latest_odometry_position_.x - active_goal_start_odometry_position_.x;
+  const double dy = latest_odometry_position_.y - active_goal_start_odometry_position_.y;
+  return std::hypot(dx, dy) >= active_goal_min_odometry_progress_m_;
+}
+
+bool MappingNode::isTransientNavigationTfFailure() const
+{
+  if (map_frame_id_ == odom_frame_id_ || hasActiveGoalRouteProgress()) {
+    return false;
+  }
+
+  return !tf_buffer_->canTransform(
+    map_frame_id_,
+    base_frame_,
+    tf2::TimePointZero,
+    tf2::durationFromSec(startup_tf_lookup_timeout_seconds_));
+}
+
 void MappingNode::handleGoalResponse(
   rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::SharedPtr goal_handle)
 {
   if (!goal_handle) {
     waiting_for_goal_result_ = false;
     mission_active_ = false;
+    active_goal_handle_.reset();
     if (!isNavigatorActive()) {
       RCLCPP_WARN_THROTTLE(
         get_logger(),
@@ -3527,6 +3897,24 @@ void MappingNode::handleGoalResponse(
     RCLCPP_ERROR(get_logger(), "Mission chunk was rejected by Nav2.");
     markMissionTerminal("aborted", "Nav2 rejected the mission chunk");
   }
+
+  active_goal_handle_ = goal_handle;
+}
+
+void MappingNode::handleGoalFeedback(
+  rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>::SharedPtr goal_handle,
+  const std::shared_ptr<const nav2_msgs::action::NavigateThroughPoses::Feedback> feedback)
+{
+  (void)goal_handle;
+  if (!feedback) {
+    return;
+  }
+
+  latest_goal_feedback_ready_ = true;
+  latest_goal_poses_remaining_ = std::max<int>(0, feedback->number_of_poses_remaining);
+  if (hasActiveGoalRouteProgress()) {
+    consecutive_no_progress_nav2_failures_ = 0;
+  }
 }
 
 void MappingNode::handleGoalResult(
@@ -3534,16 +3922,83 @@ void MappingNode::handleGoalResult(
 {
   waiting_for_goal_result_ = false;
   mission_active_ = false;
+  active_goal_handle_.reset();
 
   if (result.code != rclcpp_action::ResultCode::SUCCEEDED) {
     const std::string failure_reason =
       "Nav2 navigate_through_poses ended with result code " +
       std::to_string(static_cast<int>(result.code));
-    if (advancePastBlockedMissionWaypoint(failure_reason)) {
+    if (isTransientNavigationTfFailure()) {
+      ++consecutive_no_progress_nav2_failures_;
+      navigation_tf_ready_streak_ = 0;
       RCLCPP_WARN(
         get_logger(),
-        "Mission chunk failed with result code %d, but the blocked waypoint was skipped and the mission will continue.",
-        static_cast<int>(result.code));
+        "Mission chunk failed before Nav2 made route progress while %s -> %s TF was unavailable; retrying the same chunk after TF recovers instead of advancing the blocked-waypoint budget (%d/%d no-progress retries).",
+        map_frame_id_.c_str(),
+        base_frame_.c_str(),
+        consecutive_no_progress_nav2_failures_,
+        max_no_progress_nav2_retries_);
+      if (consecutive_no_progress_nav2_failures_ <= max_no_progress_nav2_retries_) {
+        return;
+      }
+      RCLCPP_ERROR(
+        get_logger(),
+        "No-progress Nav2 retry limit reached after repeated %s -> %s TF instability; aborting mission. Last failure: %s",
+        map_frame_id_.c_str(),
+        base_frame_.c_str(),
+        failure_reason.c_str());
+      mission_completed_ = true;
+      markMissionTerminal("aborted", "Nav2 no-progress retry limit reached: " + failure_reason);
+      return;
+    }
+    if (!hasActiveGoalRouteProgress()) {
+      if (consecutive_blocked_waypoint_advances_ > 0) {
+        if (advancePastBlockedMissionWaypoint(failure_reason + " before route progress")) {
+          if (!mission_completed_) {
+            RCLCPP_WARN(
+              get_logger(),
+              "Mission chunk failed before Nav2 reported route progress after a blocked waypoint was already skipped; advancing through the blocked-waypoint budget instead of retrying the same point.");
+          }
+          return;
+        }
+
+        RCLCPP_ERROR(
+          get_logger(),
+          "Mission chunk failed before Nav2 reported route progress after %d blocked waypoint skip(s), and no further blocked-waypoint recovery is available; aborting mission. Last failure: %s",
+          consecutive_blocked_waypoint_advances_,
+          failure_reason.c_str());
+        mission_completed_ = true;
+        markMissionTerminal("aborted", "Nav2 blocked-waypoint recovery exhausted: " + failure_reason);
+        return;
+      }
+
+      ++consecutive_no_progress_nav2_failures_;
+      navigation_tf_ready_streak_ = 0;
+      if (consecutive_no_progress_nav2_failures_ <= max_no_progress_nav2_retries_) {
+        RCLCPP_WARN(
+          get_logger(),
+          "Mission chunk failed before Nav2 reported route progress; retrying the same chunk instead of advancing the blocked-waypoint budget (%d/%d no-progress retries). Last failure: %s",
+          consecutive_no_progress_nav2_failures_,
+          max_no_progress_nav2_retries_,
+          failure_reason.c_str());
+        return;
+      }
+      RCLCPP_ERROR(
+        get_logger(),
+        "No-progress Nav2 retry limit reached after %d retry/retries; aborting mission. Last failure: %s",
+        consecutive_no_progress_nav2_failures_,
+        failure_reason.c_str());
+      mission_completed_ = true;
+      markMissionTerminal("aborted", "Nav2 no-progress retry limit reached: " + failure_reason);
+      return;
+    }
+    if (advancePastBlockedMissionWaypoint(failure_reason)) {
+      if (!mission_completed_) {
+        RCLCPP_WARN(
+          get_logger(),
+          "Mission chunk failed with result code %d, but the blocked waypoint was skipped and the mission will continue.",
+          static_cast<int>(result.code));
+      }
       return;
     }
 
@@ -3554,6 +4009,10 @@ void MappingNode::handleGoalResult(
   }
 
   consecutive_blocked_waypoint_advances_ = 0;
+  consecutive_no_progress_nav2_failures_ = 0;
+  active_goal_target_pose_ready_ = false;
+  active_goal_distance_ready_ = false;
+  active_goal_cancel_requested_ = false;
   ++active_chunk_index_;
   if (active_chunk_index_ >= mission_chunks_.size()) {
     mission_completed_ = true;
@@ -3594,30 +4053,117 @@ bool MappingNode::advancePastBlockedMissionWaypoint(const std::string & failure_
   const std::size_t failed_chunk_start_route_index =
     active_chunk_index_ < mission_chunk_start_indices_.size() ?
     mission_chunk_start_indices_.at(active_chunk_index_) : active_chunk_index_;
-  const std::size_t blocked_route_index = std::min(
+  std::size_t blocked_route_index = std::min(
     failed_chunk_start_route_index + failed_chunk.size() - 1U,
     mission_route_.size() - 1U);
-  const std::size_t resume_route_index = blocked_route_index + 1U;
+  if (latest_goal_feedback_ready_ && active_goal_pose_count_ > 0U) {
+    const std::size_t poses_remaining = std::min(
+      active_goal_pose_count_,
+      static_cast<std::size_t>(latest_goal_poses_remaining_));
+    const std::size_t completed_goal_poses = active_goal_pose_count_ - poses_remaining;
+    const std::size_t route_index_offset =
+      failed_chunk.size() > active_goal_pose_count_ ? failed_chunk.size() - active_goal_pose_count_ : 0U;
+    blocked_route_index = std::min(
+      active_goal_route_start_index_ + route_index_offset + completed_goal_poses,
+      mission_route_.size() - 1U);
+  }
+  std::size_t resume_route_index = blocked_route_index + 1U;
+  double authored_resume_distance = std::numeric_limits<double>::infinity();
+  double reentry_distance = std::numeric_limits<double>::infinity();
+  bool reentered_from_robot_pose = false;
+
+  if (latest_odometry_pose_ready_ && resume_route_index < mission_route_.size()) {
+    const std::string route_frame = mission_route_.front().header.frame_id.empty() ?
+      mission_route_frame_id_ : mission_route_.front().header.frame_id;
+    geometry_msgs::msg::PointStamped odom_point;
+    odom_point.header.frame_id = odom_frame_id_;
+    odom_point.header.stamp = rclcpp::Time(0, 0, get_clock()->get_clock_type());
+    odom_point.point = latest_odometry_position_;
+
+    geometry_msgs::msg::PointStamped route_frame_point;
+    bool robot_pose_in_route_frame_ready = false;
+    try {
+      if (route_frame == odom_frame_id_) {
+        route_frame_point = odom_point;
+      } else {
+        const auto route_from_odom = tf_buffer_->lookupTransform(
+          route_frame,
+          odom_frame_id_,
+          tf2::TimePointZero);
+        tf2::doTransform(odom_point, route_frame_point, route_from_odom);
+      }
+      robot_pose_in_route_frame_ready = true;
+    } catch (const tf2::TransformException & exception) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Keeping blocked-waypoint recovery at the authored resume point because the robot pose could not be transformed from %s into %s: %s",
+        odom_frame_id_.c_str(),
+        route_frame.c_str(),
+        exception.what());
+    }
+
+    if (robot_pose_in_route_frame_ready) {
+      const auto & authored_resume_pose = mission_route_.at(resume_route_index);
+      authored_resume_distance = std::hypot(
+        authored_resume_pose.pose.position.x - route_frame_point.point.x,
+        authored_resume_pose.pose.position.y - route_frame_point.point.y);
+
+      std::size_t nearest_remaining_index = resume_route_index;
+      reentry_distance = authored_resume_distance;
+      for (std::size_t index = resume_route_index + 1U; index < mission_route_.size(); ++index) {
+        const auto & candidate = mission_route_.at(index);
+        const double distance = std::hypot(
+          candidate.pose.position.x - route_frame_point.point.x,
+          candidate.pose.position.y - route_frame_point.point.y);
+        if (distance < reentry_distance) {
+          reentry_distance = distance;
+          nearest_remaining_index = index;
+        }
+      }
+
+      if (
+        nearest_remaining_index > resume_route_index &&
+        authored_resume_distance - reentry_distance >= blocked_recovery_reentry_min_improvement_m_)
+      {
+        resume_route_index = nearest_remaining_index;
+        reentered_from_robot_pose = true;
+      }
+    }
+  }
 
   if (resume_route_index >= mission_route_.size()) {
+    ++consecutive_blocked_waypoint_advances_;
+    mission_completed_ = true;
+    const auto skipped_pose = mission_route_.at(blocked_route_index);
+    RCLCPP_WARN(
+      get_logger(),
+      "Mission chunk failed at the final waypoint x=%.3f y=%.3f after Nav2 failure (%s). "
+      "Marking mission complete because all later route waypoints are exhausted; skipped waypoint count in this streak: %d/%d.",
+      skipped_pose.pose.position.x,
+      skipped_pose.pose.position.y,
+      failure_reason.c_str(),
+      consecutive_blocked_waypoint_advances_,
+      max_blocked_waypoint_advances_);
+    markMissionTerminal(
+      "completed",
+      "autonomous mission completed after skipping final blocked waypoint: " + failure_reason);
+    return true;
+  }
+
+  if (max_blocked_waypoint_advances_ >= 0 &&
+    consecutive_blocked_waypoint_advances_ >= max_blocked_waypoint_advances_)
+  {
     RCLCPP_ERROR(
       get_logger(),
-      "Mission chunk failed at the final waypoint, so there is no later waypoint to advance to. Last failure: %s",
+      "Blocked waypoint advance limit reached before skipping waypoint %zu/%zu; aborting mission. Last failure: %s",
+      blocked_route_index + 1U,
+      mission_route_.size(),
       failure_reason.c_str());
     return false;
   }
 
   std::vector<geometry_msgs::msg::PoseStamped> remaining_route;
-  remaining_route.reserve(mission_route_.size() - resume_route_index + 1U);
-  if (latest_odometry_pose_ready_) {
-    geometry_msgs::msg::PoseStamped current_pose;
-    current_pose.header.frame_id = odom_frame_id_;
-    current_pose.pose.position = latest_odometry_position_;
-    current_pose.pose.orientation = latest_odometry_orientation_;
-    remaining_route.push_back(current_pose);
-  } else {
-    remaining_route.push_back(mission_route_.at(failed_chunk_start_route_index));
-  }
+  remaining_route.reserve(mission_route_.size() - resume_route_index);
   remaining_route.insert(
     remaining_route.end(),
     mission_route_.begin() + static_cast<long>(resume_route_index),
@@ -3631,6 +4177,7 @@ bool MappingNode::advancePastBlockedMissionWaypoint(const std::string & failure_
   mission_chunks_ = chunkRoute(mission_route_);
   mission_chunk_start_indices_ = chunkRouteStartIndices(mission_route_);
   active_chunk_index_ = 0U;
+  consecutive_no_progress_nav2_failures_ = 0;
   ++consecutive_blocked_waypoint_advances_;
 
   if (mission_chunks_.empty()) {
@@ -3643,9 +4190,16 @@ bool MappingNode::advancePastBlockedMissionWaypoint(const std::string & failure_
   }
 
   publishRouteMarker();
+  std::string reentry_summary;
+  if (reentered_from_robot_pose) {
+    reentry_summary =
+      " after re-entering the remaining route from the robot's current pose (authored resume distance " +
+      std::to_string(authored_resume_distance) + "m, reentry distance " +
+      std::to_string(reentry_distance) + "m)";
+  }
   RCLCPP_WARN(
     get_logger(),
-    "Advancing past blocked mission waypoint %zu/%zu at x=%.3f y=%.3f after Nav2 failure (%s). Resuming toward waypoint %zu/%zu at x=%.3f y=%.3f; skipped waypoint count in this streak: %d/%d.",
+    "Advancing past blocked mission waypoint %zu/%zu at x=%.3f y=%.3f after Nav2 failure (%s). Resuming toward waypoint %zu/%zu at x=%.3f y=%.3f%s; skipped waypoint count in this streak: %d/%d.",
     blocked_route_index + 1U,
     original_route_size,
     skipped_pose.pose.position.x,
@@ -3655,6 +4209,7 @@ bool MappingNode::advancePastBlockedMissionWaypoint(const std::string & failure_
     original_route_size,
     resume_pose.pose.position.x,
     resume_pose.pose.position.y,
+    reentry_summary.c_str(),
     consecutive_blocked_waypoint_advances_,
     max_blocked_waypoint_advances_);
   return true;
@@ -3917,11 +4472,32 @@ nav_msgs::msg::OccupancyGrid MappingNode::padLiveMap(
     padded_live_map_max_y_ = source_max_y;
     expanded_bounds = true;
   }
+  if (anchor_available) {
+    const double anchor_padding_m = std::max(
+      resolution * 2.0,
+      std::min(1.0, min_global_map_size_m_ * 0.1));
+    if (anchor_x - anchor_padding_m < padded_live_map_min_x_) {
+      padded_live_map_min_x_ = anchor_x - anchor_padding_m;
+      expanded_bounds = true;
+    }
+    if (anchor_y - anchor_padding_m < padded_live_map_min_y_) {
+      padded_live_map_min_y_ = anchor_y - anchor_padding_m;
+      expanded_bounds = true;
+    }
+    if (anchor_x + anchor_padding_m > padded_live_map_max_x_) {
+      padded_live_map_max_x_ = anchor_x + anchor_padding_m;
+      expanded_bounds = true;
+    }
+    if (anchor_y + anchor_padding_m > padded_live_map_max_y_) {
+      padded_live_map_max_y_ = anchor_y + anchor_padding_m;
+      expanded_bounds = true;
+    }
+  }
 
   if (expanded_bounds) {
     RCLCPP_INFO(
       get_logger(),
-      "Expanded persistent padded live-map bounds in %s to [%.3f, %.3f] x [%.3f, %.3f] to contain the latest SLAM map.",
+      "Expanded persistent padded live-map bounds in %s to [%.3f, %.3f] x [%.3f, %.3f] to contain the latest SLAM map and mission anchor.",
       message.header.frame_id.c_str(),
       padded_live_map_min_x_,
       padded_live_map_max_x_,
@@ -4183,13 +4759,16 @@ std::vector<std::vector<geometry_msgs::msg::PoseStamped>> MappingNode::chunkRout
   const std::vector<geometry_msgs::msg::PoseStamped> & route) const
 {
   std::vector<std::vector<geometry_msgs::msg::PoseStamped>> chunks;
-  if (route.size() < 2U) {
+  if (route.empty()) {
     return chunks;
   }
 
   // Make the route start its own goal so Nav2 must explicitly drive to the
   // first waypoint before the remaining mission path is executed.
   chunks.push_back({route.front()});
+  if (route.size() == 1U) {
+    return chunks;
+  }
 
   const std::size_t max_points_per_goal = static_cast<std::size_t>(std::max(1, max_segments_per_goal_) + 1);
   std::size_t start_index = 1U;
@@ -4210,11 +4789,14 @@ std::vector<std::size_t> MappingNode::chunkRouteStartIndices(
   const std::vector<geometry_msgs::msg::PoseStamped> & route) const
 {
   std::vector<std::size_t> start_indices;
-  if (route.size() < 2U) {
+  if (route.empty()) {
     return start_indices;
   }
 
   start_indices.push_back(0U);
+  if (route.size() == 1U) {
+    return start_indices;
+  }
 
   const std::size_t max_points_per_goal = static_cast<std::size_t>(std::max(1, max_segments_per_goal_) + 1);
   std::size_t start_index = 1U;

@@ -29,3 +29,7 @@ float64 position_sigma_y
 # Lever arm observability at the time of this fix
 bool    lever_arm_used      # true if lever arm correction was applied
 float64 heading_sigma_deg   # heading 1-sigma (degrees) used to decide lever arm eligibility
+
+# GNSS track-heading observability
+bool track_heading_skipped_stronger_source # true when dual antenna, magnetometer, or 9-axis IMU heading outranks GPS track heading
+bool track_heading_skipped_motion          # true when speed/yaw-rate gates reject GPS track heading for this fix

@@ -84,6 +84,30 @@ bool worldToGrid(
   return true;
 }
 
+bool navSatUsable(const sensor_msgs::msg::NavSatFix & message)
+{
+  return
+    std::isfinite(message.latitude) &&
+    std::isfinite(message.longitude) &&
+    message.status.status != sensor_msgs::msg::NavSatStatus::STATUS_NO_FIX;
+}
+
+std::pair<double, double> localEastNorthMeters(
+  const sensor_msgs::msg::NavSatFix & reference,
+  const sensor_msgs::msg::NavSatFix & sample)
+{
+  constexpr double kEarthRadiusMeters = 6378137.0;
+  constexpr double kDegreesToRadians = M_PI / 180.0;
+  const double base_latitude_rad = 0.5 * (reference.latitude + sample.latitude) *
+    kDegreesToRadians;
+  const double east_m =
+    (sample.longitude - reference.longitude) * kDegreesToRadians *
+    kEarthRadiusMeters * std::cos(base_latitude_rad);
+  const double north_m =
+    (sample.latitude - reference.latitude) * kDegreesToRadians * kEarthRadiusMeters;
+  return {east_m, north_m};
+}
+
 tf2::Transform transformFromXYYaw(
   const double x,
   const double y,
@@ -517,6 +541,7 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.latest_odometry_ready = latest_odometry_ready_;
   snapshot.latest_navsat_ready = latest_navsat_ready_;
   snapshot.latest_heading_ready = latest_heading_ready_;
+  snapshot.navsat_reference_ready = navsat_reference_ready_;
   snapshot.latest_scan_ready = latest_scan_ready_;
   snapshot.latest_global_costmap_ready = latest_global_costmap_ready_;
   snapshot.last_map_to_odom_ready = last_map_to_odom_ready_;
@@ -526,6 +551,7 @@ MapPoseNode::StateSnapshot MapPoseNode::snapshotState() const
   snapshot.latest_odometry_position = latest_odometry_position_;
   snapshot.latest_odometry_orientation = latest_odometry_orientation_;
   snapshot.latest_navsat = latest_navsat_;
+  snapshot.navsat_reference = navsat_reference_;
   snapshot.latest_heading = latest_heading_;
   snapshot.latest_scan = latest_scan_;
   snapshot.latest_global_costmap = latest_global_costmap_;
@@ -562,10 +588,6 @@ bool MapPoseNode::correctionInputsReady(const StateSnapshot & snapshot) const
   }
 
   if ((now() - snapshot.latest_scan_stamp).seconds() > scan_timeout_seconds_) {
-    return false;
-  }
-
-  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
     return false;
   }
 
@@ -633,9 +655,6 @@ std::string MapPoseNode::composeHealthReason(const StateSnapshot & snapshot) con
       return "global_costmap_missing";
     }
     return "global_costmap_waiting";
-  }
-  if ((now() - snapshot.latest_global_costmap_stamp).seconds() > costmap_timeout_seconds_) {
-    return "global_costmap_stale";
   }
   if (snapshot.latest_scan.header.frame_id.empty()) {
     return "scan_frame_missing";
@@ -931,6 +950,10 @@ void MapPoseNode::handleNavSat(const sensor_msgs::msg::NavSatFix::SharedPtr mess
     now() :
     rclcpp::Time(message->header.stamp);
   latest_navsat_ready_ = true;
+  if (!navsat_reference_ready_ && navSatUsable(*message)) {
+    navsat_reference_ = *message;
+    navsat_reference_ready_ = true;
+  }
 }
 
 void MapPoseNode::handleHeading(const sensor_msgs::msg::Imu::SharedPtr message)
@@ -1064,9 +1087,39 @@ double MapPoseNode::georeferenceConsistencyConfidence(
   const StateSnapshot & snapshot,
   const tf2::Transform & candidate_map_to_base) const
 {
-  (void)snapshot;
-  (void)candidate_map_to_base;
-  return 1.0;
+  if (
+    !snapshot.latest_navsat_ready ||
+    !snapshot.navsat_reference_ready ||
+    !navSatUsable(snapshot.latest_navsat) ||
+    !navSatUsable(snapshot.navsat_reference))
+  {
+    return 1.0;
+  }
+
+  const auto [expected_x, expected_y] =
+    localEastNorthMeters(snapshot.navsat_reference, snapshot.latest_navsat);
+  const tf2::Vector3 candidate_origin = candidate_map_to_base.getOrigin();
+  const double error_m = std::hypot(
+    candidate_origin.x() - expected_x,
+    candidate_origin.y() - expected_y);
+  const double error_ratio = std::clamp(
+    error_m / std::max(1.0e-6, georef_consistency_max_error_m_),
+    0.0,
+    1.0);
+  const double confidence =
+    1.0 - ((1.0 - georef_consistency_min_confidence_) * error_ratio);
+
+  if (error_m > georef_consistency_max_error_m_) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Rejecting most scan-match confidence because candidate map pose differs from GNSS georeference by %.3fm (limit %.3fm).",
+      error_m,
+      georef_consistency_max_error_m_);
+  }
+
+  return confidence;
 }
 
 std::optional<MapPoseNode::MapMatchEstimate> MapPoseNode::estimateMapToBaseFromPrior(

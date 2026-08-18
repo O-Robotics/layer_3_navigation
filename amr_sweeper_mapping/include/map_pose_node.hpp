@@ -56,6 +56,7 @@ private:
     bool latest_odometry_ready{false};
     bool latest_navsat_ready{false};
     bool latest_heading_ready{false};
+    bool navsat_reference_ready{false};
     bool latest_scan_ready{false};
     bool latest_global_costmap_ready{false};
     bool last_map_to_odom_ready{false};
@@ -65,6 +66,7 @@ private:
     geometry_msgs::msg::Point latest_odometry_position;
     geometry_msgs::msg::Quaternion latest_odometry_orientation;
     sensor_msgs::msg::NavSatFix latest_navsat;
+    sensor_msgs::msg::NavSatFix navsat_reference;
     sensor_msgs::msg::Imu latest_heading;
     sensor_msgs::msg::LaserScan latest_scan;
     nav_msgs::msg::OccupancyGrid latest_global_costmap;
@@ -132,6 +134,7 @@ private:
   bool latest_odometry_ready_{false};
   bool latest_navsat_ready_{false};
   bool latest_heading_ready_{false};
+  bool navsat_reference_ready_{false};
   bool latest_scan_ready_{false};
   bool latest_global_costmap_ready_{false};
   bool last_map_to_odom_ready_{false};
@@ -189,6 +192,7 @@ private:
   geometry_msgs::msg::Point latest_odometry_position_;
   geometry_msgs::msg::Quaternion latest_odometry_orientation_;
   sensor_msgs::msg::NavSatFix latest_navsat_;
+  sensor_msgs::msg::NavSatFix navsat_reference_;
   sensor_msgs::msg::Imu latest_heading_;
   sensor_msgs::msg::LaserScan latest_scan_;
   nav_msgs::msg::OccupancyGrid latest_global_costmap_;
