@@ -53,7 +53,7 @@ fusioncore:
     gnss.max_hdop:                          2.5                   # Reject fixes whose HDOP exceeds this threshold.
     gnss.min_satellites:                    6                     # Require at least this many satellites before accepting a fix.
     gnss.min_fix_type:                      4                     # Require RTK-fixed quality before startup fusion; this consistently improved pre-motion stability in replay.
-    gnss.max_speed:                          0.0                   # Physical-plausibility jump gate (fusioncore >=0.3.5): disabled with RTK available, chi2 on tight R is already strict enough. Runtime no-NTRIP launches set this to 3.0 m/s, since base_noise_xy is loosened there (see amr_sweeper_localization.launch.py _fusioncore_no_ntrip_overrides()).
+    gnss.max_speed:                          1.75                  # Physical-plausibility jump gate (fusioncore >=0.3.5): platform top-speed bound in m/s; 1.75 m/s leaves margin above the sweeper's expected 4-6 km/h operating range.
     gnss.fix2_topic:                        ""                    # No second GNSS receiver is configured by default.
     gnss.heading_topic:                     ""                    # No dedicated GNSS heading topic is configured.
     gnss.azimuth_topic:                     ""                    # IMU compass yaw published as REP-145 azimuth.

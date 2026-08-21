@@ -46,7 +46,7 @@ def _fusioncore_no_ntrip_overrides() -> dict:
         "gnss.min_fix_type": 1,
         "gnss.base_noise_xy": 50.0,
         "gnss.base_noise_z": 75.0,
-        "gnss.max_speed": 3.0,
+        "gnss.max_speed": 1.75,
     }
 
 

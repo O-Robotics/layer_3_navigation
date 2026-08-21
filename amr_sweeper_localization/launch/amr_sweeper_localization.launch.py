@@ -50,7 +50,7 @@ def _fusioncore_no_ntrip_overrides() -> dict:
         # let a modest GNSS-driven position nudge blow up into a runaway
         # heading estimate. This gate is defense-in-depth on top of that,
         # not a substitute for it.
-        "gnss.max_speed": 3.0,
+        "gnss.max_speed": 1.75,
     }
 
 
