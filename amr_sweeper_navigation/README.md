@@ -26,6 +26,7 @@ This package hosts the real-robot Nav2 bringup for the AMR Sweeper and keeps the
 - `config/programmed_missions_navigation.yaml`
 
 ## Built-In Missions
+- `missions/default_missions/2x2Sweep`
 - `missions/default_missions/3x3Sweep`
 - `missions/default_missions/SpotSweep`
 - `missions/manual_missions/RecordMap`
@@ -43,14 +44,14 @@ This package hosts the real-robot Nav2 bringup for the AMR Sweeper and keeps the
 ## Overview
 `amr_sweeper_navigation` contains the shared Nav2 node-launch logic plus three mission-class-specific entrypoints:
 
-- `default_missions_navigation.launch.py`: built-in local missions such as `3x3Sweep` and `SpotSweep`
+- `default_missions_navigation.launch.py`: built-in local missions such as `2x2Sweep`, `3x3Sweep`, and `SpotSweep`
 - `manual_missions_navigation.launch.py`: manual mission workflows such as `RecordMap` and `Teleop`
 - `programmed_missions_navigation.launch.py`: scheduled/programmed routed missions
 
 Each public launch file selects a different Nav2 parameter file while reusing the same internal `navigation_launch.py` node graph. This keeps mission policy out of the generic Nav2 launcher and lets layer 0 / layer 3 choose the right navigation stack from the mission classification.
 
 The package also owns the built-in mission files directly:
-- `missions/default_missions/`: local sweep templates such as `3x3Sweep` and `SpotSweep`
+- `missions/default_missions/`: local sweep templates such as `2x2Sweep`, `3x3Sweep`, and `SpotSweep`
 - `missions/manual_missions/`: operator-driven workflows such as `RecordMap` and `Teleop`
 
 `default_missions_navigation.yaml` is intentionally odom-only and does not depend on map-frame planning. It is tuned for the short built-in sweep patterns that start from the robot's current pose, while still consuming mapping-published costmaps when mapping is enabled.

@@ -1,0 +1,9 @@
+{
+  "name": "2x2Sweep",
+  "mission_type": "builtin_local_pattern",
+  "description": "One-and-a-half meter clockwise square sweep starting and ending at the mission start location.",
+  "route_frame": "base_footprint",
+  "sweep_width_m": 1.5,
+  "sweep_height_m": 1.5,
+  "returns_to_start": true
+}
