@@ -71,19 +71,6 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(
-  FILES
-    ../../tests/vo_localization_benchmark/localization_gnss_benchmark.launch.py
-  DESTINATION share/${PROJECT_NAME}/launch
-)
-
-install(PROGRAMS
-  ../../tests/vo_localization_benchmark/analyze_localization_benchmark.py
-  ../../tests/vo_localization_benchmark/localization_benchmark_driver.py
-  ../../tests/vo_localization_benchmark/run_localization_gnss_benchmark.py
-  DESTINATION lib/${PROJECT_NAME}
-)
-
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()

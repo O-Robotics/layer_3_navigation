@@ -344,7 +344,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "test_output_directory",
-                default_value="src/layer_3_navigation/tests",
+                default_value="/tmp/amr_sweeper_test_artifacts",
                 description="Generic test artifact directory used only when use_test is enabled without a mission execution folder.",
             ),
             DeclareLaunchArgument(

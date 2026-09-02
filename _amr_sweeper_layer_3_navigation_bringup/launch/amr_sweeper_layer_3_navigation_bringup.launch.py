@@ -587,7 +587,7 @@ def generate_launch_description():
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('mission_start_mode', default_value='start_over'),
         DeclareLaunchArgument('use_test', default_value='false'),
-        DeclareLaunchArgument('test_output_directory', default_value='src/layer_3_navigation/tests'),
+        DeclareLaunchArgument('test_output_directory', default_value='/tmp/amr_sweeper_test_artifacts'),
         DeclareLaunchArgument('run_layer_3_system_check', default_value='false'),
         OpaqueFunction(function=_build_launches),
     ])
