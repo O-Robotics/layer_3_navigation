@@ -143,6 +143,9 @@ def _build_nodes(context):
     gaussian_output_directory = mission_context.get("gaussian_output_directory", "")
     if not gaussian_output_directory and mission_run_directory:
         gaussian_output_directory = str(Path(mission_run_directory) / "gaussian")
+    gaussian_manifest_file = mission_context.get("gaussian_manifest_file", "")
+    if not gaussian_manifest_file and gaussian_output_directory:
+        gaussian_manifest_file = str(Path(gaussian_output_directory) / "manifest.json")
     if not mission_file and not mission_execution_directory and not use_test:
         mission_file = default_record_map_mission_file
         mission_id = "RecordMap"
@@ -256,6 +259,8 @@ def _build_nodes(context):
                         "use_sim_time": use_sim_time,
                         "output_directory": gaussian_output_directory,
                         "representation_name": gaussian_representation_name,
+                        "mission_id": mission_id,
+                        "gaussian_manifest_file": gaussian_manifest_file,
                     },
                 ],
             ),
@@ -324,7 +329,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "use_gaussian",
-                default_value="true",
+                default_value="false",
                 description="Launch gaussian_node when true.",
             ),
             DeclareLaunchArgument(

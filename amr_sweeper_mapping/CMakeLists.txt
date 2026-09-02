@@ -65,6 +65,7 @@ target_include_directories(amr_sweeper_gaussian_node
 ament_target_dependencies(
   amr_sweeper_gaussian_node
   geometry_msgs
+  nav_msgs
   rclcpp
   sensor_msgs
   std_msgs

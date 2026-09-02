@@ -1,3 +1,17 @@
+// Copyright 2026 O-Robotics
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "odometry_projection_node.hpp"
 
 #include <cmath>
@@ -14,7 +28,8 @@ namespace amr_sweeper_localization
 OdometryProjectionNode::OdometryProjectionNode(const rclcpp::NodeOptions & options)
 : Node("odometry_projection_node", options)
 {
-  input_odom_topic_ = declare_parameter("input_odom_topic", std::string("localization/odometry_body"));
+  input_odom_topic_ = declare_parameter("input_odom_topic",
+      std::string("localization/odometry_body"));
   output_odom_topic_ = declare_parameter(
     "output_odom_topic", std::string("localization/odometry_fused"));
   odom_frame_ = declare_parameter("odom_frame", std::string("odom"));

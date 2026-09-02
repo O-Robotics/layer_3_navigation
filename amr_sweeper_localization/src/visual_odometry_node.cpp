@@ -1,27 +1,40 @@
-// Copyright (c) 2026 O-Robotics
+// Copyright 2026 O-Robotics
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "visual_odometry_node.hpp"
 
-#include <algorithm>
-#include <cstdint>
-#include <cmath>
-#include <limits>
-#include <memory>
-#include <sstream>
-#include <stdexcept>
-#include <utility>
+#include <cstdint>  // NOLINT(build/include_order)
+#include <cmath>  // NOLINT(build/include_order)
 
-#include <Eigen/Dense>
-#include <opencv2/calib3d.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/video/tracking.hpp>
+#include <Eigen/Dense>  // NOLINT(build/include_order)
+#include <opencv2/calib3d.hpp>  // NOLINT(build/include_order)
+#include <opencv2/imgproc.hpp>  // NOLINT(build/include_order)
+#include <opencv2/video/tracking.hpp>  // NOLINT(build/include_order)
+#include <tf2/LinearMath/Matrix3x3.h>  // NOLINT(build/include_order)
+#include <tf2/LinearMath/Quaternion.h>  // NOLINT(build/include_order)
 
-#include <sensor_msgs/image_encodings.hpp>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Quaternion.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <algorithm>  // NOLINT(build/include_order)
+#include <limits>  // NOLINT(build/include_order)
+#include <memory>  // NOLINT(build/include_order)
+#include <sstream>  // NOLINT(build/include_order)
+#include <stdexcept>  // NOLINT(build/include_order)
+#include <utility>  // NOLINT(build/include_order)
 
-namespace amr_sweeper_visual_odometry
+#include <sensor_msgs/image_encodings.hpp>  // NOLINT(build/include_order)
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>  // NOLINT(build/include_order)
+
+namespace amr_sweeper_localization
 {
 
 namespace
@@ -64,6 +77,34 @@ cv::Mat convertRosImageToMono8(const sensor_msgs::msg::Image & message)
     return mono8;
   }
 
+  if (encoding == sensor_msgs::image_encodings::TYPE_16UC1 || encoding == "16UC1") {
+    require_step(message.width * sizeof(std::uint16_t));
+    cv::Mat depth16(
+      static_cast<int>(message.height),
+      static_cast<int>(message.width),
+      CV_16UC1,
+      const_cast<unsigned char *>(message.data.data()),
+      message.step);
+    cv::Mat mono8;
+    depth16.convertTo(mono8, CV_8UC1, 255.0 / 8000.0);
+    return mono8;
+  }
+
+  if (encoding == sensor_msgs::image_encodings::TYPE_32FC1 || encoding == "32FC1") {
+    require_step(message.width * sizeof(float));
+    cv::Mat depth32(
+      static_cast<int>(message.height),
+      static_cast<int>(message.width),
+      CV_32FC1,
+      const_cast<unsigned char *>(message.data.data()),
+      message.step);
+    cv::Mat clean_depth = depth32.clone();
+    cv::patchNaNs(clean_depth, 0.0);
+    cv::Mat mono8;
+    clean_depth.convertTo(mono8, CV_8UC1, 255.0 / 8.0);
+    return mono8;
+  }
+
   auto convert_color = [&message, &require_step](int cv_type, int conversion_code) {
       const int channels = CV_MAT_CN(cv_type);
       require_step(static_cast<std::size_t>(message.width) * static_cast<std::size_t>(channels));
@@ -92,6 +133,43 @@ cv::Mat convertRosImageToMono8(const sensor_msgs::msg::Image & message)
   }
 
   throw std::runtime_error("Unsupported image encoding for visual odometry: " + encoding);
+}
+
+cv::Mat convertRosImageToDepthMeters(const sensor_msgs::msg::Image & message)
+{
+  if (message.encoding == sensor_msgs::image_encodings::TYPE_16UC1 ||
+    message.encoding == "16UC1")
+  {
+    if (message.step < message.width * sizeof(std::uint16_t)) {
+      throw std::runtime_error("Depth image step is smaller than expected for 16UC1.");
+    }
+    cv::Mat depth_mm(
+      static_cast<int>(message.height),
+      static_cast<int>(message.width),
+      CV_16UC1,
+      const_cast<unsigned char *>(message.data.data()),
+      message.step);
+    cv::Mat depth_meters;
+    depth_mm.convertTo(depth_meters, CV_32FC1, 0.001);
+    return depth_meters;
+  }
+
+  if (message.encoding == sensor_msgs::image_encodings::TYPE_32FC1 ||
+    message.encoding == "32FC1")
+  {
+    if (message.step < message.width * sizeof(float)) {
+      throw std::runtime_error("Depth image step is smaller than expected for 32FC1.");
+    }
+    cv::Mat depth_meters(
+      static_cast<int>(message.height),
+      static_cast<int>(message.width),
+      CV_32FC1,
+      const_cast<unsigned char *>(message.data.data()),
+      message.step);
+    return depth_meters.clone();
+  }
+
+  throw std::runtime_error("Unsupported depth encoding for visual odometry: " + message.encoding);
 }
 
 }  // namespace
@@ -132,11 +210,23 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions & options)
   motion_reference_history_seconds_ = declare_parameter(
     "motion_reference.history_seconds", 5.0);
   min_scale_translation_meters_ = declare_parameter("min_scale_translation_meters", 0.005);
+  reject_zero_scale_updates_ = declare_parameter("reject_zero_scale_updates", true);
   camera_fusion_tolerance_seconds_ = declare_parameter("camera_fusion_tolerance_seconds", 0.03);
   tf_warning_tolerance_ms_ = declare_parameter("tf_warning_tolerance_ms", 5.0);
   stereo_match_max_error_ = declare_parameter("stereo_match_max_error", 20.0);
+  stereo_image_history_seconds_ = declare_parameter("stereo_image_history_seconds", 0.5);
   stereo_min_disparity_px_ = declare_parameter("stereo_min_disparity_px", 1.0);
   stereo_max_reprojection_error_m_ = declare_parameter("stereo_max_reprojection_error_m", 0.20);
+  depth_sync_tolerance_seconds_ = declare_parameter("depth.sync_tolerance_seconds", 0.08);
+  depth_history_seconds_ = declare_parameter("depth.history_seconds", 0.5);
+  depth_min_range_m_ = declare_parameter("depth.min_range_m", 0.20);
+  depth_max_range_m_ = declare_parameter("depth.max_range_m", 8.0);
+  depth_sampling_radius_px_ = declare_parameter("depth.sampling_radius_px", 1);
+  depth_min_inliers_ = declare_parameter("depth.min_inliers", 20);
+  depth_min_valid_ratio_ = declare_parameter("depth.min_valid_ratio", 0.35);
+  depth_max_residual_m_ = declare_parameter("depth.max_residual_m", 0.20);
+  depth_max_translation_m_ = declare_parameter("depth.max_translation_m", 0.50);
+  depth_max_yaw_rad_ = declare_parameter("depth.max_yaw_rad", 0.35);
   pose_sigma_floor_m_ = declare_parameter("pose_sigma_floor_m", 0.03);
   pose_sigma_ceiling_m_ = declare_parameter("pose_sigma_ceiling_m", 0.50);
   yaw_sigma_floor_rad_ = declare_parameter("yaw_sigma_floor_rad", 0.02);
@@ -174,13 +264,18 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions & options)
       std::bind(&VisualOdometryNode::imuCallback, this, std::placeholders::_1));
   }
 
-  if (!use_wheel_scale_ && !use_imu_yaw_) {
+  const bool has_depth_metric_camera = std::any_of(
+    cameras_.begin(),
+    cameras_.end(),
+    [](const auto & camera) {return camera->use_depth;});
+  if (!use_wheel_scale_ && !use_imu_yaw_ && stereo_pairs_.empty() && !has_depth_metric_camera) {
     throw std::runtime_error(
-            "Visual odometry requires at least one enabled motion reference source.");
+            "Visual odometry requires stereo, depth, or at least one motion reference source.");
   }
 
   odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
-  status_publisher_ = create_publisher<std_msgs::msg::String>("visual_odometry/status", rclcpp::QoS(10));
+  status_publisher_ = create_publisher<std_msgs::msg::String>("visual_odometry/status",
+      rclcpp::QoS(10));
 
   std::ostringstream camera_summary;
   for (std::size_t index = 0; index < cameras_.size(); ++index) {
@@ -192,8 +287,9 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions & options)
 
   RCLCPP_INFO(
     get_logger(),
-    "Monocular visual odometry configured with cameras=[%s] wheel_scale=%s imu_yaw=%s output=%s",
+    "VO configured with cameras=[%s] depth_metric=%s wheel_scale=%s imu_yaw=%s output=%s",
     camera_summary.str().c_str(),
+    has_depth_metric_camera ? "true" : "false",
     use_wheel_scale_ ? "true" : "false",
     use_imu_yaw_ ? "true" : "false",
     odom_topic_.c_str());
@@ -219,12 +315,20 @@ void VisualOdometryNode::configureCameras()
     const std::string & name,
     const std::string & image_topic,
     const std::string & camera_info_topic,
+    const std::string & depth_image_topic,
+    const std::string & depth_camera_info_topic,
     const std::string & frame_override,
+    const std::string & depth_frame_override,
+    bool use_depth,
     double fusion_weight) {
       auto camera = std::make_shared<CameraState>(name);
       camera->image_topic = image_topic;
       camera->camera_info_topic = camera_info_topic;
+      camera->depth_image_topic = depth_image_topic;
+      camera->depth_camera_info_topic = depth_camera_info_topic;
       camera->frame_override = frame_override;
+      camera->depth_frame_override = depth_frame_override;
+      camera->use_depth = use_depth;
       camera->fusion_weight = fusion_weight;
 
       camera->camera_info_subscription = create_subscription<sensor_msgs::msg::CameraInfo>(
@@ -241,6 +345,23 @@ void VisualOdometryNode::configureCameras()
           imageCallback(camera, message);
         });
 
+      if (camera->use_depth) {
+        camera->depth_camera_info_subscription =
+          create_subscription<sensor_msgs::msg::CameraInfo>(
+          camera->depth_camera_info_topic,
+          rclcpp::SensorDataQoS(),
+          [this, camera](const sensor_msgs::msg::CameraInfo::SharedPtr message) {
+            depthCameraInfoCallback(camera, message);
+          });
+
+        camera->depth_image_subscription = create_subscription<sensor_msgs::msg::Image>(
+          camera->depth_image_topic,
+          rclcpp::SensorDataQoS(),
+          [this, camera](const sensor_msgs::msg::Image::SharedPtr message) {
+            depthImageCallback(camera, message);
+          });
+      }
+
       cameras_.push_back(std::move(camera));
     };
 
@@ -255,8 +376,15 @@ void VisualOdometryNode::configureCameras()
     const std::string image_topic = declare_parameter(prefix + "image_topic", std::string(""));
     const std::string camera_info_topic =
       declare_parameter(prefix + "camera_info_topic", std::string(""));
+    const bool use_depth = declare_parameter(prefix + "use_depth", false);
+    const std::string depth_image_topic =
+      declare_parameter(prefix + "depth_image_topic", std::string(""));
+    const std::string depth_camera_info_topic =
+      declare_parameter(prefix + "depth_camera_info_topic", std::string(""));
     const std::string frame_override =
       declare_parameter(prefix + "camera_frame", std::string(""));
+    const std::string depth_frame_override =
+      declare_parameter(prefix + "depth_camera_frame", std::string(""));
     const double fusion_weight =
       declare_parameter(prefix + "fusion_weight", 1.0);
 
@@ -267,8 +395,24 @@ void VisualOdometryNode::configureCameras()
         camera_name.c_str());
       continue;
     }
+    if (use_depth && (depth_image_topic.empty() || depth_camera_info_topic.empty())) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Skipping camera '%s' because depth is enabled but depth topics are empty.",
+        camera_name.c_str());
+      continue;
+    }
 
-    add_camera(camera_name, image_topic, camera_info_topic, frame_override, fusion_weight);
+    add_camera(
+      camera_name,
+      image_topic,
+      camera_info_topic,
+      depth_image_topic,
+      depth_camera_info_topic,
+      frame_override,
+      depth_frame_override,
+      use_depth,
+      fusion_weight);
   }
 
   if (cameras_.empty()) {
@@ -337,6 +481,10 @@ void VisualOdometryNode::cameraInfoCallback(
 
   camera->calibration.camera_matrix =
     cv::Mat(3, 3, CV_64F, const_cast<double *>(message->k.data())).clone();
+  if (message->p.size() == 12U) {
+    camera->calibration.projection_matrix =
+      cv::Mat(3, 4, CV_64F, const_cast<double *>(message->p.data())).clone();
+  }
   camera->calibration.distortion_coefficients =
     cv::Mat(
     1,
@@ -347,6 +495,77 @@ void VisualOdometryNode::cameraInfoCallback(
 
   if (camera->calibration.distortion_coefficients.empty()) {
     camera->calibration.distortion_coefficients = cv::Mat::zeros(1, 4, CV_64F);
+  }
+}
+
+void VisualOdometryNode::depthCameraInfoCallback(
+  const std::shared_ptr<CameraState> & camera,
+  const sensor_msgs::msg::CameraInfo::SharedPtr message)
+{
+  if (message->k.size() != 9U) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Ignoring depth camera info for %s without a 3x3 intrinsic matrix.",
+      camera->name.c_str());
+    return;
+  }
+
+  camera->depth_calibration.camera_matrix =
+    cv::Mat(3, 3, CV_64F, const_cast<double *>(message->k.data())).clone();
+  if (message->p.size() == 12U) {
+    camera->depth_calibration.projection_matrix =
+      cv::Mat(3, 4, CV_64F, const_cast<double *>(message->p.data())).clone();
+  }
+  camera->depth_calibration.distortion_coefficients =
+    cv::Mat(
+    1,
+    static_cast<int>(message->d.size()),
+    CV_64F,
+    const_cast<double *>(message->d.data())).clone();
+  camera->depth_calibration.distortion_model = message->distortion_model;
+
+  if (camera->depth_calibration.distortion_coefficients.empty()) {
+    camera->depth_calibration.distortion_coefficients = cv::Mat::zeros(1, 4, CV_64F);
+  }
+}
+
+void VisualOdometryNode::depthImageCallback(
+  const std::shared_ptr<CameraState> & camera,
+  const sensor_msgs::msg::Image::SharedPtr message)
+{
+  if (!camera->depth_calibration.ready()) {
+    publishStatus(camera->name + ":waiting_for_depth_camera_info");
+    return;
+  }
+
+  DepthSample sample;
+  try {
+    sample.depth_meters = convertRosImageToDepthMeters(*message);
+  } catch (const std::exception & error) {
+    RCLCPP_ERROR_THROTTLE(
+      get_logger(),
+      *get_clock(),
+      5000,
+      "Failed to convert depth image for camera %s: %s",
+      camera->name.c_str(),
+      error.what());
+    publishStatus(camera->name + ":depth_conversion_failed");
+    return;
+  }
+
+  sample.calibration = camera->depth_calibration;
+  sample.stamp = rclcpp::Time(message->header.stamp);
+  sample.frame_id =
+    camera->depth_frame_override.empty() ? message->header.frame_id : camera->depth_frame_override;
+  camera->depth_history.push_back(std::move(sample));
+
+  const rclcpp::Time newest_stamp(message->header.stamp);
+  while (!camera->depth_history.empty() &&
+    (newest_stamp - camera->depth_history.front().stamp).seconds() > depth_history_seconds_)
+  {
+    camera->depth_history.pop_front();
   }
 }
 
@@ -460,9 +679,10 @@ void VisualOdometryNode::imageCallback(
   }
 
   auto motion_reference = lookupMotionReference(stamp);
-  if (!motion_reference.has_value()) {
-    publishStatus(camera->name + ":waiting_for_motion_reference");
-    return;
+  MotionReferenceSample motion_reference_sample;
+  motion_reference_sample.stamp = stamp;
+  if (motion_reference.has_value()) {
+    motion_reference_sample = motion_reference.value();
   }
 
   cv::Mat gray_image;
@@ -480,6 +700,38 @@ void VisualOdometryNode::imageCallback(
     return;
   }
 
+  std::optional<DepthSample> inline_depth_sample;
+  if (camera->use_depth && camera->depth_image_topic == camera->image_topic &&
+    camera->depth_calibration.ready())
+  {
+    try {
+      DepthSample sample;
+      sample.depth_meters = convertRosImageToDepthMeters(*message);
+      sample.calibration = camera->depth_calibration;
+      sample.stamp = stamp;
+      sample.frame_id =
+        camera->depth_frame_override.empty() ? message->header.frame_id :
+        camera->depth_frame_override;
+      inline_depth_sample = sample;
+      camera->depth_history.push_back(std::move(sample));
+      while (!camera->depth_history.empty() &&
+        (stamp - camera->depth_history.front().stamp).seconds() > depth_history_seconds_)
+      {
+        camera->depth_history.pop_front();
+      }
+    } catch (const std::exception & error) {
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        5000,
+        "Failed to convert inline depth for camera %s: %s",
+        camera->name.c_str(),
+        error.what());
+      publishStatus(camera->name + ":depth_conversion_failed");
+      return;
+    }
+  }
+
   const std::string camera_frame =
     camera->frame_override.empty() ? message->header.frame_id : camera->frame_override;
   if (!resolveCameraExtrinsics(camera, camera_frame, stamp)) {
@@ -490,6 +742,13 @@ void VisualOdometryNode::imageCallback(
   camera->latest_gray_image = gray_image.clone();
   camera->latest_image_stamp = stamp;
   camera->latest_frame_id = camera_frame;
+  camera->image_history.push_back(CameraImageSample{camera->latest_gray_image, stamp,
+      camera_frame});
+  while (!camera->image_history.empty() &&
+    (stamp - camera->image_history.front().stamp).seconds() > stereo_image_history_seconds_)
+  {
+    camera->image_history.pop_front();
+  }
 
   if (StereoPairState * stereo_pair = findStereoPairByCameraName(camera->name)) {
     if (stereo_pair->right_camera.get() == camera.get()) {
@@ -497,89 +756,143 @@ void VisualOdometryNode::imageCallback(
       return;
     }
 
-    if (!stereo_pair->right_camera ||
-      stereo_pair->right_camera->latest_gray_image.empty() ||
-      stereo_pair->right_camera->latest_image_stamp.nanoseconds() == 0)
-    {
+    if (!stereo_pair->right_camera || stereo_pair->right_camera->image_history.empty()) {
       publishStatus(stereo_pair->name + ":waiting_for_right_frame");
+    } else {
+      const CameraImageSample * right_sample = nullptr;
+      double right_delta_seconds = std::numeric_limits<double>::max();
+      for (const auto & candidate : stereo_pair->right_camera->image_history) {
+        const double candidate_delta_seconds = std::abs((candidate.stamp - stamp).seconds());
+        if (candidate_delta_seconds < right_delta_seconds) {
+          right_delta_seconds = candidate_delta_seconds;
+          right_sample = &candidate;
+        }
+      }
+
+      if (right_delta_seconds > stereo_pair->sync_tolerance_seconds) {
+        publishStatus(stereo_pair->name + ":waiting_for_synced_right_frame");
+      } else {
+        const bool right_extrinsics_ready = resolveCameraExtrinsics(
+          stereo_pair->right_camera,
+          stereo_pair->right_camera->frame_override.empty() ? right_sample->frame_id :
+          stereo_pair->right_camera->frame_override,
+          right_sample->stamp);
+        if (!right_extrinsics_ready) {
+          publishStatus(stereo_pair->name + ":waiting_for_right_camera_extrinsics");
+        } else if (!stereo_pair->previous_frame.has_value()) {
+          initializeStereoFrame(
+            *stereo_pair,
+            gray_image,
+            right_sample->gray_image,
+            motion_reference_sample,
+            stamp);
+          publishStatus(stereo_pair->name + ":initialized_first_frame");
+        } else {
+          TrackingResult stereo_result = estimateStereoMotion(
+            *stereo_pair,
+            gray_image,
+            right_sample->gray_image,
+            motion_reference_sample,
+            camera->base_to_camera,
+            stereo_pair->right_camera->base_to_camera,
+            stamp);
+          initializeStereoFrame(
+            *stereo_pair,
+            gray_image,
+            right_sample->gray_image,
+            motion_reference_sample,
+            stamp);
+          if (stereo_result.success) {
+            queueEstimate(stereo_pair->name, stereo_result, stamp, stereo_pair->fusion_weight);
+            flushPendingEstimates(stamp, false);
+
+            std::ostringstream status;
+            status << "tracking=true stereo_pair=" << stereo_pair->name
+                   << " tracked=" << stereo_result.tracked_features
+                   << " inliers=" << stereo_result.inliers
+                   << " scale=" << stereo_result.metric_translation_scale;
+            publishStatus(status.str());
+            return;
+          }
+          publishStatus(stereo_pair->name + ":" + stereo_result.reason);
+        }
+      }
+    }
+  }
+
+  const std::optional<DepthSample> depth_sample =
+    inline_depth_sample.has_value() ? inline_depth_sample : findNearestDepthSample(camera, stamp);
+  if (camera->use_depth && depth_sample.has_value()) {
+    if (camera->previous_gray_image.empty() || !camera->previous_depth_sample.has_value()) {
+      initializeFromFrame(camera, gray_image, depth_sample, motion_reference_sample, stamp);
+      publishStatus(camera->name + ":initialized_first_depth_frame");
       return;
     }
 
-    const double right_delta_seconds =
-      std::abs((stereo_pair->right_camera->latest_image_stamp - stamp).seconds());
-    if (right_delta_seconds > stereo_pair->sync_tolerance_seconds) {
-      publishStatus(stereo_pair->name + ":waiting_for_synced_right_frame");
+    TrackingResult depth_result =
+      estimateDepthMotion(camera, gray_image, *depth_sample, motion_reference_sample, stamp);
+    if (depth_result.success) {
+      camera->previous_gray_image = gray_image.clone();
+      camera->previous_points = depth_result.tracked_points;
+      if (static_cast<int>(camera->previous_points.size()) < min_tracked_features_) {
+        camera->previous_points = detectFeatures(camera->previous_gray_image);
+      }
+      camera->previous_depth_sample = depth_sample;
+      camera->previous_image_stamp = stamp;
+      if (motion_reference_sample.planar_position.has_value()) {
+        camera->previous_motion_reference_position = *motion_reference_sample.planar_position;
+      }
+      if (motion_reference_sample.yaw_rad.has_value()) {
+        camera->previous_motion_reference_yaw_rad = *motion_reference_sample.yaw_rad;
+      }
+      camera->have_previous_motion_reference = motion_reference.has_value();
+
+      queueEstimate(camera->name, depth_result, stamp, camera->fusion_weight);
+      flushPendingEstimates(stamp, cameras_.size() == 1U);
+
+      std::ostringstream status;
+      status << "tracking=true camera=" << camera->name
+             << " metric_source=" << depth_result.metric_source
+             << " tracked=" << depth_result.tracked_features
+             << " valid_depth=" << depth_result.valid_depth_points
+             << " rejected_depth=" << depth_result.rejected_depth_points
+             << " inliers=" << depth_result.inliers
+             << " residual_m=" << depth_result.residual_m
+             << " sync_delta_s=" << depth_result.sync_delta_seconds
+             << " scale=" << depth_result.metric_translation_scale;
+      publishStatus(status.str());
       return;
     }
-
-    if (!resolveCameraExtrinsics(
-        stereo_pair->right_camera,
-        stereo_pair->right_camera->frame_override.empty() ?
-        stereo_pair->right_camera->latest_frame_id :
-        stereo_pair->right_camera->frame_override,
-        stereo_pair->right_camera->latest_image_stamp))
-    {
-      publishStatus(stereo_pair->name + ":waiting_for_right_camera_extrinsics");
-      return;
-    }
-
-    if (!stereo_pair->previous_frame.has_value()) {
-      initializeStereoFrame(
-        *stereo_pair,
-        gray_image,
-        stereo_pair->right_camera->latest_gray_image,
-        motion_reference.value(),
-        stamp);
-      publishStatus(stereo_pair->name + ":initialized_first_frame");
-      return;
-    }
-
-    TrackingResult stereo_result = estimateStereoMotion(
-      *stereo_pair,
-      gray_image,
-      stereo_pair->right_camera->latest_gray_image,
-      motion_reference.value(),
-      camera->base_to_camera,
-      stereo_pair->right_camera->base_to_camera,
-      stamp);
-    if (!stereo_result.success) {
-      initializeStereoFrame(
-        *stereo_pair,
-        gray_image,
-        stereo_pair->right_camera->latest_gray_image,
-        motion_reference.value(),
-        stamp);
-      publishStatus(stereo_pair->name + ":" + stereo_result.reason);
-      return;
-    }
-
-    initializeStereoFrame(
-      *stereo_pair,
-      gray_image,
-      stereo_pair->right_camera->latest_gray_image,
-      motion_reference.value(),
-      stamp);
-    queueEstimate(stereo_pair->name, stereo_result, stamp, stereo_pair->fusion_weight);
-    flushPendingEstimates(stamp, false);
-
     std::ostringstream status;
-    status << "tracking=true stereo_pair=" << stereo_pair->name
-           << " tracked=" << stereo_result.tracked_features
-           << " inliers=" << stereo_result.inliers
-           << " scale=" << stereo_result.metric_translation_scale;
+    status << camera->name << ":" << depth_result.reason
+           << " metric_source=" << depth_result.metric_source
+           << " tracked=" << depth_result.tracked_features
+           << " valid_depth=" << depth_result.valid_depth_points
+           << " rejected_depth=" << depth_result.rejected_depth_points
+           << " inliers=" << depth_result.inliers
+           << " residual_m=" << depth_result.residual_m
+           << " sync_delta_s=" << depth_result.sync_delta_seconds;
     publishStatus(status.str());
+  } else if (camera->use_depth) {
+    publishStatus(camera->name + ":waiting_for_synced_depth_frame");
+  }
+
+  if (!motion_reference.has_value()) {
+    publishStatus(
+      camera->name + ":waiting_for_motion_reference " +
+      describeMotionReferenceAvailability(stamp));
     return;
   }
 
   if (!camera->have_previous_motion_reference || camera->previous_gray_image.empty()) {
-    initializeFromFrame(camera, gray_image, motion_reference.value(), stamp);
+    initializeFromFrame(camera, gray_image, depth_sample, motion_reference_sample, stamp);
     publishStatus(camera->name + ":initialized_first_frame");
     return;
   }
 
-  TrackingResult result = estimateMotion(camera, gray_image, motion_reference.value(), stamp);
+  TrackingResult result = estimateMotion(camera, gray_image, motion_reference_sample, stamp);
   if (!result.success) {
-    initializeFromFrame(camera, gray_image, motion_reference.value(), stamp);
+    initializeFromFrame(camera, gray_image, depth_sample, motion_reference_sample, stamp);
     publishStatus(camera->name + ":" + result.reason);
     return;
   }
@@ -590,11 +903,11 @@ void VisualOdometryNode::imageCallback(
     camera->previous_points = detectFeatures(camera->previous_gray_image);
   }
   camera->previous_image_stamp = stamp;
-  if (motion_reference->planar_position.has_value()) {
-    camera->previous_motion_reference_position = *motion_reference->planar_position;
+  if (motion_reference_sample.planar_position.has_value()) {
+    camera->previous_motion_reference_position = *motion_reference_sample.planar_position;
   }
-  if (motion_reference->yaw_rad.has_value()) {
-    camera->previous_motion_reference_yaw_rad = *motion_reference->yaw_rad;
+  if (motion_reference_sample.yaw_rad.has_value()) {
+    camera->previous_motion_reference_yaw_rad = *motion_reference_sample.yaw_rad;
   }
   camera->have_previous_motion_reference = true;
 
@@ -603,6 +916,7 @@ void VisualOdometryNode::imageCallback(
 
   std::ostringstream status;
   status << "tracking=true camera=" << camera->name
+         << " metric_source=" << result.metric_source
          << " tracked=" << result.tracked_features
          << " inliers=" << result.inliers
          << " scale=" << result.metric_translation_scale;
@@ -612,11 +926,13 @@ void VisualOdometryNode::imageCallback(
 void VisualOdometryNode::initializeFromFrame(
   const std::shared_ptr<CameraState> & camera,
   const cv::Mat & gray_image,
+  const std::optional<DepthSample> & depth_sample,
   const MotionReferenceSample & motion_reference,
   const rclcpp::Time & stamp)
 {
   camera->previous_gray_image = gray_image.clone();
   camera->previous_points = detectFeatures(camera->previous_gray_image);
+  camera->previous_depth_sample = depth_sample;
   camera->previous_image_stamp = stamp;
   if (motion_reference.planar_position.has_value()) {
     camera->previous_motion_reference_position = *motion_reference.planar_position;
@@ -659,7 +975,9 @@ VisualOdometryNode::StereoPairState * VisualOdometryNode::findStereoPairByCamera
   const std::string & camera_name)
 {
   for (auto & stereo_pair : stereo_pairs_) {
-    if (stereo_pair.left_camera_name == camera_name || stereo_pair.right_camera_name == camera_name) {
+    if (stereo_pair.left_camera_name == camera_name ||
+      stereo_pair.right_camera_name == camera_name)
+    {
       return &stereo_pair;
     }
   }
@@ -670,7 +988,9 @@ const VisualOdometryNode::StereoPairState * VisualOdometryNode::findStereoPairBy
   const std::string & camera_name) const
 {
   for (const auto & stereo_pair : stereo_pairs_) {
-    if (stereo_pair.left_camera_name == camera_name || stereo_pair.right_camera_name == camera_name) {
+    if (stereo_pair.left_camera_name == camera_name ||
+      stereo_pair.right_camera_name == camera_name)
+    {
       return &stereo_pair;
     }
   }
@@ -787,7 +1107,9 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateStereoMotion(
       std::abs(previous_left_valid_points[index].x - previous_right_points[index].x);
     const double current_disparity =
       std::abs(current_left_valid_points[index].x - current_right_points[index].x);
-    if (previous_disparity < stereo_min_disparity_px_ || current_disparity < stereo_min_disparity_px_) {
+    if (previous_disparity < stereo_min_disparity_px_ ||
+      current_disparity < stereo_min_disparity_px_)
+    {
       continue;
     }
     previous_left_stereo_points.push_back(previous_left_valid_points[index]);
@@ -880,6 +1202,12 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateStereoMotion(
   result.inliers = rigid_inliers;
   result.tracked_points = current_left_stereo_points;
   result.metric_translation_scale = delta_left.getOrigin().length();
+  if (reject_zero_scale_updates_ &&
+    result.metric_translation_scale < min_scale_translation_meters_)
+  {
+    result.reason = "reinitializing_zero_scale";
+    return result;
+  }
 
   tf2::Transform delta_base = base_to_left * delta_left * base_to_left.inverse();
   double roll = 0.0;
@@ -909,6 +1237,181 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateStereoMotion(
 
   result.dt_seconds = std::max((stamp - previous_frame.stamp).seconds(), 1.0e-3);
   result.delta_base = delta_base;
+  result.metric_source = "stereo";
+  result.success = true;
+  return result;
+}
+
+VisualOdometryNode::TrackingResult VisualOdometryNode::estimateDepthMotion(
+  const std::shared_ptr<CameraState> & camera,
+  const cv::Mat & current_gray_image,
+  const DepthSample & current_depth_sample,
+  const MotionReferenceSample & current_motion_reference,
+  const rclcpp::Time & stamp)
+{
+  TrackingResult result;
+  result.metric_source = "depth";
+  result.sync_delta_seconds = std::abs((current_depth_sample.stamp - stamp).seconds());
+
+  if (!camera->previous_depth_sample.has_value()) {
+    result.reason = "reinitializing_no_previous_depth_frame";
+    return result;
+  }
+  if (camera->previous_points.empty()) {
+    result.reason = "reinitializing_no_features";
+    return result;
+  }
+
+  std::vector<cv::Point2f> tracked_points;
+  std::vector<unsigned char> tracking_status;
+  std::vector<float> tracking_errors;
+  cv::calcOpticalFlowPyrLK(
+    camera->previous_gray_image,
+    current_gray_image,
+    camera->previous_points,
+    tracked_points,
+    tracking_status,
+    tracking_errors,
+    cv::Size(optical_flow_window_px_, optical_flow_window_px_),
+    optical_flow_max_pyramid_level_,
+    cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 30, 0.01));
+
+  std::vector<cv::Point2f> current_valid_points;
+  std::vector<Eigen::Vector3d> previous_points_3d;
+  std::vector<Eigen::Vector3d> current_points_3d;
+  current_valid_points.reserve(camera->previous_points.size());
+  previous_points_3d.reserve(camera->previous_points.size());
+  current_points_3d.reserve(camera->previous_points.size());
+
+  const DepthSample & previous_depth_sample = *camera->previous_depth_sample;
+  int tracked_with_flow = 0;
+  for (std::size_t index = 0; index < camera->previous_points.size(); ++index) {
+    if (!tracking_status[index] || tracking_errors[index] > optical_flow_max_error_) {
+      continue;
+    }
+    ++tracked_with_flow;
+
+    const std::optional<double> previous_depth =
+      sampleDepthMeters(previous_depth_sample.depth_meters, camera->previous_points[index]);
+    const std::optional<double> current_depth =
+      sampleDepthMeters(current_depth_sample.depth_meters, tracked_points[index]);
+    if (!previous_depth.has_value() || !current_depth.has_value()) {
+      continue;
+    }
+
+    const std::optional<Eigen::Vector3d> previous_point =
+      backProjectDepthPoint(
+      previous_depth_sample.calibration,
+      camera->previous_points[index],
+      *previous_depth);
+    const std::optional<Eigen::Vector3d> current_point =
+      backProjectDepthPoint(
+      current_depth_sample.calibration,
+      tracked_points[index],
+      *current_depth);
+    if (!previous_point.has_value() || !current_point.has_value()) {
+      continue;
+    }
+
+    previous_points_3d.push_back(*previous_point);
+    current_points_3d.push_back(*current_point);
+    current_valid_points.push_back(tracked_points[index]);
+  }
+
+  result.tracked_features = tracked_with_flow;
+  result.valid_depth_points = static_cast<int>(current_points_3d.size());
+  result.rejected_depth_points = std::max(0, tracked_with_flow - result.valid_depth_points);
+  if (tracked_with_flow < depth_min_inliers_) {
+    result.reason = "reinitializing_tracking_lost";
+    return result;
+  }
+  const double valid_depth_ratio =
+    static_cast<double>(result.valid_depth_points) / static_cast<double>(tracked_with_flow);
+  if (result.valid_depth_points < depth_min_inliers_ ||
+    valid_depth_ratio < depth_min_valid_ratio_)
+  {
+    result.reason = "reinitializing_low_valid_depth";
+    return result;
+  }
+
+  tf2::Transform delta_camera(tf2::Transform::getIdentity());
+  int rigid_inliers = 0;
+  if (!estimateRigidTransform(previous_points_3d, current_points_3d, delta_camera, rigid_inliers) ||
+    rigid_inliers < depth_min_inliers_)
+  {
+    result.reason = "reinitializing_depth_rigid_fit_failed";
+    return result;
+  }
+
+  double residual_sum = 0.0;
+  const tf2::Matrix3x3 rotation(delta_camera.getRotation());
+  const tf2::Vector3 translation = delta_camera.getOrigin();
+  for (std::size_t index = 0; index < previous_points_3d.size(); ++index) {
+    const tf2::Vector3 previous_point(
+      previous_points_3d[index].x(),
+      previous_points_3d[index].y(),
+      previous_points_3d[index].z());
+    const tf2::Vector3 estimated_current = (rotation * previous_point) + translation;
+    const Eigen::Vector3d residual(
+      estimated_current.x() - current_points_3d[index].x(),
+      estimated_current.y() - current_points_3d[index].y(),
+      estimated_current.z() - current_points_3d[index].z());
+    residual_sum += residual.norm();
+  }
+  result.residual_m = residual_sum / static_cast<double>(previous_points_3d.size());
+  if (result.residual_m > depth_max_residual_m_) {
+    result.reason = "reinitializing_depth_residual_high";
+    return result;
+  }
+
+  const tf2::Transform camera_to_base = camera->base_to_camera.inverse();
+  tf2::Transform delta_base = camera->base_to_camera * delta_camera * camera_to_base;
+  double roll = 0.0;
+  double pitch = 0.0;
+  double yaw = 0.0;
+  tf2::Matrix3x3(delta_base.getRotation()).getRPY(roll, pitch, yaw);
+  result.delta_yaw_rad = normalizeAngle(yaw);
+  if (use_imu_yaw_ && current_motion_reference.yaw_rad.has_value() &&
+    camera->have_previous_motion_reference)
+  {
+    result.delta_yaw_rad = normalizeAngle(
+      *current_motion_reference.yaw_rad - camera->previous_motion_reference_yaw_rad);
+  }
+
+  if (std::abs(result.delta_yaw_rad) > depth_max_yaw_rad_) {
+    result.reason = "reinitializing_depth_yaw_jump";
+    return result;
+  }
+  result.metric_translation_scale = delta_base.getOrigin().length();
+  if (result.metric_translation_scale > depth_max_translation_m_) {
+    result.reason = "reinitializing_depth_translation_jump";
+    return result;
+  }
+  if (reject_zero_scale_updates_ &&
+    result.metric_translation_scale < min_scale_translation_meters_)
+  {
+    result.reason = "reinitializing_zero_scale";
+    return result;
+  }
+
+  if (force_2d_) {
+    tf2::Transform planar_delta(tf2::Transform::getIdentity());
+    planar_delta.setOrigin(
+      tf2::Vector3(
+        delta_base.getOrigin().x(),
+        delta_base.getOrigin().y(),
+        0.0));
+    tf2::Quaternion planar_quaternion;
+    planar_quaternion.setRPY(0.0, 0.0, result.delta_yaw_rad);
+    planar_delta.setRotation(planar_quaternion);
+    delta_base = planar_delta;
+  }
+
+  result.inliers = rigid_inliers;
+  result.tracked_points = std::move(current_valid_points);
+  result.dt_seconds = std::max((stamp - camera->previous_image_stamp).seconds(), 1.0e-3);
+  result.delta_base = delta_base;
+  result.metric_source = "depth";
   result.success = true;
   return result;
 }
@@ -1011,6 +1514,12 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateMotion(
       result.metric_translation_scale = 0.0;
     }
   }
+  if (reject_zero_scale_updates_ &&
+    result.metric_translation_scale < min_scale_translation_meters_)
+  {
+    result.reason = "reinitializing_zero_scale";
+    return result;
+  }
 
   cv::Mat scaled_translation = translation_vector.clone();
   const double translation_norm = cv::norm(translation_vector);
@@ -1021,9 +1530,12 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateMotion(
   }
 
   tf2::Matrix3x3 tf_rotation(
-    rotation_matrix.at<double>(0, 0), rotation_matrix.at<double>(0, 1), rotation_matrix.at<double>(0, 2),
-    rotation_matrix.at<double>(1, 0), rotation_matrix.at<double>(1, 1), rotation_matrix.at<double>(1, 2),
-    rotation_matrix.at<double>(2, 0), rotation_matrix.at<double>(2, 1), rotation_matrix.at<double>(2, 2));
+    rotation_matrix.at<double>(0, 0), rotation_matrix.at<double>(0, 1),
+    rotation_matrix.at<double>(0, 2),
+    rotation_matrix.at<double>(1, 0), rotation_matrix.at<double>(1, 1),
+    rotation_matrix.at<double>(1, 2),
+    rotation_matrix.at<double>(2, 0), rotation_matrix.at<double>(2, 1),
+    rotation_matrix.at<double>(2, 2));
   tf2::Quaternion camera_delta_quaternion;
   tf_rotation.getRotation(camera_delta_quaternion);
 
@@ -1063,6 +1575,7 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::estimateMotion(
 
   result.dt_seconds = std::max((stamp - camera->previous_image_stamp).seconds(), 1.0e-3);
   result.delta_base = delta_base;
+  result.metric_source = "wheel_scaled_mono";
   result.success = true;
   return result;
 }
@@ -1155,49 +1668,65 @@ bool VisualOdometryNode::triangulateStereoCorrespondences(
     valid_mask->assign(left_points.size(), 0U);
   }
 
-  std::vector<cv::Point2f> left_undistorted;
-  std::vector<cv::Point2f> right_undistorted;
-  if (left_calibration.distortion_model == "equidistant") {
-    cv::fisheye::undistortPoints(
-      left_points,
-      left_undistorted,
-      left_calibration.camera_matrix,
-      left_calibration.distortion_coefficients);
-  } else {
-    cv::undistortPoints(
-      left_points,
-      left_undistorted,
-      left_calibration.camera_matrix,
-      left_calibration.distortion_coefficients);
-  }
-  if (right_calibration.distortion_model == "equidistant") {
-    cv::fisheye::undistortPoints(
-      right_points,
-      right_undistorted,
-      right_calibration.camera_matrix,
-      right_calibration.distortion_coefficients);
-  } else {
-    cv::undistortPoints(
-      right_points,
-      right_undistorted,
-      right_calibration.camera_matrix,
-      right_calibration.distortion_coefficients);
-  }
+  std::vector<cv::Point2f> left_points_for_triangulation;
+  std::vector<cv::Point2f> right_points_for_triangulation;
+  cv::Mat left_projection;
+  cv::Mat right_projection;
 
-  tf2::Matrix3x3 rotation_matrix(left_to_right.getRotation());
-  tf2::Matrix3x3 identity_rotation;
-  identity_rotation.setIdentity();
-  const cv::Mat left_projection = makeProjectionMatrix(
-    identity_rotation,
-    tf2::Vector3(0.0, 0.0, 0.0));
-  const cv::Mat right_projection = makeProjectionMatrix(rotation_matrix, left_to_right.getOrigin());
+  const bool rectified_projection_available =
+    !left_calibration.projection_matrix.empty() &&
+    !right_calibration.projection_matrix.empty() &&
+    (std::abs(right_calibration.projection_matrix.at<double>(0, 3)) > 1.0e-9 ||
+    std::abs(right_calibration.projection_matrix.at<double>(1, 3)) > 1.0e-9);
+
+  if (rectified_projection_available) {
+    left_projection = left_calibration.projection_matrix;
+    right_projection = right_calibration.projection_matrix;
+    left_points_for_triangulation = left_points;
+    right_points_for_triangulation = right_points;
+  } else {
+    if (left_calibration.distortion_model == "equidistant") {
+      cv::fisheye::undistortPoints(
+        left_points,
+        left_points_for_triangulation,
+        left_calibration.camera_matrix,
+        left_calibration.distortion_coefficients);
+    } else {
+      cv::undistortPoints(
+        left_points,
+        left_points_for_triangulation,
+        left_calibration.camera_matrix,
+        left_calibration.distortion_coefficients);
+    }
+    if (right_calibration.distortion_model == "equidistant") {
+      cv::fisheye::undistortPoints(
+        right_points,
+        right_points_for_triangulation,
+        right_calibration.camera_matrix,
+        right_calibration.distortion_coefficients);
+    } else {
+      cv::undistortPoints(
+        right_points,
+        right_points_for_triangulation,
+        right_calibration.camera_matrix,
+        right_calibration.distortion_coefficients);
+    }
+
+    tf2::Matrix3x3 rotation_matrix(left_to_right.getRotation());
+    tf2::Matrix3x3 identity_rotation;
+    identity_rotation.setIdentity();
+    left_projection = makeProjectionMatrix(
+      identity_rotation,
+      tf2::Vector3(0.0, 0.0, 0.0));
+    right_projection = makeProjectionMatrix(rotation_matrix, left_to_right.getOrigin());
+  }
 
   cv::Mat homogeneous_points;
   cv::triangulatePoints(
     left_projection,
     right_projection,
-    left_undistorted,
-    right_undistorted,
+    left_points_for_triangulation,
+    right_points_for_triangulation,
     homogeneous_points);
 
   points_3d.reserve(left_points.size());
@@ -1235,9 +1764,9 @@ bool VisualOdometryNode::estimateRigidTransform(
   }
 
   auto compute_transform = [](const std::vector<Eigen::Vector3d> & source_points,
-      const std::vector<Eigen::Vector3d> & target_points,
-      Eigen::Matrix3d & rotation_out,
-      Eigen::Vector3d & translation_out) {
+    const std::vector<Eigen::Vector3d> & target_points,
+    Eigen::Matrix3d & rotation_out,
+    Eigen::Vector3d & translation_out) {
       Eigen::Vector3d source_centroid = Eigen::Vector3d::Zero();
       Eigen::Vector3d target_centroid = Eigen::Vector3d::Zero();
       for (std::size_t index = 0; index < source_points.size(); ++index) {
@@ -1250,7 +1779,8 @@ bool VisualOdometryNode::estimateRigidTransform(
       Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
       for (std::size_t index = 0; index < source_points.size(); ++index) {
         covariance +=
-          (source_points[index] - source_centroid) * (target_points[index] - target_centroid).transpose();
+          (source_points[index] - source_centroid) *
+          (target_points[index] - target_centroid).transpose();
       }
 
       const Eigen::JacobiSVD<Eigen::Matrix3d> svd(
@@ -1304,6 +1834,93 @@ bool VisualOdometryNode::estimateRigidTransform(
   return true;
 }
 
+std::optional<VisualOdometryNode::DepthSample> VisualOdometryNode::findNearestDepthSample(
+  const std::shared_ptr<CameraState> & camera,
+  const rclcpp::Time & stamp) const
+{
+  if (!camera->use_depth || camera->depth_history.empty()) {
+    return std::nullopt;
+  }
+
+  const DepthSample * best_sample = nullptr;
+  double best_delta_seconds = std::numeric_limits<double>::infinity();
+  for (const auto & sample : camera->depth_history) {
+    const double delta_seconds = std::abs((sample.stamp - stamp).seconds());
+    if (delta_seconds < best_delta_seconds) {
+      best_delta_seconds = delta_seconds;
+      best_sample = &sample;
+    }
+  }
+
+  if (best_sample == nullptr || best_delta_seconds > depth_sync_tolerance_seconds_) {
+    return std::nullopt;
+  }
+  return *best_sample;
+}
+
+std::optional<double> VisualOdometryNode::sampleDepthMeters(
+  const cv::Mat & depth_meters,
+  const cv::Point2f & point) const
+{
+  if (depth_meters.empty() || depth_meters.type() != CV_32FC1) {
+    return std::nullopt;
+  }
+
+  std::vector<float> valid_depths;
+  const int center_x = static_cast<int>(std::lround(point.x));
+  const int center_y = static_cast<int>(std::lround(point.y));
+  for (int dy = -depth_sampling_radius_px_; dy <= depth_sampling_radius_px_; ++dy) {
+    const int y = center_y + dy;
+    if (y < 0 || y >= depth_meters.rows) {
+      continue;
+    }
+    for (int dx = -depth_sampling_radius_px_; dx <= depth_sampling_radius_px_; ++dx) {
+      const int x = center_x + dx;
+      if (x < 0 || x >= depth_meters.cols) {
+        continue;
+      }
+      const float depth = depth_meters.at<float>(y, x);
+      if (std::isfinite(depth) && depth >= depth_min_range_m_ && depth <= depth_max_range_m_) {
+        valid_depths.push_back(depth);
+      }
+    }
+  }
+
+  if (valid_depths.empty()) {
+    return std::nullopt;
+  }
+  const auto median = valid_depths.begin() +
+    static_cast<std::ptrdiff_t>(valid_depths.size() / 2U);
+  std::nth_element(valid_depths.begin(), median, valid_depths.end());
+  return static_cast<double>(*median);
+}
+
+std::optional<Eigen::Vector3d> VisualOdometryNode::backProjectDepthPoint(
+  const CameraCalibration & calibration,
+  const cv::Point2f & point,
+  double depth_meters) const
+{
+  if (!calibration.ready() || !std::isfinite(depth_meters) || depth_meters <= 0.0) {
+    return std::nullopt;
+  }
+
+  const double fx = calibration.camera_matrix.at<double>(0, 0);
+  const double fy = calibration.camera_matrix.at<double>(1, 1);
+  const double cx = calibration.camera_matrix.at<double>(0, 2);
+  const double cy = calibration.camera_matrix.at<double>(1, 2);
+  if (std::abs(fx) < 1.0e-9 || std::abs(fy) < 1.0e-9) {
+    return std::nullopt;
+  }
+
+  const double x = (static_cast<double>(point.x) - cx) * depth_meters / fx;
+  const double y = (static_cast<double>(point.y) - cy) * depth_meters / fy;
+  Eigen::Vector3d point_3d(x, y, depth_meters);
+  if (!point_3d.allFinite()) {
+    return std::nullopt;
+  }
+  return point_3d;
+}
+
 std::optional<VisualOdometryNode::MotionReferenceSample>
 VisualOdometryNode::lookupMotionReference(
   const rclcpp::Time & stamp) const
@@ -1312,19 +1929,20 @@ VisualOdometryNode::lookupMotionReference(
   auto lookup_best_match = [&stamp, &tolerance](const auto & history)
     -> const MotionReferenceSample * {
       const MotionReferenceSample * best_match = nullptr;
-      auto best_delta = rclcpp::Duration::from_seconds(std::numeric_limits<double>::max());
+      double best_delta_seconds = std::numeric_limits<double>::infinity();
 
       for (const auto & sample : history) {
         const rclcpp::Time candidate_stamp(sample.stamp);
         const rclcpp::Duration delta =
           candidate_stamp > stamp ? (candidate_stamp - stamp) : (stamp - candidate_stamp);
-        if (delta < best_delta) {
-          best_delta = delta;
+        const double delta_seconds = delta.seconds();
+        if (delta_seconds < best_delta_seconds) {
+          best_delta_seconds = delta_seconds;
           best_match = &sample;
         }
       }
 
-      if (best_match == nullptr || best_delta > tolerance) {
+      if (best_match == nullptr || best_delta_seconds > tolerance.seconds()) {
         return nullptr;
       }
       return best_match;
@@ -1352,6 +1970,37 @@ VisualOdometryNode::lookupMotionReference(
   return combined_sample;
 }
 
+std::string VisualOdometryNode::describeMotionReferenceAvailability(
+  const rclcpp::Time & stamp) const
+{
+  const auto describe_history = [&stamp](const auto & history, const char * name) {
+      std::ostringstream stream;
+      stream << name << "_samples=" << history.size();
+      if (history.empty()) {
+        stream << " " << name << "_nearest_dt=none";
+        return stream.str();
+      }
+
+      double nearest_dt_seconds = std::numeric_limits<double>::max();
+      for (const auto & sample : history) {
+        const rclcpp::Time candidate_stamp(sample.stamp);
+        const double dt_seconds =
+          std::abs((candidate_stamp > stamp ? candidate_stamp - stamp : stamp - candidate_stamp)
+            .seconds());
+        nearest_dt_seconds = std::min(nearest_dt_seconds, dt_seconds);
+      }
+      stream << " " << name << "_nearest_dt=" << nearest_dt_seconds;
+      return stream.str();
+    };
+
+  std::ostringstream status;
+  status << "stamp=" << stamp.seconds()
+         << " tolerance=" << motion_reference_lookup_tolerance_seconds_
+         << " " << describe_history(wheel_motion_reference_history_, "wheel")
+         << " " << describe_history(imu_motion_reference_history_, "imu");
+  return status.str();
+}
+
 bool VisualOdometryNode::resolveCameraExtrinsics(
   const std::shared_ptr<CameraState> & camera,
   const std::string & camera_frame,
@@ -1366,7 +2015,8 @@ bool VisualOdometryNode::resolveCameraExtrinsics(
       tf_buffer_.lookupTransform(base_frame_, camera_frame, tf2::TimePointZero);
     tf2::fromMsg(latest_transform.transform, camera->base_to_camera);
 
-    const rclcpp::Time transform_stamp(latest_transform.header.stamp, get_clock()->get_clock_type());
+    const rclcpp::Time transform_stamp(latest_transform.header.stamp,
+      get_clock()->get_clock_type());
     const double lag_seconds = (stamp - transform_stamp).seconds();
     if (lag_seconds * 1000.0 > tf_warning_tolerance_ms_) {
       RCLCPP_WARN_THROTTLE(
@@ -1483,7 +2133,11 @@ void VisualOdometryNode::flushPendingEstimates(
     std::ostringstream status;
     status << "tracking=true cameras=" << group.size()
            << " sources=" << sources.str()
+           << " metric_source=" << fused_result.metric_source
            << " inliers=" << fused_result.inliers
+           << " valid_depth=" << fused_result.valid_depth_points
+           << " rejected_depth=" << fused_result.rejected_depth_points
+           << " residual_m=" << fused_result.residual_m
            << " scale=" << fused_result.metric_translation_scale;
     publishStatus(status.str());
   }
@@ -1510,7 +2164,11 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::fuseTrackingResults(
   Eigen::Matrix3d covariance = Eigen::Matrix3d::Identity() * 1.0e3;
   double scale_sum = 0.0;
   double dt_sum = 0.0;
+  double residual_sum = 0.0;
   double weight_sum = 0.0;
+  bool has_depth_source = false;
+  bool has_stereo_source = false;
+  bool has_wheel_scaled_source = false;
 
   for (const auto & estimate : estimates) {
     const double weight =
@@ -1530,8 +2188,15 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::fuseTrackingResults(
 
     scale_sum += weight * estimate.result.metric_translation_scale;
     dt_sum += weight * estimate.result.dt_seconds;
+    residual_sum += weight * estimate.result.residual_m;
     fused_result.tracked_features += estimate.result.tracked_features;
     fused_result.inliers += estimate.result.inliers;
+    fused_result.valid_depth_points += estimate.result.valid_depth_points;
+    fused_result.rejected_depth_points += estimate.result.rejected_depth_points;
+    has_depth_source = has_depth_source || estimate.result.metric_source == "depth";
+    has_stereo_source = has_stereo_source || estimate.result.metric_source == "stereo";
+    has_wheel_scaled_source =
+      has_wheel_scaled_source || estimate.result.metric_source == "wheel_scaled_mono";
     weight_sum += weight;
   }
 
@@ -1557,7 +2222,15 @@ VisualOdometryNode::TrackingResult VisualOdometryNode::fuseTrackingResults(
 
   fused_result.metric_translation_scale = scale_sum / weight_sum;
   fused_result.dt_seconds = dt_sum / weight_sum;
+  fused_result.residual_m = residual_sum / weight_sum;
   fused_result.delta_base = fused_delta;
+  if (has_depth_source) {
+    fused_result.metric_source = "depth";
+  } else if (has_stereo_source) {
+    fused_result.metric_source = "stereo";
+  } else if (has_wheel_scaled_source) {
+    fused_result.metric_source = "wheel_scaled_mono";
+  }
   fused_result.success = true;
   return fused_result;
 }
@@ -1620,12 +2293,18 @@ Eigen::Matrix3d VisualOdometryNode::makeMeasurementCovariance(
 {
   Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
   const double bounded_confidence = std::clamp(trackingConfidence(result), 0.1, 1.0);
+  double source_multiplier = 1.0;
+  if (result.metric_source == "wheel_scaled_mono") {
+    source_multiplier = 3.0;
+  } else if (result.metric_source == "stereo") {
+    source_multiplier = 1.25;
+  }
   const double position_sigma = std::clamp(
-    pose_sigma_floor_m_ / bounded_confidence,
+    (pose_sigma_floor_m_ * source_multiplier) / bounded_confidence,
     pose_sigma_floor_m_,
     pose_sigma_ceiling_m_);
   const double yaw_sigma = std::clamp(
-    yaw_sigma_floor_rad_ / bounded_confidence,
+    (yaw_sigma_floor_rad_ * source_multiplier) / bounded_confidence,
     yaw_sigma_floor_rad_,
     yaw_sigma_ceiling_rad_);
   covariance(0, 0) = position_sigma * position_sigma;
@@ -1681,7 +2360,8 @@ tf2::Transform VisualOdometryNode::poseToTransform(
     pose.orientation.y,
     pose.orientation.z,
     pose.orientation.w);
-  tf2::Transform transform(rotation, tf2::Vector3(pose.position.x, pose.position.y, pose.position.z));
+  tf2::Transform transform(rotation,
+    tf2::Vector3(pose.position.x, pose.position.y, pose.position.z));
   return transform;
 }
 
@@ -1703,12 +2383,18 @@ std::array<double, 36> VisualOdometryNode::makePoseCovariance(
   covariance.fill(0.0);
 
   const double bounded_confidence = std::clamp(trackingConfidence(result), 0.1, 1.0);
+  double source_multiplier = 1.0;
+  if (result.metric_source == "wheel_scaled_mono") {
+    source_multiplier = 3.0;
+  } else if (result.metric_source == "stereo") {
+    source_multiplier = 1.25;
+  }
   const double position_sigma = std::clamp(
-    pose_sigma_floor_m_ / bounded_confidence,
+    (pose_sigma_floor_m_ * source_multiplier) / bounded_confidence,
     pose_sigma_floor_m_,
     pose_sigma_ceiling_m_);
   const double yaw_sigma = std::clamp(
-    yaw_sigma_floor_rad_ / bounded_confidence,
+    (yaw_sigma_floor_rad_ * source_multiplier) / bounded_confidence,
     yaw_sigma_floor_rad_,
     yaw_sigma_ceiling_rad_);
 
@@ -1729,12 +2415,18 @@ std::array<double, 36> VisualOdometryNode::makeTwistCovariance(
   covariance.fill(0.0);
 
   const double bounded_confidence = std::clamp(trackingConfidence(result), 0.1, 1.0);
+  double source_multiplier = 1.0;
+  if (result.metric_source == "wheel_scaled_mono") {
+    source_multiplier = 3.0;
+  } else if (result.metric_source == "stereo") {
+    source_multiplier = 1.25;
+  }
   const double position_sigma = std::clamp(
-    pose_sigma_floor_m_ / bounded_confidence,
+    (pose_sigma_floor_m_ * source_multiplier) / bounded_confidence,
     pose_sigma_floor_m_,
     pose_sigma_ceiling_m_);
   const double yaw_sigma = std::clamp(
-    yaw_sigma_floor_rad_ / bounded_confidence,
+    (yaw_sigma_floor_rad_ * source_multiplier) / bounded_confidence,
     yaw_sigma_floor_rad_,
     yaw_sigma_ceiling_rad_);
   const double safe_dt_seconds = std::max(dt_seconds, 1.0e-3);
@@ -1750,12 +2442,12 @@ std::array<double, 36> VisualOdometryNode::makeTwistCovariance(
   return covariance;
 }
 
-}  // namespace amr_sweeper_visual_odometry
+}  // namespace amr_sweeper_localization
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<amr_sweeper_visual_odometry::VisualOdometryNode>();
+  auto node = std::make_shared<amr_sweeper_localization::VisualOdometryNode>();
   rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;

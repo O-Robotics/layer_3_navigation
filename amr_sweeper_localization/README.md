@@ -5,7 +5,7 @@ ros2 launch amr_sweeper_localization amr_sweeper_localization.launch.py
 ```
 
 ## Purpose
-This package launches the official upstream FusionCore ROS 2 localization stack for the AMR Sweeper and provides the robot-specific parameter file used by that node.
+This package launches the official upstream FusionCore ROS 2 localization stack for the AMR Sweeper, provides the robot-specific parameter file used by that node, and owns the optional visual odometry node used as FusionCore's secondary encoder source.
 
 ## Dependencies
 - `amr_sweeper_imu`
@@ -14,6 +14,7 @@ This package launches the official upstream FusionCore ROS 2 localization stack 
 
 ## Launch File
 - `launch/amr_sweeper_localization.launch.py`
+- `launch/amr_sweeper_visual_odometry.launch.py`
 
 ## Launch Arguments
 - `namespace`: default `amr_sweeper`
@@ -35,8 +36,11 @@ FusionCore output onto the leveled `base_footprint` plane:
 - `localization/odometry_fused`: projected planar `odom -> base_footprint` odometry for downstream consumers
 - `localization/pose`: FusionCore body-frame pose aligned with `localization/odometry_body`
 
-The parameter file [config/amr_sweeper_localization.yaml](/mnt/c/home/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/amr_sweeper_localization.yaml) now follows the official FusionCore schema and uses the official `fusioncore:` YAML root, plus a small `launch_defaults:` section that is only consumed by this package's launch file.
-The odometry projector tunables live in [config/odometry_projection.yaml](/mnt/c/home/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/odometry_projection.yaml).
+When `use_visual_odometry:=true`, the same launch file also starts `visual_odometry_node`, which publishes `visual_odometry/odom` and `visual_odometry/status`.
+
+The parameter file [config/amr_sweeper_localization.yaml](/home/alfolsen/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/amr_sweeper_localization.yaml) follows the official FusionCore schema and uses the official `fusioncore:` YAML root, plus a small `launch_defaults:` section that is only consumed by this package's launch file.
+The odometry projector tunables live in [config/odometry_projection.yaml](/home/alfolsen/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/odometry_projection.yaml).
+The visual odometry tunables live in [config/amr_sweeper_visual_odometry.yaml](/home/alfolsen/dev/rob_ws/src/layer_3_navigation/amr_sweeper_localization/config/amr_sweeper_visual_odometry.yaml).
 
 ## Sensor Inputs
 - Primary IMU: `imu.topic`, default `imu/data_raw`
@@ -90,6 +94,7 @@ ros2 launch amr_sweeper_localization amr_sweeper_localization.launch.py \
 
 Behavior:
 - `use_visual_odometry:=false` clears `encoder2.topic`
+- `use_visual_odometry:=true` starts `visual_odometry_node` and enables FusionCore `encoder2.topic`
 - `use_imu:=false` clears `imu.topic`
 - `use_imu2:=false` clears `imu2.topic`
 - `use_gnss:=false` clears `gnss.fix2_topic`, `gnss.heading_topic`, and `gnss.azimuth_topic`, and remaps `/gnss/fix` to a disabled placeholder

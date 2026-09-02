@@ -1,28 +1,43 @@
-#ifndef AMR_SWEEPER_VISUAL_ODOMETRY__VISUAL_ODOMETRY_NODE_HPP_
-#define AMR_SWEEPER_VISUAL_ODOMETRY__VISUAL_ODOMETRY_NODE_HPP_
+// Copyright 2026 O-Robotics
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-#include <array>
-#include <deque>
-#include <memory>
-#include <optional>
-#include <string>
-#include <vector>
+#ifndef VISUAL_ODOMETRY_NODE_HPP_
+#define VISUAL_ODOMETRY_NODE_HPP_
 
-#include <Eigen/Dense>
-#include <opencv2/core.hpp>
+#include <Eigen/Dense>  // NOLINT(build/include_order)
+#include <opencv2/core.hpp>  // NOLINT(build/include_order)
+#include <tf2/LinearMath/Transform.h>  // NOLINT(build/include_order)
 
-#include <nav_msgs/msg/odometry.hpp>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/camera_info.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <std_msgs/msg/string.hpp>
-#include <tf2/LinearMath/Transform.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_broadcaster.h>
-#include <tf2_ros/transform_listener.h>
+#include <array>  // NOLINT(build/include_order)
+#include <deque>  // NOLINT(build/include_order)
+#include <memory>  // NOLINT(build/include_order)
+#include <optional>  // NOLINT(build/include_order)
+#include <string>  // NOLINT(build/include_order)
+#include <utility>  // NOLINT(build/include_order)
+#include <vector>  // NOLINT(build/include_order)
 
-namespace amr_sweeper_visual_odometry
+#include <nav_msgs/msg/odometry.hpp>  // NOLINT(build/include_order)
+#include <rclcpp/rclcpp.hpp>  // NOLINT(build/include_order)
+#include <sensor_msgs/msg/camera_info.hpp>  // NOLINT(build/include_order)
+#include <sensor_msgs/msg/image.hpp>  // NOLINT(build/include_order)
+#include <sensor_msgs/msg/imu.hpp>  // NOLINT(build/include_order)
+#include <std_msgs/msg/string.hpp>  // NOLINT(build/include_order)
+#include <tf2_ros/buffer.h>  // NOLINT(build/include_order)
+#include <tf2_ros/transform_broadcaster.h>  // NOLINT(build/include_order)
+#include <tf2_ros/transform_listener.h>  // NOLINT(build/include_order)
+
+namespace amr_sweeper_localization
 {
 
 class VisualOdometryNode : public rclcpp::Node
@@ -36,17 +51,23 @@ private:
     bool success{false};
     int tracked_features{0};
     int inliers{0};
+    int valid_depth_points{0};
+    int rejected_depth_points{0};
     double metric_translation_scale{0.0};
     double delta_yaw_rad{0.0};
     double dt_seconds{0.0};
+    double residual_m{0.0};
+    double sync_delta_seconds{0.0};
     tf2::Transform delta_base{tf2::Transform::getIdentity()};
     std::vector<cv::Point2f> tracked_points;
+    std::string metric_source{"none"};
     std::string reason;
   };
 
   struct CameraCalibration
   {
     cv::Mat camera_matrix;
+    cv::Mat projection_matrix;
     cv::Mat distortion_coefficients;
     std::string distortion_model;
 
@@ -54,6 +75,21 @@ private:
     {
       return !camera_matrix.empty();
     }
+  };
+
+  struct CameraImageSample
+  {
+    cv::Mat gray_image;
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+    std::string frame_id;
+  };
+
+  struct DepthSample
+  {
+    cv::Mat depth_meters;
+    CameraCalibration calibration;
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+    std::string frame_id;
   };
 
   struct CameraState
@@ -66,14 +102,22 @@ private:
     std::string name;
     std::string image_topic;
     std::string camera_info_topic;
+    std::string depth_image_topic;
+    std::string depth_camera_info_topic;
     std::string frame_override;
+    std::string depth_frame_override;
     double fusion_weight{1.0};
+    bool use_depth{false};
     CameraCalibration calibration;
+    CameraCalibration depth_calibration;
     cv::Mat latest_gray_image;
     rclcpp::Time latest_image_stamp{0, 0, RCL_ROS_TIME};
     std::string latest_frame_id;
+    std::deque<CameraImageSample> image_history;
+    std::deque<DepthSample> depth_history;
     cv::Mat previous_gray_image;
     std::vector<cv::Point2f> previous_points;
+    std::optional<DepthSample> previous_depth_sample;
     rclcpp::Time previous_image_stamp{0, 0, RCL_ROS_TIME};
     bool have_previous_motion_reference{false};
     tf2::Vector3 previous_motion_reference_position{0.0, 0.0, 0.0};
@@ -81,6 +125,8 @@ private:
     tf2::Transform base_to_camera{tf2::Transform::getIdentity()};
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription;
+    rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr depth_camera_info_subscription;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_image_subscription;
   };
 
   struct MotionReferenceSample
@@ -126,7 +172,13 @@ private:
   void cameraInfoCallback(
     const std::shared_ptr<CameraState> & camera,
     const sensor_msgs::msg::CameraInfo::SharedPtr message);
+  void depthCameraInfoCallback(
+    const std::shared_ptr<CameraState> & camera,
+    const sensor_msgs::msg::CameraInfo::SharedPtr message);
   void imageCallback(
+    const std::shared_ptr<CameraState> & camera,
+    const sensor_msgs::msg::Image::SharedPtr message);
+  void depthImageCallback(
     const std::shared_ptr<CameraState> & camera,
     const sensor_msgs::msg::Image::SharedPtr message);
   void wheelOdometryCallback(const nav_msgs::msg::Odometry::SharedPtr message);
@@ -135,6 +187,7 @@ private:
   void initializeFromFrame(
     const std::shared_ptr<CameraState> & camera,
     const cv::Mat & gray_image,
+    const std::optional<DepthSample> & depth_sample,
     const MotionReferenceSample & motion_reference,
     const rclcpp::Time & stamp);
   void initializeStereoFrame(
@@ -146,6 +199,12 @@ private:
   [[nodiscard]] TrackingResult estimateMotion(
     const std::shared_ptr<CameraState> & camera,
     const cv::Mat & current_gray_image,
+    const MotionReferenceSample & current_motion_reference,
+    const rclcpp::Time & stamp);
+  [[nodiscard]] TrackingResult estimateDepthMotion(
+    const std::shared_ptr<CameraState> & camera,
+    const cv::Mat & current_gray_image,
+    const DepthSample & current_depth_sample,
     const MotionReferenceSample & current_motion_reference,
     const rclcpp::Time & stamp);
   [[nodiscard]] TrackingResult estimateStereoMotion(
@@ -181,6 +240,16 @@ private:
     const std::vector<Eigen::Vector3d> & current_points,
     tf2::Transform & delta_transform,
     int & inlier_count) const;
+  [[nodiscard]] std::optional<DepthSample> findNearestDepthSample(
+    const std::shared_ptr<CameraState> & camera,
+    const rclcpp::Time & stamp) const;
+  [[nodiscard]] std::optional<double> sampleDepthMeters(
+    const cv::Mat & depth_meters,
+    const cv::Point2f & point) const;
+  [[nodiscard]] std::optional<Eigen::Vector3d> backProjectDepthPoint(
+    const CameraCalibration & calibration,
+    const cv::Point2f & point,
+    double depth_meters) const;
   [[nodiscard]] static cv::Mat makeProjectionMatrix(
     const tf2::Matrix3x3 & rotation,
     const tf2::Vector3 & translation);
@@ -197,6 +266,7 @@ private:
     const rclcpp::Time & stamp,
     double dt_seconds);
   void publishStatus(const std::string & status_message) const;
+  [[nodiscard]] std::string describeMotionReferenceAvailability(const rclcpp::Time & stamp) const;
   [[nodiscard]] double trackingConfidence(const TrackingResult & result) const;
   [[nodiscard]] Eigen::Matrix3d makeMeasurementCovariance(const TrackingResult & result) const;
 
@@ -239,11 +309,23 @@ private:
   double motion_reference_lookup_tolerance_seconds_{0.25};
   double motion_reference_history_seconds_{5.0};
   double min_scale_translation_meters_{0.005};
+  bool reject_zero_scale_updates_{true};
   double camera_fusion_tolerance_seconds_{0.03};
   double tf_warning_tolerance_ms_{5.0};
   double stereo_match_max_error_{20.0};
+  double stereo_image_history_seconds_{0.5};
   double stereo_min_disparity_px_{1.0};
   double stereo_max_reprojection_error_m_{0.20};
+  double depth_sync_tolerance_seconds_{0.08};
+  double depth_history_seconds_{0.5};
+  double depth_min_range_m_{0.20};
+  double depth_max_range_m_{8.0};
+  int depth_sampling_radius_px_{1};
+  int depth_min_inliers_{20};
+  double depth_min_valid_ratio_{0.35};
+  double depth_max_residual_m_{0.20};
+  double depth_max_translation_m_{0.50};
+  double depth_max_yaw_rad_{0.35};
   double pose_sigma_floor_m_{0.03};
   double pose_sigma_ceiling_m_{0.50};
   double yaw_sigma_floor_rad_{0.02};
@@ -280,6 +362,6 @@ private:
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };
 
-}  // namespace amr_sweeper_visual_odometry
+}  // namespace amr_sweeper_localization
 
-#endif  // AMR_SWEEPER_VISUAL_ODOMETRY__VISUAL_ODOMETRY_NODE_HPP_
+#endif  // VISUAL_ODOMETRY_NODE_HPP_

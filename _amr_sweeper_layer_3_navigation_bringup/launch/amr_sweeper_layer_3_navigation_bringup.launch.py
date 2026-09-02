@@ -77,6 +77,11 @@ def _projection_config_path() -> str:
     return os.path.join(package_dir, "config", "odometry_projection.yaml")
 
 
+def _visual_odometry_config_path() -> str:
+    package_dir = get_package_share_directory("amr_sweeper_localization")
+    return os.path.join(package_dir, "config", "amr_sweeper_visual_odometry.yaml")
+
+
 def _load_localization_defaults() -> dict[str, str]:
     package_dir = get_package_share_directory("amr_sweeper_localization")
     config_path = os.path.join(package_dir, "config", "amr_sweeper_localization.yaml")
@@ -202,6 +207,7 @@ def _mission_requires_mapping(
 def _build_launches(context):
     namespace = LaunchConfiguration('namespace')
     use_sim_time = LaunchConfiguration('use_sim_time')
+    use_sim_time_bool = use_sim_time.perform(context).lower() == 'true'
     use_simulation = LaunchConfiguration('use_simulation')
     use_simulation_bool = use_simulation.perform(context).lower() == 'true'
     legacy_navigation_startup_delay_sec = float(
@@ -258,14 +264,21 @@ def _build_launches(context):
         'use_amr_sweeper_navigation',
         use_amr_sweeper_navigation,
     )
+    use_gaussian = 'true' if _bool_override(
+        mission_context,
+        'use_gaussian',
+        use_gaussian.strip().lower() in {'1', 'true', 'yes', 'on'},
+    ) else 'false'
     use_amr_sweeper_mapping = _bool_override(
         mission_context,
         'use_amr_sweeper_mapping',
         use_amr_sweeper_mapping,
     )
+    if use_gaussian == 'true':
+        use_amr_sweeper_localization = True
+        use_amr_sweeper_mapping = True
     if use_simulation_bool:
         use_imu2 = False
-        use_amr_sweeper_visual_odometry_bool = False
     effective_mission_type = mission_type or mission_context.get("mission_type", "")
     effective_execution_mode = mission_context.get("execution_mode", "")
     effective_mission_file = mission_file or mission_context.get("mission_file", "")
@@ -304,19 +317,21 @@ def _build_launches(context):
             "depends on amr_sweeper_mapping publishing map -> odom."
         )
 
-    actions = [
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                _launch_file('amr_sweeper_visual_odometry', 'amr_sweeper_visual_odometry.launch.py')
-            ),
-            launch_arguments={
-                'namespace': namespace,
-                'use_sim_time': use_sim_time,
-                'use_simulation': use_simulation,
-            }.items(),
-            condition=IfCondition(use_amr_sweeper_visual_odometry),
-        ),
-    ]
+    actions = []
+    if use_amr_sweeper_visual_odometry_bool:
+        actions.append(Node(
+            package='amr_sweeper_localization',
+            executable='visual_odometry_node',
+            name='visual_odometry_node',
+            namespace=LaunchConfiguration('namespace').perform(context),
+            output='screen',
+            parameters=[
+                _visual_odometry_config_path(),
+                {
+                    'use_sim_time': use_sim_time_bool,
+                },
+            ],
+        ))
     navigation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             _launch_file('amr_sweeper_navigation', navigation_launch_filename)
@@ -377,7 +392,6 @@ def _build_launches(context):
     )
 
     if use_amr_sweeper_localization:
-        use_sim_time_bool = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
         localization_parameters = _load_localization_parameters()
         use_gps_fix_input = localization_parameters.get("gnss.use_gps_fix", False)
         if use_simulation_bool:
@@ -398,11 +412,16 @@ def _build_launches(context):
             "encoder2.topic": _topic_if_enabled(
                 use_amr_sweeper_visual_odometry_bool,
                 localization_parameters.get("encoder2.topic", "visual_odometry/odom")),
+            "gnss.use_gps_fix": use_gnss and localization_parameters.get("gnss.use_gps_fix", False),
+            "gnss.fix_topic": _primary_topic_or_disabled(use_gnss, gnss_input_topic, "_gnss_disabled"),
             "gnss.fix2_topic": _topic_if_enabled(use_gnss, localization_parameters.get("gnss.fix2_topic", "")),
             "gnss.heading_topic": _topic_if_enabled(
                 use_gnss, localization_parameters.get("gnss.heading_topic", "")),
             "gnss.azimuth_topic": _topic_if_enabled(
                 use_gnss, localization_parameters.get("gnss.azimuth_topic", "")),
+            "reference.use_first_fix": use_gnss and localization_parameters.get("reference.use_first_fix", True),
+            "init.wait_for_all_sensors": (
+                localization_parameters.get("init.wait_for_all_sensors", True) and use_encoder),
             "publish.tf": False,
         }
         if use_gnss and not use_ntrip_client:
@@ -564,7 +583,7 @@ def generate_launch_description():
         DeclareLaunchArgument('mission_id', default_value=''),
         DeclareLaunchArgument('mission_type', default_value=''),
         DeclareLaunchArgument('mission_static_costmap_yaml', default_value=''),
-        DeclareLaunchArgument('use_gaussian', default_value='true'),
+        DeclareLaunchArgument('use_gaussian', default_value='false'),
         DeclareLaunchArgument('auto_start_mission', default_value='false'),
         DeclareLaunchArgument('mission_start_mode', default_value='start_over'),
         DeclareLaunchArgument('use_test', default_value='false'),

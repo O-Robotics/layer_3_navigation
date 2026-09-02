@@ -2,16 +2,46 @@
   ros__parameters:
     # -- Output artifacts -----------------------------------------------------
     output_directory:              ""                               # Leave empty until a mission execution folder is injected; gaussian artifacts should stay inside per-run folders.
-    source_mode:                   realsense_pointcloud             # Pointcloud ingestion mode used by the gaussian mapper.
+    source_mode:                   synchronized_camera_dataset      # Mission capture mode used by offline gaussian-splat tooling.
     representation_name:           global_gaussian_map              # Default saved representation name when no mission-specific name is injected.
     world_frame:                   map                              # World frame used for saved gaussian data.
 
     # -- Input topics ---------------------------------------------------------
+    odom_topic:                    localization/odometry_fused
+    map_pose_status_topic:         mapping/map_pose_status
+    camera_names:
+      - depth_color
+      - front_left_camera
+      - front_right_camera
+      - rear_left_camera
+      - rear_right_camera
+      - tools_camera
+    camera_image_topics:
+      - depth_camera/color/image_raw
+      - usb_cameras/front_left_camera/image_raw
+      - usb_cameras/front_right_camera/image_raw
+      - usb_cameras/rear_left_camera/image_raw
+      - usb_cameras/rear_right_camera/image_raw
+      - usb_cameras/tools_camera/image_raw
+    camera_info_topics:
+      - depth_camera/color/camera_info
+      - usb_cameras/front_left_camera/front_left_camera_info
+      - usb_cameras/front_right_camera/front_right_camera_info
+      - usb_cameras/rear_left_camera/rear_left_camera_info
+      - usb_cameras/rear_right_camera/rear_right_camera_info
+      - usb_cameras/tools_camera/tools_camera_info
+    enable_pointcloud_capture:     true
     pointcloud_topic:              depth_camera/depth/color/points  # Realsense pointcloud topic relative to the robot namespace.
-    enable_surface_texture_camera: true                             # Fuse RGB texture from the tool camera into saved artifacts.
-    surface_texture_topic:         usb_cameras/tools_camera/image_raw  # Tool-camera image topic relative to the robot namespace.
 
     # -- Downsampling and limits ----------------------------------------------
+    capture_distance_meters:       0.50
+    capture_yaw_degrees:           15.0
+    min_capture_period_seconds:    1.0
+    max_camera_timestamp_skew_seconds: 0.20
+    max_camera_sample_age_seconds: 1.00
+    max_pointcloud_sample_age_seconds: 0.50
+    min_camera_count:              1
+    enable_voxel_preview:          false
     voxel_size_meters:             0.10
     min_range_meters:              0.30
     max_range_meters:              8.00
