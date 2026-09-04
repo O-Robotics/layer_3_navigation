@@ -54,16 +54,16 @@ ament_target_dependencies(${PROJECT_NAME}
   visualization_msgs
 )
 
-add_executable(amr_sweeper_gaussian_node src/gaussian_node.cpp)
-set_target_properties(amr_sweeper_gaussian_node PROPERTIES OUTPUT_NAME gaussian_node)
-target_compile_features(amr_sweeper_gaussian_node PUBLIC cxx_std_17)
-target_include_directories(amr_sweeper_gaussian_node
+add_executable(amr_sweeper_gaussian_splat_capture_node src/gaussian_splat_capture_node.cpp)
+set_target_properties(amr_sweeper_gaussian_splat_capture_node PROPERTIES OUTPUT_NAME gaussian_splat_capture_node)
+target_compile_features(amr_sweeper_gaussian_splat_capture_node PUBLIC cxx_std_17)
+target_include_directories(amr_sweeper_gaussian_splat_capture_node
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 ament_target_dependencies(
-  amr_sweeper_gaussian_node
+  amr_sweeper_gaussian_splat_capture_node
   geometry_msgs
   nav_msgs
   rclcpp
@@ -127,7 +127,7 @@ install(DIRECTORY include DESTINATION include)
 install(
   TARGETS
     ${PROJECT_NAME}
-    amr_sweeper_gaussian_node
+    amr_sweeper_gaussian_splat_capture_node
     amr_sweeper_map_pose_node
     amr_sweeper_mapping_node
   EXPORT export_${PROJECT_NAME}

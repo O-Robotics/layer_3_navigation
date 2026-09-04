@@ -8,7 +8,7 @@ ros2 launch amr_sweeper_mapping amr_sweeper_mapping.launch.py
 This package provides the runtime mapping layer for AMR Sweeper, including global occupancy-map building, gaussian-map orchestration, and the map-to-odom alignment node.
 
 ## Nodes
-- `gaussian_node`
+- `gaussian_splat_capture_node`
 - `mapping_node`
 
 ## Current Capabilities
@@ -27,7 +27,7 @@ This package provides the runtime mapping layer for AMR Sweeper, including globa
 ## Runtime Structure
 - `mapping_node.cpp/.hpp` contains the `mapping_node` coordinator and the in-package occupancy-grid map builder.
 - `map_pose_node.cpp/.hpp` publishes `map -> odom` by combining scan-to-map matching with GNSS and IMU consistency terms so Nav2 can consume the global map in the `map` frame without shifting that map at runtime. In mission runs it should correlate against the static mission-folder costmap artifact, not the run-folder live-updated copy.
-- `gaussian_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
+- `gaussian_splat_capture_node.cpp/.hpp` builds the lightweight onboard 3D gaussian-world representation.
 
 ## Notes
 - REP-105 ownership in this workspace is now: `amr_sweeper_localization` runs FusionCore on `base_link`, projects that estimate to `odom -> base_footprint`, and `map_pose_node` inside `amr_sweeper_mapping` publishes the `map -> odom` alignment.
@@ -44,5 +44,5 @@ This package provides the runtime mapping layer for AMR Sweeper, including globa
 - Runtime artifacts such as the `mapping` section inside `<mission_id>_<run_timestamp>_context.json`, `<mission_id>_<run_timestamp>_path_actual.geojson`, and gaussian outputs are only written when a mission execution folder is resolved from `mission_execution_directory`.
 - The scheduler-prepared execution context is expected at `missions/logs/<mission_id>/<execution_timestamp>/<mission_id>_<run_timestamp>_context.json`.
 - Gaussian outputs are expected under the execution folder's `gaussian/` subdirectory.
-- VDA5050 mission parsing and artifact generation now live in layer 0 inside `amr_sweeper_vda5050_parser`.
+- VDA5050 mission parsing and artifact generation now live in layer 0 inside `amr_sweeper_mission_builder`.
 - `mapping_node` now owns startup costmap lock-in and runtime artifact persistence directly, so there is no separate `slam_node` process in the launch graph.

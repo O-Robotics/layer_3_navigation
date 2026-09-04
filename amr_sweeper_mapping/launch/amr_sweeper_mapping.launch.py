@@ -249,8 +249,8 @@ def _build_nodes(context):
         actions.extend([
             Node(
                 package="amr_sweeper_mapping",
-                executable="gaussian_node",
-                name="gaussian_node",
+                executable="gaussian_splat_capture_node",
+                name="gaussian_splat_capture_node",
                 namespace=namespace,
                 output="screen",
                 parameters=[
@@ -330,7 +330,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_gaussian",
                 default_value="false",
-                description="Launch gaussian_node when true.",
+                description="Launch gaussian_splat_capture_node when true.",
             ),
             DeclareLaunchArgument(
                 "use_ntrip_client",

@@ -1,4 +1,4 @@
-#include "gaussian_node.hpp"
+#include "gaussian_splat_capture_node.hpp"
 
 #include <algorithm>
 #include <array>
@@ -157,8 +157,8 @@ std::size_t GaussianVoxelKeyHash::operator()(const GaussianVoxelKey & key) const
   return hx ^ (hy << 1U) ^ (hz << 2U);
 }
 
-GaussianNode::GaussianNode()
-: Node("gaussian_node"),
+GaussianSplatCaptureNode::GaussianSplatCaptureNode()
+: Node("gaussian_splat_capture_node"),
   tf_buffer_(get_clock()),
   tf_listener_(tf_buffer_)
 {
@@ -266,17 +266,17 @@ GaussianNode::GaussianNode()
   odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
     odom_topic_,
     10,
-    std::bind(&GaussianNode::handleOdometry, this, std::placeholders::_1));
+    std::bind(&GaussianSplatCaptureNode::handleOdometry, this, std::placeholders::_1));
   map_pose_status_subscription_ = create_subscription<std_msgs::msg::String>(
     map_pose_status_topic_,
     10,
-    std::bind(&GaussianNode::handleMapPoseStatus, this, std::placeholders::_1));
+    std::bind(&GaussianSplatCaptureNode::handleMapPoseStatus, this, std::placeholders::_1));
 
   if (enable_pointcloud_capture_ || enable_voxel_preview_) {
     pointcloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       pointcloud_topic_,
       rclcpp::SensorDataQoS(),
-      std::bind(&GaussianNode::processPointCloud, this, std::placeholders::_1));
+      std::bind(&GaussianSplatCaptureNode::processPointCloud, this, std::placeholders::_1));
   }
 
   debug_pointcloud_publisher_ =
@@ -285,17 +285,17 @@ GaussianNode::GaussianNode()
 
   status_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("status_period_seconds").as_double()),
-    std::bind(&GaussianNode::publishStatus, this));
+    std::bind(&GaussianSplatCaptureNode::publishStatus, this));
   capture_start_time_ = now();
   capture_timer_ = create_wall_timer(
     std::chrono::duration<double>(0.20),
-    std::bind(&GaussianNode::tryCaptureBundle, this));
+    std::bind(&GaussianSplatCaptureNode::tryCaptureBundle, this));
   debug_publish_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("debug_publish_period_seconds").as_double()),
-    std::bind(&GaussianNode::publishDebugPointCloud, this));
+    std::bind(&GaussianSplatCaptureNode::publishDebugPointCloud, this));
   artifact_save_timer_ = create_wall_timer(
     std::chrono::duration<double>(get_parameter("artifact_save_period_seconds").as_double()),
-    std::bind(&GaussianNode::saveArtifacts, this));
+    std::bind(&GaussianSplatCaptureNode::saveArtifacts, this));
 
   RCLCPP_INFO(
     get_logger(),
@@ -305,7 +305,7 @@ GaussianNode::GaussianNode()
     output_directory_.empty() ? "<disabled until mission context>" : output_directory_.c_str());
 }
 
-GaussianNode::~GaussianNode()
+GaussianSplatCaptureNode::~GaussianSplatCaptureNode()
 {
   try {
     saveArtifacts();
@@ -318,7 +318,7 @@ GaussianNode::~GaussianNode()
   }
 }
 
-void GaussianNode::handleCameraImage(
+void GaussianSplatCaptureNode::handleCameraImage(
   const std::size_t camera_index,
   sensor_msgs::msg::Image::SharedPtr message)
 {
@@ -334,7 +334,7 @@ void GaussianNode::handleCameraImage(
   ++stream.image_frames;
 }
 
-void GaussianNode::handleCameraInfo(
+void GaussianSplatCaptureNode::handleCameraInfo(
   const std::size_t camera_index,
   sensor_msgs::msg::CameraInfo::SharedPtr message)
 {
@@ -346,19 +346,19 @@ void GaussianNode::handleCameraInfo(
   ++stream.camera_info_frames;
 }
 
-void GaussianNode::handleOdometry(nav_msgs::msg::Odometry::SharedPtr message)
+void GaussianSplatCaptureNode::handleOdometry(nav_msgs::msg::Odometry::SharedPtr message)
 {
   latest_odometry_pose_ = message->pose.pose;
   latest_odometry_stamp_ = rclcpp::Time(message->header.stamp);
   latest_odometry_ready_ = true;
 }
 
-void GaussianNode::handleMapPoseStatus(std_msgs::msg::String::SharedPtr message)
+void GaussianSplatCaptureNode::handleMapPoseStatus(std_msgs::msg::String::SharedPtr message)
 {
   latest_map_pose_status_ = message->data;
 }
 
-void GaussianNode::processPointCloud(const sensor_msgs::msg::PointCloud2::SharedPtr message)
+void GaussianSplatCaptureNode::processPointCloud(const sensor_msgs::msg::PointCloud2::SharedPtr message)
 {
   latest_pointcloud_ = message;
   ++pointcloud_frames_;
@@ -449,7 +449,7 @@ void GaussianNode::processPointCloud(const sensor_msgs::msg::PointCloud2::Shared
   }
 }
 
-void GaussianNode::tryCaptureBundle()
+void GaussianSplatCaptureNode::tryCaptureBundle()
 {
   if (output_directory_.empty() || !latest_odometry_ready_ || !shouldCaptureForMotion()) {
     return;
@@ -548,6 +548,7 @@ void GaussianNode::tryCaptureBundle()
   capture["cameras"] = nlohmann::json::array();
 
   bool wrote_any_image = false;
+  bool wrote_any_trainable_image = false;
   for (const auto & [camera_index, image] : selected_cameras) {
     const auto & stream = camera_streams_.at(camera_index);
     const std::string camera_token = sanitizeFileToken(stream.name);
@@ -570,10 +571,12 @@ void GaussianNode::tryCaptureBundle()
       (bundle_relative_path + "/" + image_path.filename().string()) : "";
     camera_record["image_format"] = image_format;
     camera_record["image_error"] = image_error;
-    if (stream.latest_camera_info) {
+    const bool has_camera_info = static_cast<bool>(stream.latest_camera_info);
+    if (has_camera_info) {
       camera_record["camera_info"] = cameraInfoToJson(*stream.latest_camera_info);
     }
 
+    bool has_world_from_camera = false;
     try {
       const auto camera_pose = tf_buffer_.lookupTransform(
         world_frame_,
@@ -581,15 +584,18 @@ void GaussianNode::tryCaptureBundle()
         image->header.stamp,
         tf2::durationFromSec(0.02));
       camera_record["world_from_camera"] = transformToJson(camera_pose);
+      has_world_from_camera = true;
     } catch (const tf2::TransformException & exception) {
       camera_record["world_from_camera_error"] = exception.what();
     }
 
     wrote_any_image = wrote_any_image || wrote_image;
+    wrote_any_trainable_image =
+      wrote_any_trainable_image || (wrote_image && has_camera_info && has_world_from_camera);
     capture["cameras"].push_back(camera_record);
   }
 
-  if (!wrote_any_image) {
+  if (!wrote_any_image || !wrote_any_trainable_image) {
     ++rejected_bundles_;
     return;
   }
@@ -618,7 +624,7 @@ void GaussianNode::tryCaptureBundle()
   saveManifest();
 }
 
-std::size_t GaussianNode::expectedCameraCount() const
+std::size_t GaussianSplatCaptureNode::expectedCameraCount() const
 {
   std::size_t observed_camera_count = 0U;
   for (const auto & stream : camera_streams_) {
@@ -635,7 +641,7 @@ std::size_t GaussianNode::expectedCameraCount() const
     observed_camera_count);
 }
 
-bool GaussianNode::shouldCaptureForMotion() const
+bool GaussianSplatCaptureNode::shouldCaptureForMotion() const
 {
   if (!last_capture_pose_ready_) {
     return true;
@@ -671,7 +677,7 @@ bool GaussianNode::shouldCaptureForMotion() const
          yaw_delta >= (capture_yaw_degrees_ * M_PI / 180.0);
 }
 
-double GaussianNode::latestYawRadians() const
+double GaussianSplatCaptureNode::latestYawRadians() const
 {
   tf2::Quaternion quaternion(
     latest_odometry_pose_.orientation.x,
@@ -685,19 +691,19 @@ double GaussianNode::latestYawRadians() const
   return yaw;
 }
 
-std::string GaussianNode::stampToString(const builtin_interfaces::msg::Time & stamp) const
+std::string GaussianSplatCaptureNode::stampToString(const builtin_interfaces::msg::Time & stamp) const
 {
   std::ostringstream stream;
   stream << stamp.sec << "." << std::setw(9) << std::setfill('0') << stamp.nanosec;
   return stream.str();
 }
 
-std::string GaussianNode::relativeBundlePath(const std::uint64_t bundle_index) const
+std::string GaussianSplatCaptureNode::relativeBundlePath(const std::uint64_t bundle_index) const
 {
   return std::string("frames/") + bundleDirectoryName(bundle_index);
 }
 
-bool GaussianNode::writeImageFile(
+bool GaussianSplatCaptureNode::writeImageFile(
   const sensor_msgs::msg::Image & image,
   const std::filesystem::path & path,
   std::string & format,
@@ -765,7 +771,7 @@ bool GaussianNode::writeImageFile(
   }
 }
 
-bool GaussianNode::writePointCloudFile(
+bool GaussianSplatCaptureNode::writePointCloudFile(
   const sensor_msgs::msg::PointCloud2 & pointcloud,
   const std::filesystem::path & path,
   std::string & error) const
@@ -788,7 +794,7 @@ bool GaussianNode::writePointCloudFile(
   }
 }
 
-nlohmann::json GaussianNode::cameraInfoToJson(const sensor_msgs::msg::CameraInfo & message) const
+nlohmann::json GaussianSplatCaptureNode::cameraInfoToJson(const sensor_msgs::msg::CameraInfo & message) const
 {
   nlohmann::json document;
   document["stamp"] = stampToString(message.header.stamp);
@@ -803,7 +809,7 @@ nlohmann::json GaussianNode::cameraInfoToJson(const sensor_msgs::msg::CameraInfo
   return document;
 }
 
-nlohmann::json GaussianNode::poseToJson(const geometry_msgs::msg::Pose & pose) const
+nlohmann::json GaussianSplatCaptureNode::poseToJson(const geometry_msgs::msg::Pose & pose) const
 {
   return {
     {"position", {{"x", pose.position.x}, {"y", pose.position.y}, {"z", pose.position.z}}},
@@ -814,7 +820,7 @@ nlohmann::json GaussianNode::poseToJson(const geometry_msgs::msg::Pose & pose) c
         {"w", pose.orientation.w}}}};
 }
 
-nlohmann::json GaussianNode::pointcloudMetadataToJson(
+nlohmann::json GaussianSplatCaptureNode::pointcloudMetadataToJson(
   const sensor_msgs::msg::PointCloud2 & message,
   const std::string & file_name) const
 {
@@ -843,7 +849,7 @@ nlohmann::json GaussianNode::pointcloudMetadataToJson(
     {"byte_count", message.data.size()}};
 }
 
-nlohmann::json GaussianNode::transformToJson(
+nlohmann::json GaussianSplatCaptureNode::transformToJson(
   const geometry_msgs::msg::TransformStamped & transform) const
 {
   return {
@@ -861,7 +867,7 @@ nlohmann::json GaussianNode::transformToJson(
         {"w", transform.transform.rotation.w}}}};
 }
 
-nlohmann::json GaussianNode::buildManifest() const
+nlohmann::json GaussianSplatCaptureNode::buildManifest() const
 {
   nlohmann::json camera_streams = nlohmann::json::array();
   for (const auto & stream : camera_streams_) {
@@ -908,7 +914,7 @@ nlohmann::json GaussianNode::buildManifest() const
     {"captures", capture_records_}};
 }
 
-void GaussianNode::saveManifest()
+void GaussianSplatCaptureNode::saveManifest()
 {
   if (output_directory_.empty()) {
     return;
@@ -924,11 +930,11 @@ void GaussianNode::saveManifest()
   stream << buildManifest().dump(2) << "\n";
 }
 
-void GaussianNode::publishStatus()
+void GaussianSplatCaptureNode::publishStatus()
 {
   std_msgs::msg::String message;
   message.data =
-    "gaussian_node ready; source_mode=" + source_mode_ +
+    "gaussian_splat_capture_node ready; source_mode=" + source_mode_ +
     "; world_frame=" + world_frame_ +
     "; cameras=" + std::to_string(camera_streams_.size()) +
     "; capture_bundles=" + std::to_string(capture_bundles_) +
@@ -940,7 +946,7 @@ void GaussianNode::publishStatus()
   status_publisher_->publish(message);
 }
 
-void GaussianNode::publishDebugPointCloud()
+void GaussianSplatCaptureNode::publishDebugPointCloud()
 {
   if (!enable_voxel_preview_ || voxels_.empty()) {
     return;
@@ -993,7 +999,7 @@ void GaussianNode::publishDebugPointCloud()
   debug_pointcloud_publisher_->publish(message);
 }
 
-void GaussianNode::saveArtifacts()
+void GaussianSplatCaptureNode::saveArtifacts()
 {
   saveManifest();
   if (
@@ -1091,7 +1097,7 @@ void GaussianNode::saveArtifacts()
     base_path.c_str());
 }
 
-void GaussianNode::upsertVoxel(
+void GaussianSplatCaptureNode::upsertVoxel(
   const double x,
   const double y,
   const double z,
@@ -1124,7 +1130,7 @@ void GaussianNode::upsertVoxel(
   ++voxel.count;
 }
 
-GaussianVoxelKey GaussianNode::voxelKeyForPoint(
+GaussianVoxelKey GaussianSplatCaptureNode::voxelKeyForPoint(
   const double x, const double y,
   const double z) const
 {
@@ -1134,7 +1140,7 @@ GaussianVoxelKey GaussianNode::voxelKeyForPoint(
     static_cast<int>(std::floor(z / voxel_size_meters_))};
 }
 
-std::string GaussianNode::artifactBasePath() const
+std::string GaussianSplatCaptureNode::artifactBasePath() const
 {
   namespace fs = std::filesystem;
   return (fs::path(output_directory_) / representation_name_).string();
@@ -1145,7 +1151,7 @@ std::string GaussianNode::artifactBasePath() const
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<amr_sweeper_mapping::GaussianNode>());
+  rclcpp::spin(std::make_shared<amr_sweeper_mapping::GaussianSplatCaptureNode>());
   rclcpp::shutdown();
   return 0;
 }

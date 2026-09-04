@@ -53,11 +53,11 @@ struct GaussianVoxel
   std::uint32_t count{0U};
 };
 
-class GaussianNode : public rclcpp::Node
+class GaussianSplatCaptureNode : public rclcpp::Node
 {
 public:
-  GaussianNode();
-  ~GaussianNode() override;
+  GaussianSplatCaptureNode();
+  ~GaussianSplatCaptureNode() override;
 
 private:
   struct CameraStream

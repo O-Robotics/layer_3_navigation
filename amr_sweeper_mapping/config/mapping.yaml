@@ -1,4 +1,4 @@
-/**/gaussian_node:
+/**/gaussian_splat_capture_node:
   ros__parameters:
     # -- Output artifacts -----------------------------------------------------
     output_directory:              ""                               # Leave empty until a mission execution folder is injected; gaussian artifacts should stay inside per-run folders.
