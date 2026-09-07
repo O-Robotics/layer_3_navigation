@@ -142,7 +142,7 @@ def _build_nodes(context):
     )
     gaussian_output_directory = mission_context.get("gaussian_output_directory", "")
     if not gaussian_output_directory and mission_run_directory:
-        gaussian_output_directory = str(Path(mission_run_directory) / "gaussian")
+        gaussian_output_directory = str(Path(mission_run_directory) / "_3D_map" / "gaussian")
     gaussian_manifest_file = mission_context.get("gaussian_manifest_file", "")
     if not gaussian_manifest_file and gaussian_output_directory:
         gaussian_manifest_file = str(Path(gaussian_output_directory) / "manifest.json")
@@ -162,17 +162,17 @@ def _build_nodes(context):
     if mission_run_directory and run_artifact_stem:
         if not actual_path_output_file:
             actual_path_output_file = str(
-                Path(mission_run_directory) / f"{run_artifact_stem}_path_actual.geojson"
+                Path(mission_run_directory) / "_Path" / f"{run_artifact_stem}_path_actual.geojson"
             )
         if not actual_path_navsat_output_file:
             actual_path_navsat_output_file = str(
-                Path(mission_run_directory) / f"{run_artifact_stem}_path_navsat.geojson"
+                Path(mission_run_directory) / "_Path" / f"{run_artifact_stem}_path_navsat.geojson"
             )
     elif mission_run_directory:
         if not actual_path_output_file:
-            actual_path_output_file = str(Path(mission_run_directory) / "actual_path.geojson")
+            actual_path_output_file = str(Path(mission_run_directory) / "_Path" / "actual_path.geojson")
         if not actual_path_navsat_output_file:
-            actual_path_navsat_output_file = str(Path(mission_run_directory) / "actual_path_navsat.geojson")
+            actual_path_navsat_output_file = str(Path(mission_run_directory) / "_Path" / "actual_path_navsat.geojson")
 
     gaussian_representation_name = run_artifact_stem if run_artifact_stem else (
         mission_id if mission_id else "global_gaussian_map"
