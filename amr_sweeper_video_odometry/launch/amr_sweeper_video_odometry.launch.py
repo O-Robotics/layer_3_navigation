@@ -29,6 +29,9 @@ def generate_launch_description():
             'accel_random_walk': 0.003,
             'image_jitter_threshold_ms': 70.0,
             'enable_slam_visualization': False,
+            'enable_observations_view': False,
+            'enable_landmarks_view': False,
+            'enable_request_hint': False,
         }],
         remappings=[
             (
@@ -50,6 +53,10 @@ def generate_launch_description():
             (
                 'visual_slam/imu',
                 '/amr_sweeper/depth_camera/motion/sample',
+            ),
+            (
+                'visual_slam/tracking/odometry',
+                '/amr_sweeper/visual_odometry/odom',
             ),
         ],
     )
