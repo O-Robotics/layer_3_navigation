@@ -40,3 +40,7 @@ The repository also ships built-in mission assets inside `amr_sweeper_navigation
 - `amr_sweeper_localization` owns the optional visual odometry node, which publishes `/amr_sweeper/visual_odometry/odom`; FusionCore consumes that VO topic as `encoder2.topic` when visual odometry is enabled.
 - Nav2 runtime parameters now live in mission-class-specific files under `amr_sweeper_navigation/config/`; Nav2 consumes mapping-published `mapping/static_costmap` for global planning and builds its rolling local costmap directly from live sensor topics.
 - Mission execution is disabled by default at the layer 3 entrypoints and should only be enabled by FSM `RUNNING` profiles.
+
+## Controlled engineering documentation
+
+The controlled AMR-Sweeper software design, requirements traceability, verification references, and release/configuration records for this repository are maintained in SharePoint under [07 - Software Development / 04 - Layer 3 - Navigation](https://orobotics.sharepoint.com/sites/AMRSweeper/Shared%20Documents/07%20-%20Software%20Development/04%20-%20Layer%203%20-%20Navigation). GitHub remains the source of truth for implementation source code; SharePoint is the controlled engineering and traceability record.
